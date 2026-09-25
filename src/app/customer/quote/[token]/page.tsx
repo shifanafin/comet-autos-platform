@@ -1,12 +1,15 @@
 import type { Metadata, Viewport } from 'next';
 import { CheckCircle2, Clock, Link2Off, XCircle } from 'lucide-react';
 import { getQuoteAccess, loadCustomerQuote } from '@/lib/customer-access/quote';
-import { browserProof } from '@/lib/customer-access/verify-browser';
 import { getQuotationDocumentForLink } from '@/lib/documents/build';
 import { formatAed } from '@/lib/documents/model';
 import { formatCalendarDate, formatDateTime } from '@/lib/format';
-import { CUSTOMER_BAR_COLOR, CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
-import { VerifyForm } from '@/components/customer/verify-form';
+import { customerLinkMetadata, quotePreview } from '@/lib/customer-access/preview';
+import {
+  CUSTOMER_BAR_COLOR,
+  CustomerNotice,
+  CustomerShell,
+} from '@/components/customer/customer-shell';
 import {
   DocumentItems,
   DocumentStatus,
@@ -15,17 +18,18 @@ import {
 import { CustomerDocumentActions } from '@/components/documents/share-menu';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { cn } from '@/lib/utils';
-import { verifyQuoteAction } from './actions';
 import { DecisionBar } from './quote-forms';
 
 export const viewport: Viewport = { themeColor: CUSTOMER_BAR_COLOR };
 
-export const metadata: Metadata = {
-  title: 'Your quotation — Comet Autos',
-  robots: { index: false, follow: false },
-  // Keep the secret link out of Referer headers sent to other sites.
-  referrer: 'no-referrer',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  return customerLinkMetadata(`/customer/quote/${token}`, await quotePreview(token));
+}
 
 export default async function CustomerQuotePage({
   params,
@@ -33,7 +37,7 @@ export default async function CustomerQuotePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const access = await getQuoteAccess(token, await browserProof(token, 'ESTIMATE'));
+  const access = await getQuoteAccess(token);
 
   if (access.state === 'invalid') {
     return (
@@ -56,14 +60,6 @@ export default async function CustomerQuotePage({
       </CustomerShell>
     );
   }
-  if (access.state === 'needs_verification') {
-    return (
-      <CustomerShell organization={access.organization} label="Quotation">
-        <VerifyForm action={verifyQuoteAction.bind(null, token)} documentName="quotation" />
-      </CustomerShell>
-    );
-  }
-
   const [quote, document] = await Promise.all([
     loadCustomerQuote(token),
     getQuotationDocumentForLink(access.organizationId, access.resourceId),

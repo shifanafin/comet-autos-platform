@@ -16,6 +16,9 @@ self.addEventListener('install', (event) => {
     caches
       .open(CACHE)
       .then((cache) => cache.add(new Request(OFFLINE_URL, { cache: 'reload' })))
+      // No room to keep it (private browsing, a full phone) is no reason to
+      // refuse the worker: pages still load, only the offline page is missing.
+      .catch(() => {})
       .then(() => self.skipWaiting()),
   );
 });
@@ -33,6 +36,8 @@ self.addEventListener('fetch', (event) => {
   // Only full page loads. Everything else is left to the browser.
   if (event.request.mode !== 'navigate' || event.request.method !== 'GET') return;
   event.respondWith(
-    fetch(event.request).catch(async () => (await caches.match(OFFLINE_URL)) ?? Response.error()),
+    fetch(event.request).catch(async () =>
+      ((await caches.match(OFFLINE_URL).catch(() => undefined)) ?? Response.error()),
+    ),
   );
 });

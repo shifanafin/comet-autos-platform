@@ -30,7 +30,11 @@ async function lockJob(tx: Prisma.TransactionClient, organizationId: string, job
  * below reads those from the estimate row rather than through the job card
  * — which a quotation raised straight for a customer does not have.
  */
-async function loadEstimate(tx: Prisma.TransactionClient, organizationId: string, estimateId: string) {
+async function loadEstimate(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  estimateId: string,
+) {
   const estimate = await tx.estimate.findFirst({
     where: { id: estimateId, organizationId },
     include: {
@@ -101,7 +105,8 @@ export async function createEstimate(user: AuthenticatedUser, jobCardId: string)
       orderBy: { version: 'desc' },
     });
     if (existing?.status === 'DRAFT') return existing;
-    if (existing) throw new DomainError('This work order already has a quotation. Revise it instead.');
+    if (existing)
+      throw new DomainError('This work order already has a quotation. Revise it instead.');
     const status = normalizeStatus(jobCard.status);
     if (!QUOTABLE_STATUSES.includes(status as (typeof QUOTABLE_STATUSES)[number])) {
       throw new DomainError('This work order has moved past the quotation stage.');
@@ -118,7 +123,12 @@ export async function createEstimate(user: AuthenticatedUser, jobCardId: string)
       });
     }
 
-    const estimateNumber = await allocateDocumentNumber(tx, user.organizationId, jobCard.branchId, 'ESTIMATE');
+    const estimateNumber = await allocateDocumentNumber(
+      tx,
+      user.organizationId,
+      jobCard.branchId,
+      'ESTIMATE',
+    );
     const estimate = await tx.estimate.create({
       data: {
         organizationId: user.organizationId,
@@ -184,7 +194,8 @@ export async function createQuotation(user: AuthenticatedUser, rawInput: unknown
       where: { id: input.customerId, organizationId: user.organizationId, isActive: true },
       select: { id: true },
     });
-    if (!customer) throw new DomainError('Choose the customer this quotation is for.', 'customerId');
+    if (!customer)
+      throw new DomainError('Choose the customer this quotation is for.', 'customerId');
 
     let vehicleId: string | null = null;
     if (input.vehicleId) {
@@ -239,7 +250,12 @@ export async function createQuotation(user: AuthenticatedUser, rawInput: unknown
       vehicleId = vehicleId ?? jobCard.vehicleId;
     }
 
-    const estimateNumber = await allocateDocumentNumber(tx, user.organizationId, jobBranchId, 'ESTIMATE');
+    const estimateNumber = await allocateDocumentNumber(
+      tx,
+      user.organizationId,
+      jobBranchId,
+      'ESTIMATE',
+    );
     const estimate = await tx.estimate.create({
       data: {
         organizationId: user.organizationId,
@@ -292,7 +308,9 @@ const lineSchema = z.object({
 
 const draftSchema = z.object({
   items: z.array(lineSchema).max(100, 'An estimate can have at most 100 lines.'),
-  validUntil: z.string({ error: 'Choose how long the quotation is valid.' }).min(1, 'Choose how long the quotation is valid.'),
+  validUntil: z
+    .string({ error: 'Choose how long the quotation is valid.' })
+    .min(1, 'Choose how long the quotation is valid.'),
 });
 
 function priceLines(items: z.infer<typeof lineSchema>[], defaultVatRate: string) {
@@ -316,7 +334,11 @@ function priceLines(items: z.infer<typeof lineSchema>[], defaultVatRate: string)
 }
 
 /** Replaces a draft's lines and recalculates Subtotal / VAT / Total on the server. */
-export async function saveEstimateDraft(user: AuthenticatedUser, estimateId: string, rawInput: unknown) {
+export async function saveEstimateDraft(
+  user: AuthenticatedUser,
+  estimateId: string,
+  rawInput: unknown,
+) {
   const input = parseInput(draftSchema, rawInput);
   const lines = priceLines(input.items, await resolveDefaultVatRate(user.organizationId));
   const totals = calculateTotals(lines.map((line) => line.amounts));
@@ -327,12 +349,19 @@ export async function saveEstimateDraft(user: AuthenticatedUser, estimateId: str
     const estimate = await loadEstimate(tx, user.organizationId, estimateId);
     requirePermission(user, 'job_card.edit', { branchId: estimate.branchId });
     await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimate.id}::uuid FOR UPDATE`;
-    const fresh = await tx.estimate.findUniqueOrThrow({ where: { id: estimate.id }, select: { status: true } });
+    const fresh = await tx.estimate.findUniqueOrThrow({
+      where: { id: estimate.id },
+      select: { status: true },
+    });
     if (fresh.status !== 'DRAFT') {
-      throw new DomainError('This estimate has already been sent and can no longer be edited. Revise it instead.');
+      throw new DomainError(
+        'This estimate has already been sent and can no longer be edited. Revise it instead.',
+      );
     }
 
-    await tx.estimateItem.deleteMany({ where: { estimateId: estimate.id, organizationId: user.organizationId } });
+    await tx.estimateItem.deleteMany({
+      where: { estimateId: estimate.id, organizationId: user.organizationId },
+    });
     for (const line of lines) {
       await tx.estimateItem.create({
         data: {
@@ -370,26 +399,23 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
 
     const fresh = await tx.estimate.findUniqueOrThrow({ where: { id: estimate.id } });
     if (fresh.status !== 'DRAFT') throw new DomainError('This quotation has already been sent.');
-    if (estimate._count.nextVersions > 0) throw new DomainError('A newer version of this quotation exists.');
-    if (estimate.items.length === 0) throw new DomainError('Add at least one labour or parts line before sending.');
-    if (!fresh.validUntil) throw new DomainError('Choose how long the quotation is valid.', 'validUntil');
+    if (estimate._count.nextVersions > 0)
+      throw new DomainError('A newer version of this quotation exists.');
+    if (estimate.items.length === 0)
+      throw new DomainError('Add at least one labour or parts line before sending.');
+    if (!fresh.validUntil)
+      throw new DomainError('Choose how long the quotation is valid.', 'validUntil');
     if (fresh.validUntil.toISOString().slice(0, 10) < localDateString()) {
       throw new DomainError('The validity date is in the past.', 'validUntil');
     }
-    // The customer opens the secure link by confirming the registration on
-    // file. With no vehicle there is nothing to confirm against, so the link
-    // is not issued — the quotation itself still saves, prints and lists.
-    if (!fresh.vehicleId) {
-      throw new DomainError(
-        'Add the vehicle to this quotation before sending it — the customer confirms their registration number to open the link.',
-        'vehicleId',
-      );
-    }
-
     // A standalone quotation has no job to move; only the document changes.
     if (estimate.jobCardId) {
-      const jobStatus = (await tx.jobCard.findUniqueOrThrow({ where: { id: estimate.jobCardId }, select: { status: true } }))
-        .status;
+      const jobStatus = (
+        await tx.jobCard.findUniqueOrThrow({
+          where: { id: estimate.jobCardId },
+          select: { status: true },
+        })
+      ).status;
       if (fresh.kind === 'ADDITIONAL') {
         // Additional work is quoted during repair; the job stays in REPAIR.
         if (normalizeStatus(jobStatus) !== 'REPAIR') {
@@ -397,7 +423,9 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
         }
       } else {
         if (normalizeStatus(jobStatus) !== 'ESTIMATE') {
-          throw new DomainError('The work order is not at the quotation stage, so this quotation cannot be sent.');
+          throw new DomainError(
+            'The work order is not at the quotation stage, so this quotation cannot be sent.',
+          );
         }
         await applyJobStatusChange(tx, {
           organizationId: user.organizationId,
@@ -432,7 +460,12 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
           select: { id: true },
         })
       : await revisionChain(tx, user.organizationId, estimate.id);
-    await revokeAccessTokens(tx, user.organizationId, 'ESTIMATE', siblings.map((s) => s.id));
+    await revokeAccessTokens(
+      tx,
+      user.organizationId,
+      'ESTIMATE',
+      siblings.map((s) => s.id),
+    );
     const { rawToken, tokenId } = await issueAccessToken(tx, {
       organizationId: user.organizationId,
       resourceType: 'ESTIMATE',
@@ -467,7 +500,9 @@ export async function reissueEstimateLink(user: AuthenticatedUser, estimateId: s
     const estimate = await loadEstimate(tx, user.organizationId, estimateId);
     requirePermission(user, 'job_card.edit', { branchId: estimate.branchId });
     if (estimate.status !== 'SENT' || estimate._count.nextVersions > 0 || !estimate.validUntil) {
-      throw new DomainError('A new link can only be created for the estimate currently waiting approval.');
+      throw new DomainError(
+        'A new link can only be created for the estimate currently waiting approval.',
+      );
     }
     if (estimate.validUntil.toISOString().slice(0, 10) < localDateString()) {
       throw new DomainError('This quotation has expired. Revise it to send a new one.');
@@ -508,7 +543,11 @@ const additionalSchema = z.object({
  * approved do its lines become approved work that parts and labour can be
  * recorded against. Returns the open draft if one exists.
  */
-export async function createAdditionalEstimate(user: AuthenticatedUser, jobCardId: string, rawInput: unknown) {
+export async function createAdditionalEstimate(
+  user: AuthenticatedUser,
+  jobCardId: string,
+  rawInput: unknown,
+) {
   const input = parseInput(additionalSchema, rawInput);
   return prisma.$transaction(async (tx) => {
     await lockJob(tx, user.organizationId, jobCardId);
@@ -522,12 +561,23 @@ export async function createAdditionalEstimate(user: AuthenticatedUser, jobCardI
       throw new DomainError('Additional work can only be requested while the job is in repair.');
     }
     const open = await tx.estimate.findFirst({
-      where: { jobCardId: jobCard.id, organizationId: user.organizationId, kind: 'ADDITIONAL', status: { in: ['DRAFT', 'SENT'] } },
+      where: {
+        jobCardId: jobCard.id,
+        organizationId: user.organizationId,
+        kind: 'ADDITIONAL',
+        status: { in: ['DRAFT', 'SENT'] },
+      },
     });
     if (open?.status === 'DRAFT') return open;
-    if (open) throw new DomainError('An additional work request is already waiting for the customer.');
+    if (open)
+      throw new DomainError('An additional work request is already waiting for the customer.');
 
-    const estimateNumber = await allocateDocumentNumber(tx, user.organizationId, jobCard.branchId, 'ESTIMATE');
+    const estimateNumber = await allocateDocumentNumber(
+      tx,
+      user.organizationId,
+      jobCard.branchId,
+      'ESTIMATE',
+    );
     const estimate = await tx.estimate.create({
       data: {
         organizationId: user.organizationId,
@@ -584,14 +634,21 @@ export async function reviseEstimate(user: AuthenticatedUser, estimateId: string
       throw new DomainError('A newer version of this quotation already exists.');
     }
     if (source.kind === 'ADDITIONAL') {
-      throw new DomainError('Additional work requests are not revised — create a new request instead.');
+      throw new DomainError(
+        'Additional work requests are not revised — create a new request instead.',
+      );
     }
     if (source.status !== 'SENT' && source.status !== 'REJECTED') {
-      throw new DomainError('Only a quotation that is waiting approval or was rejected can be revised.');
+      throw new DomainError(
+        'Only a quotation that is waiting approval or was rejected can be revised.',
+      );
     }
     // A standalone quotation has no job to walk back; only the document is versioned.
     if (source.jobCardId) {
-      const job = await tx.jobCard.findUniqueOrThrow({ where: { id: source.jobCardId }, select: { status: true } });
+      const job = await tx.jobCard.findUniqueOrThrow({
+        where: { id: source.jobCardId },
+        select: { status: true },
+      });
       const jobStatus = normalizeStatus(job.status);
       if (jobStatus !== 'WAITING_APPROVAL' && jobStatus !== 'REJECTED') {
         throw new DomainError('The work order is no longer at the quotation stage.');
@@ -686,7 +743,9 @@ export async function applyEstimateDecision(
 ) {
   const online = params.method === 'ONLINE';
   if (online !== (params.recordedByUserId === null)) {
-    throw new Error('An ONLINE decision has no recording staff member; any other method must have one.');
+    throw new Error(
+      'An ONLINE decision has no recording staff member; any other method must have one.',
+    );
   }
   await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${params.estimateId}::uuid AND organization_id = ${params.organizationId}::uuid FOR UPDATE`;
   const estimate = await loadEstimate(tx, params.organizationId, params.estimateId);
@@ -740,15 +799,22 @@ export async function applyEstimateDecision(
   // identical either way.
   if (estimate.jobCardId) {
     await lockJob(tx, params.organizationId, estimate.jobCardId);
-    const job = await tx.jobCard.findUniqueOrThrow({ where: { id: estimate.jobCardId }, select: { status: true } });
+    const job = await tx.jobCard.findUniqueOrThrow({
+      where: { id: estimate.jobCardId },
+      select: { status: true },
+    });
     if (estimate.kind === 'ADDITIONAL') {
       // Approved additional lines simply join the approved work; the job stays in repair.
       if (normalizeStatus(job.status) !== 'REPAIR') {
-        throw new DomainError('The job is no longer in repair, so this additional work can no longer be approved.');
+        throw new DomainError(
+          'The job is no longer in repair, so this additional work can no longer be approved.',
+        );
       }
     } else {
       if (normalizeStatus(job.status) !== 'WAITING_APPROVAL') {
-        throw new DomainError('The work order is not waiting for approval (it may be on hold). Ask the workshop to resume it.');
+        throw new DomainError(
+          'The work order is not waiting for approval (it may be on hold). Ask the workshop to resume it.',
+        );
       }
       await applyJobStatusChange(tx, {
         organizationId: params.organizationId,
@@ -792,7 +858,9 @@ export async function applyEstimateDecision(
 
 const staffDecisionSchema = z.object({
   decision: z.enum(['APPROVED', 'REJECTED'], { error: 'Choose approved or rejected.' }),
-  method: z.enum(['IN_PERSON', 'PHONE', 'EMAIL', 'SMS'], { error: 'Choose how the customer told you.' }),
+  method: z.enum(['IN_PERSON', 'PHONE', 'EMAIL', 'SMS'], {
+    error: 'Choose how the customer told you.',
+  }),
   notes: z.string().trim().max(2000).optional(),
   /** Optional: the customer signs the approval on the workshop device (in person). */
   signature: z.string().max(2_000_000).optional(),
@@ -804,9 +872,16 @@ const staffDecisionSchema = z.object({
  * phone, email or SMS. An approval given in person may carry the customer's
  * signature, captured on the workshop device — never required.
  */
-export async function recordCustomerDecision(user: AuthenticatedUser, estimateId: string, rawInput: unknown) {
+export async function recordCustomerDecision(
+  user: AuthenticatedUser,
+  estimateId: string,
+  rawInput: unknown,
+) {
   const input = parseInput(staffDecisionSchema, rawInput);
-  const target = await prisma.estimate.findFirst({ where: { id: estimateId, organizationId: user.organizationId }, select: { jobCardId: true } });
+  const target = await prisma.estimate.findFirst({
+    where: { id: estimateId, organizationId: user.organizationId },
+    select: { jobCardId: true },
+  });
   // A signature is filed against the work order it belongs to. A quotation
   // raised without one takes the decision on its own — the approval, its
   // items and the audit trail are unchanged; only the optional signature
@@ -827,7 +902,10 @@ export async function recordCustomerDecision(user: AuthenticatedUser, estimateId
       recordedByUserId: user.id,
     });
     if (signature && estimate.jobCardId) {
-      const customer = await tx.customer.findUniqueOrThrow({ where: { id: approval.customerId }, select: { name: true } });
+      const customer = await tx.customer.findUniqueOrThrow({
+        where: { id: approval.customerId },
+        select: { name: true },
+      });
       await recordSignature(tx, {
         prepared: signature,
         organizationId: user.organizationId,
@@ -848,7 +926,11 @@ export async function recordCustomerDecision(user: AuthenticatedUser, estimateId
 }
 
 /** One additional-work request, for its own page. Scoped to the organization and the job. */
-export async function getAdditionalEstimate(user: AuthenticatedUser, jobCardId: string, estimateId: string) {
+export async function getAdditionalEstimate(
+  user: AuthenticatedUser,
+  jobCardId: string,
+  estimateId: string,
+) {
   const estimate = await prisma.estimate.findFirst({
     where: { id: estimateId, jobCardId, organizationId: user.organizationId, kind: 'ADDITIONAL' },
     include: {
@@ -856,7 +938,10 @@ export async function getAdditionalEstimate(user: AuthenticatedUser, jobCardId: 
       items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
       approvals: {
         orderBy: { decidedAt: 'desc' },
-        include: { recordedBy: { select: { fullName: true } }, customer: { select: { name: true } } },
+        include: {
+          recordedBy: { select: { fullName: true } },
+          customer: { select: { name: true } },
+        },
       },
       preparedBy: { select: { fullName: true } },
       sentBy: { select: { fullName: true } },

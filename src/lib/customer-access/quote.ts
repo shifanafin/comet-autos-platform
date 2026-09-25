@@ -6,7 +6,6 @@ import { resolveAccessToken } from '@/lib/customer-access/tokens';
 import { prepareSignature, recordSignature } from '@/lib/media/signatures';
 import {
   getCustomerAccess,
-  verifyCustomerAccess,
   type CustomerAccess,
   type OrganizationBranding,
 } from '@/lib/customer-access/access';
@@ -22,17 +21,12 @@ export type { OrganizationBranding };
 
 export type QuoteAccess = CustomerAccess;
 
-/** Resolves the link and checks the browser's verification proof (cookie value). */
-export function getQuoteAccess(rawToken: string, proof: string | undefined): Promise<QuoteAccess> {
-  return getCustomerAccess(rawToken, 'ESTIMATE', proof);
+/** Resolves the quotation link: open, expired or invalid. */
+export function getQuoteAccess(rawToken: string): Promise<QuoteAccess> {
+  return getCustomerAccess(rawToken, 'ESTIMATE');
 }
 
-/** Checks the registration + mobile number the customer typed against the vehicle and owner on the estimate. */
-export function verifyQuoteAccess(rawToken: string, plateNumber: string, phone: string) {
-  return verifyCustomerAccess(rawToken, 'ESTIMATE', plateNumber, phone);
-}
-
-/** The quotation as the customer sees it. Call only after getQuoteAccess returned "verified". */
+/** The quotation as the customer sees it. Call only after getQuoteAccess returned "open". */
 export async function loadCustomerQuote(rawToken: string) {
   const resolved = await resolveAccessToken(rawToken, 'ESTIMATE');
   if (resolved.state !== 'valid' || !resolved.token) return null;
@@ -110,15 +104,18 @@ export async function loadCustomerQuote(rawToken: string) {
 /** Records the customer's own decision made through the secure link. */
 export async function decideQuoteAsCustomer(
   rawToken: string,
-  proof: string | undefined,
   decision: EstimateDecision,
   notes: string | null,
   /** Optional signature confirming an approval (PNG data URL); never required. */
   signatureDataUrl: string | null = null,
 ) {
-  const access = await getQuoteAccess(rawToken, proof);
-  if (access.state !== 'verified') {
-    throw new DomainError('Please confirm your vehicle details again before responding.');
+  const access = await getQuoteAccess(rawToken);
+  if (access.state !== 'open') {
+    throw new DomainError(
+      access.state === 'expired'
+        ? 'This quotation link has expired. Please contact the workshop for a new one.'
+        : 'This link is no longer valid. Please contact the workshop.',
+    );
   }
   const resolved = await resolveAccessToken(rawToken, 'ESTIMATE');
   if (resolved.state !== 'valid' || !resolved.token) {
@@ -152,10 +149,17 @@ export async function decideQuoteAsCustomer(
       method: 'ONLINE',
       notes: trimmedNotes,
       recordedByUserId: null,
-      metadata: { customerAccessTokenId: token.id, linkIssuedByUserId: token.createdByUserId, signed: Boolean(signature) },
+      metadata: {
+        customerAccessTokenId: token.id,
+        linkIssuedByUserId: token.createdByUserId,
+        signed: Boolean(signature),
+      },
     });
     if (signature && estimateJob?.jobCardId && estimateJob.jobCard) {
-      const customer = await tx.customer.findUniqueOrThrow({ where: { id: approval.customerId }, select: { name: true } });
+      const customer = await tx.customer.findUniqueOrThrow({
+        where: { id: approval.customerId },
+        select: { name: true },
+      });
       await recordSignature(tx, {
         prepared: signature,
         organizationId: token.organizationId,

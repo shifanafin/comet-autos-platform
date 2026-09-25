@@ -82,11 +82,6 @@ async function shareQuotation(
       throw new DomainError('Send the quotation first — a draft can’t be shared.');
     if (estimate._count.nextVersions > 0)
       throw new DomainError('A newer version of this quotation exists. Share that one instead.');
-    // The customer opens the link by confirming the registration on file.
-    if (!estimate.vehicle)
-      throw new DomainError(
-        'Add the vehicle to this quotation before sharing it — the customer confirms their registration number to open the link.',
-      );
 
     let expiresAt: Date;
     if (estimate.status === 'SENT') {
@@ -194,13 +189,6 @@ async function shareInvoice(
     });
     if (!invoice) throw new NotFoundError(target.kind === 'invoice' ? 'invoice' : 'receipt');
     requirePermission(user, 'invoice.view', { branchId: invoice.branchId });
-    // The customer opens the link by confirming the registration on file, so
-    // an invoice with no vehicle has nothing to check against. It still
-    // prints and is still payable — only the secure link needs the car.
-    if (!invoice.vehicle)
-      throw new DomainError(
-        'Add the vehicle to this invoice before sharing it — the customer confirms their registration number to open the link.',
-      );
 
     const expiresAt = new Date(Date.now() + INVOICE_LINK_DAYS * 86_400_000);
     const { rawToken, tokenId } = await issueAccessToken(tx, {
@@ -229,8 +217,8 @@ async function shareInvoice(
     const common = {
       customerName: invoice.customer.name,
       workshopName,
-      vehicle: vehicleLabel(vehicle),
-      plateNumber: vehicle.plateNumber,
+      vehicle: vehicle ? vehicleLabel(vehicle) : null,
+      plateNumber: vehicle?.plateNumber ?? null,
     };
     const path = `/customer/invoice/${rawToken}`;
     if (target.kind === 'invoice') {

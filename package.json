@@ -20,7 +20,7 @@
     "db:stop": "node scripts/dev-db.mjs stop",
     "db:seed": "tsx prisma/seed.ts",
     "db:permissions": "tsx prisma/ensure-permissions.ts",
-    "test:integration": "tsx --test tests/workshop-flow.test.ts tests/repair-flow.test.ts tests/billing-flow.test.ts tests/inventory-flow.test.ts tests/documents-flow.test.ts tests/media-flow.test.ts tests/operations-flow.test.ts tests/ownership-finance.test.ts tests/finance-dashboard.test.ts tests/organization-settings.test.ts tests/access-management.test.ts tests/supplier-payments.test.ts tests/attendance.test.ts tests/reliability.test.ts tests/account.test.ts tests/simple-documents.test.ts tests/data-transfer.test.ts"
+    "test:integration": "tsx --test tests/workshop-flow.test.ts tests/repair-flow.test.ts tests/billing-flow.test.ts tests/inventory-flow.test.ts tests/documents-flow.test.ts tests/media-flow.test.ts tests/operations-flow.test.ts tests/ownership-finance.test.ts tests/finance-dashboard.test.ts tests/organization-settings.test.ts tests/access-management.test.ts tests/supplier-payments.test.ts tests/attendance.test.ts tests/reliability.test.ts tests/account.test.ts tests/simple-documents.test.ts tests/data-transfer.test.ts tests/security.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

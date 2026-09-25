@@ -1,12 +1,15 @@
 import type { Metadata, Viewport } from 'next';
 import { CheckCircle2, Clock, FileDown, Link2Off, Receipt } from 'lucide-react';
 import { getCustomerAccess } from '@/lib/customer-access/access';
-import { browserProof } from '@/lib/customer-access/verify-browser';
 import { getInvoiceDocumentForLink } from '@/lib/documents/build';
 import { formatAed } from '@/lib/documents/model';
 import { formatDate } from '@/lib/format';
-import { CUSTOMER_BAR_COLOR, CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
-import { VerifyForm } from '@/components/customer/verify-form';
+import { customerLinkMetadata, invoicePreview } from '@/lib/customer-access/preview';
+import {
+  CUSTOMER_BAR_COLOR,
+  CustomerNotice,
+  CustomerShell,
+} from '@/components/customer/customer-shell';
 import {
   DocumentItems,
   DocumentStatus,
@@ -15,16 +18,17 @@ import {
 import { CustomerDocumentActions } from '@/components/documents/share-menu';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { cn } from '@/lib/utils';
-import { verifyInvoiceAction } from './actions';
 
 export const viewport: Viewport = { themeColor: CUSTOMER_BAR_COLOR };
 
-export const metadata: Metadata = {
-  title: 'Your invoice — Comet Autos',
-  robots: { index: false, follow: false },
-  // Keep the secret link out of Referer headers sent to other sites.
-  referrer: 'no-referrer',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  return customerLinkMetadata(`/customer/invoice/${token}`, await invoicePreview(token));
+}
 
 export default async function CustomerInvoicePage({
   params,
@@ -32,7 +36,7 @@ export default async function CustomerInvoicePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const access = await getCustomerAccess(token, 'INVOICE', await browserProof(token, 'INVOICE'));
+  const access = await getCustomerAccess(token, 'INVOICE');
 
   if (access.state === 'invalid') {
     return (
@@ -55,14 +59,6 @@ export default async function CustomerInvoicePage({
       </CustomerShell>
     );
   }
-  if (access.state === 'needs_verification') {
-    return (
-      <CustomerShell organization={access.organization} label="Invoice">
-        <VerifyForm action={verifyInvoiceAction.bind(null, token)} documentName="invoice" />
-      </CustomerShell>
-    );
-  }
-
   const data = await getInvoiceDocumentForLink(access.organizationId, access.resourceId);
   if (!data) {
     return (

@@ -21,11 +21,13 @@ export interface CsvColumn<Row> {
 const NEEDS_QUOTES = /[",\r\n]/;
 /** Excel reads a leading = + - @ as a formula; a leading apostrophe keeps it text. */
 const FORMULA_START = /^[=+\-@\t\r]/;
+/** A plain number — a stock movement of -2, a refund of -50.00 — can't be a formula, and must stay a number. */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
 
 function cell(value: CsvValue): string {
   if (value === null || value === undefined) return '';
   const text = value instanceof Date ? value.toISOString() : String(value);
-  const safe = FORMULA_START.test(text) ? `'${text}` : text;
+  const safe = FORMULA_START.test(text) && !PLAIN_NUMBER.test(text) ? `'${text}` : text;
   return NEEDS_QUOTES.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

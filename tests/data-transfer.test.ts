@@ -70,6 +70,15 @@ describe('CSV itself', () => {
     assert.equal(parseCsv(csv).records[0].v, '=1+1', 'and it reads back unchanged');
   });
 
+  test('a negative number stays a number; anything else starting with - is still guarded', () => {
+    const csv = toCsv(
+      [{ v: '-2.000' }, { v: -50 }, { v: '-2+3' }, { v: '-SUM(A1)' }],
+      [{ header: 'V', value: (row) => row.v }],
+    );
+    const cells = csv.split('\r\n').slice(1).filter(Boolean);
+    assert.deepEqual(cells, ['-2.000', '-50', "'-2+3", "'-SUM(A1)"]);
+  });
+
   test('headings match however they were typed', () => {
     const sheet = parseCsv('Mobile Number,customer_name\r\n050 111 2222,Ahmed\r\n');
     assert.equal(sheet.records[0].mobilenumber, '050 111 2222');

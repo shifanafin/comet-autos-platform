@@ -51,7 +51,7 @@ import {
 } from '@/lib/documents/build';
 import { renderDocumentPdf } from '@/lib/documents/pdf/render';
 import { createShareLink, shareResult } from '@/lib/customer-access/share';
-import { decideQuoteAsCustomer, getQuoteAccess, verifyQuoteAccess } from '@/lib/customer-access/quote';
+import { decideQuoteAsCustomer, getQuoteAccess } from '@/lib/customer-access/quote';
 import { getQuotation, listQuotations } from '@/lib/workshop/quotations';
 import { listInvoices } from '@/lib/billing/lists';
 import { calculateLine, calculateTotals } from '@/lib/money';
@@ -209,10 +209,13 @@ describe('quotation without a work order', () => {
     assert.equal(document.meta.some((m) => m.label === 'Work order'), false);
     assertPdf(renderDocumentPdf(document));
 
-    // Sending issues a secure link the customer opens with their registration,
-    // so a quotation with no vehicle says so clearly instead of sending.
-    await expectDomainError(sendEstimate(a.owner, quote.id), /Add the vehicle to this quotation/);
-    assert.equal((await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status, 'DRAFT');
+    // The link opens by itself, so a quotation with no car on file still sends —
+    // and its WhatsApp message simply has no vehicle lines.
+    const { rawToken } = await sendEstimate(a.owner, quote.id);
+    assert.equal((await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status, 'SENT');
+    assert.equal((await getQuoteAccess(rawToken)).state, 'open');
+    const shared = shareResult(await createShareLink(a.owner, { kind: 'quotation', id: quote.id }), ORIGIN);
+    assert.doesNotMatch(shared.message, /Vehicle:|Registration:/);
   });
 
   test('with a vehicle: send → WhatsApp → the customer approves online', async () => {
@@ -232,11 +235,8 @@ describe('quotation without a work order', () => {
     assert.match(shared.message, /Registration: S20/);
     assert.match(shared.message, /Total: AED 262\.50/);
 
-    const verified = await verifyQuoteAccess(rawToken, `S20 ${RUN.slice(-4)}`, '050 020 4411');
-    assert.equal(verified.ok, true);
-    const proof = verified.ok ? verified.proof : '';
-    assert.equal((await getQuoteAccess(rawToken, proof)).state, 'verified');
-    await decideQuoteAsCustomer(rawToken, proof, 'APPROVED', 'Go ahead');
+    assert.equal((await getQuoteAccess(rawToken)).state, 'open');
+    await decideQuoteAsCustomer(rawToken, 'APPROVED', 'Go ahead');
 
     const approved = await prisma.estimate.findUniqueOrThrow({
       where: { id: quote.id },
@@ -259,7 +259,7 @@ describe('quotation without a work order', () => {
     assert.equal(revision.jobCardId, null);
     assert.equal(revision.customerId, customerId);
     assert.equal(revision.vehicleId, vehicleId);
-    assert.equal((await getQuoteAccess(rawToken, undefined)).state, 'invalid', 'the old link stops working');
+    assert.equal((await getQuoteAccess(rawToken)).state, 'invalid', 'the old link stops working');
 
     const screen = await getQuotation(a.owner, revision.id);
     assert.deepEqual(screen.versions.map((v) => v.version), [2, 1]);
@@ -398,7 +398,7 @@ describe('invoice without a work order', () => {
     assert.match(shared.link, /^https:\/\/workshop\.example\/customer\/invoice\//);
   });
 
-  test('without a vehicle: still issued, printed and paid — only the secure link needs the car', async () => {
+  test('without a vehicle: issued, printed, paid and shared like any other', async () => {
     const result = await createDirectInvoice(a.owner, {
       customerId,
       items: [{ itemType: 'PART', description: 'Car wash', quantity: '1', unitPrice: '40' }],
@@ -409,10 +409,12 @@ describe('invoice without a work order', () => {
     assertPdf(renderDocumentPdf(await getInvoiceDocument(a.owner, result.invoiceId)));
     await recordInvoicePayment(a.owner, result.invoiceId, { amount: '42', method: 'CASH', receivedAt: now() });
     assert.equal((await getInvoiceDetail(a.owner, result.invoiceId)).status, 'PAID');
-    await expectDomainError(
-      createShareLink(a.owner, { kind: 'invoice', id: result.invoiceId }),
-      /Add the vehicle to this invoice/,
+    const shared = shareResult(
+      await createShareLink(a.owner, { kind: 'invoice', id: result.invoiceId }),
+      ORIGIN,
     );
+    assert.match(shared.link, /\/customer\/invoice\/[A-Za-z0-9_-]{43}$/);
+    assert.doesNotMatch(shared.message, /Vehicle:|Registration:/);
   });
 
   test('refuses an invoice with nothing on it, and lines that do not add up', async () => {

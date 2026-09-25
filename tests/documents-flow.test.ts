@@ -35,7 +35,7 @@ import { formatAed } from '@/lib/documents/model';
 import { renderDocumentPdf } from '@/lib/documents/pdf/render';
 import { sanitizePdfText, wrapText } from '@/lib/documents/pdf/writer';
 import { createShareLink, shareResult } from '@/lib/customer-access/share';
-import { getCustomerAccess, verifyCustomerAccess } from '@/lib/customer-access/access';
+import { getCustomerAccess } from '@/lib/customer-access/access';
 import { hashToken } from '@/lib/customer-access/tokens';
 import {
   invoiceMessage,
@@ -160,7 +160,7 @@ describe('customer documents and sharing', () => {
       `Registration: ${plate}`,
       'Total: AED 897.75',
       shared.link,
-      'You can approve or reject the quotation online.',
+      '👉 *Tap to view and approve your quotation:*',
     ]) {
       assert.ok(shared.message.includes(expected), `message contains ${expected}`);
     }
@@ -254,81 +254,40 @@ describe('customer documents and sharing', () => {
     );
   });
 
-  test('customer link: verification, wrong details, wrong kind, expiry — and the customer sees only their document', async () => {
+  test('customer link: opens with one tap, only for its own kind, until it expires — and the customer sees only their document', async () => {
     const shared = await createShareLink(a.owner, { kind: 'quotation', id: estimateId });
     const token = shared.path.split('/').pop()!;
 
-    assert.equal(
-      (await getCustomerAccess(token, 'ESTIMATE', undefined)).state,
-      'needs_verification',
-    );
-    assert.deepEqual(await verifyCustomerAccess(token, 'ESTIMATE', 'WRONG 1', '0501234567'), {
-      ok: false,
-      state: 'mismatch',
-    });
-    assert.deepEqual(await verifyCustomerAccess(token, 'ESTIMATE', plate, '0509999999'), {
-      ok: false,
-      state: 'mismatch',
-    });
-    assert.deepEqual(
-      await verifyCustomerAccess(token, 'INVOICE', plate, '0501234567'),
-      { ok: false, state: 'invalid' },
-      'a quotation link is not an invoice link',
-    );
-    const verified = await verifyCustomerAccess(
-      token,
-      'ESTIMATE',
-      plate.toLowerCase().replace(' ', ''),
-      '+971 50 123 4567',
-    );
-    assert.ok(
-      verified.ok,
-      'registration and mobile are matched loosely (case, spaces, country code)',
-    );
-
-    const access = await getCustomerAccess(
-      token,
-      'ESTIMATE',
-      verified.ok ? verified.proof : undefined,
-    );
-    assert.equal(access.state, 'verified');
-    if (access.state !== 'verified') return;
+    // Nothing to type: the link itself opens the quotation.
+    const access = await getCustomerAccess(token, 'ESTIMATE');
+    assert.equal(access.state, 'open');
+    if (access.state !== 'open') return;
     assert.equal(access.resourceId, estimateId);
     const document = await getQuotationDocumentForLink(access.organizationId, access.resourceId);
     assert.equal(document?.number, (await getQuotationDocument(a.owner, estimateId)).number);
 
-    // The proof for one link is useless for another link to the same quotation.
+    assert.equal(
+      (await getCustomerAccess(token, 'INVOICE')).state,
+      'invalid',
+      'a quotation link is not an invoice link',
+    );
+
+    // Sharing again issues a second link and does not revoke the earlier one.
     const other = (await createShareLink(a.owner, { kind: 'quotation', id: estimateId })).path
       .split('/')
       .pop()!;
-    assert.equal(
-      (await getCustomerAccess(other, 'ESTIMATE', verified.ok ? verified.proof : undefined)).state,
-      'needs_verification',
-    );
-    // Sharing again does not revoke the earlier link.
-    assert.equal(
-      (await getCustomerAccess(token, 'ESTIMATE', verified.ok ? verified.proof : undefined)).state,
-      'verified',
-    );
+    assert.notEqual(other, token);
+    assert.equal((await getCustomerAccess(other, 'ESTIMATE')).state, 'open');
+    assert.equal((await getCustomerAccess(token, 'ESTIMATE')).state, 'open');
 
     // Expired links stop working.
     await prisma.customerAccessToken.update({
       where: { tokenHash: hashToken(token) },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
-    assert.equal(
-      (await getCustomerAccess(token, 'ESTIMATE', verified.ok ? verified.proof : undefined)).state,
-      'expired',
-    );
-    assert.deepEqual(await verifyCustomerAccess(token, 'ESTIMATE', plate, '0501234567'), {
-      ok: false,
-      state: 'expired',
-    });
+    assert.equal((await getCustomerAccess(token, 'ESTIMATE')).state, 'expired');
     // Garbage tokens are simply invalid.
-    assert.equal(
-      (await getCustomerAccess('not-a-real-token', 'ESTIMATE', undefined)).state,
-      'invalid',
-    );
+    assert.equal((await getCustomerAccess('not-a-real-token', 'ESTIMATE')).state, 'invalid');
   });
 
   test('invoice and receipts: documents, totals, VAT and balances', async () => {
@@ -460,7 +419,7 @@ describe('customer documents and sharing', () => {
       'Total: AED 897.75',
       'Paid: AED 897.75',
       'Balance: AED 0.00',
-      'View your invoice:',
+      '👉 *View your invoice:*',
     ]) {
       assert.ok(shared.message.includes(expected), `invoice message contains ${expected}`);
     }
@@ -474,15 +433,9 @@ describe('customer documents and sharing', () => {
     );
 
     const token = shared.link.split('/').pop()!;
-    const verified = await verifyCustomerAccess(token, 'INVOICE', plate, '0501234567');
-    assert.ok(verified.ok);
-    const access = await getCustomerAccess(
-      token,
-      'INVOICE',
-      verified.ok ? verified.proof : undefined,
-    );
-    assert.equal(access.state, 'verified');
-    if (access.state !== 'verified') return;
+    const access = await getCustomerAccess(token, 'INVOICE');
+    assert.equal(access.state, 'open');
+    if (access.state !== 'open') return;
     const data = (await getInvoiceDocumentForLink(access.organizationId, access.resourceId))!;
     assert.equal(data.balance.state, 'PAID');
     assert.equal(data.receipts.length, 2);

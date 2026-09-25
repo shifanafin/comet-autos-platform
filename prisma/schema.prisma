@@ -2038,3 +2038,18 @@ model Signature {
   @@index([organizationId, jobCardId])
   @@map("signatures")
 }
+
+/// Failed sign-in and customer-link attempts, for locking out guessing.
+/// Keys are SHA-256 hashes (never an email, phone or IP in the clear).
+/// Written only through the record_auth_failure() SQL function — see
+/// migration 20260926090000_auth_throttles and lib/auth/throttle.ts.
+model AuthThrottle {
+  key             String    @id
+  failures        Int       @default(0)
+  windowStartedAt DateTime  @default(now()) @map("window_started_at") @db.Timestamptz
+  lockedUntil     DateTime? @map("locked_until") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@index([updatedAt])
+  @@map("auth_throttles")
+}

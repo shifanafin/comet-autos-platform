@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
+import { safeReturnPath } from '@/lib/auth/sign-in';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'Sign in — Comet Autos' };
@@ -17,7 +18,7 @@ const JOURNEY = ['Check-in', 'Inspection', 'Estimate', 'Repair', 'Invoice', 'Han
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next: rawNext } = await searchParams;
-  const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') && !rawNext.startsWith('/login') ? rawNext : '/';
+  const next = safeReturnPath(rawNext);
   if (await getCurrentUser()) redirect(next);
 
   return (

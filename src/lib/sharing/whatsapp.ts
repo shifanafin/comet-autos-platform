@@ -6,9 +6,11 @@ import { formatAed } from '@/lib/documents/model';
  * Nothing is sent automatically and no WhatsApp API is involved.
  *
  * Messages carry only what the customer needs: their name, the vehicle, the
- * document number and amounts, and the secure link (which itself asks for
- * the registration and mobile number before showing anything). No internal
- * ids, no staff details, no notes.
+ * document number and amounts, and the secure link, which opens the
+ * document with one tap. WhatsApp shows that link as a preview card drawn
+ * as a "View" button (lib/brand/share-card); the line above the link is in
+ * *bold* (WhatsApp's own formatting) so it reads as the call to action.
+ * No internal ids, no staff details, no notes.
  */
 
 /**
@@ -74,10 +76,11 @@ export function quotationMessage(
     `Quotation: ${input.number}`,
     `Total: ${formatAed(input.total)}`,
     '',
-    'Please review the quotation here:',
+    input.awaitingDecision
+      ? '👉 *Tap to view and approve your quotation:*'
+      : '👉 *View your quotation:*',
     input.link,
     '',
-    ...(input.awaitingDecision ? ['You can approve or reject the quotation online.', ''] : []),
     signOff(input.workshopName),
   ].join('\n');
 }
@@ -96,7 +99,7 @@ export function invoiceMessage(
     `Paid: ${formatAed(input.paid)}`,
     `Balance: ${formatAed(input.balance)}`,
     '',
-    'View your invoice:',
+    '👉 *View your invoice:*',
     input.link,
     '',
     signOff(input.workshopName),
@@ -122,7 +125,7 @@ export function receiptMessage(
     `Amount paid: ${formatAed(input.amount)}`,
     `Remaining balance: ${formatAed(input.balance)}`,
     '',
-    'View your invoice and receipts:',
+    '👉 *View your invoice and receipts:*',
     input.link,
     '',
     signOff(input.workshopName),

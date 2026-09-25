@@ -43,7 +43,8 @@ import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { StockPill } from '@/components/inventory/stock-level';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { usesDetailedJobCards } from '@/lib/organization/settings';
+import { getWorkshopPreferences } from '@/lib/organization/settings';
+import { isMenuShown } from '@/lib/nav';
 import { visibleStages } from '@/lib/workshop/stages';
 
 // Several independently-streamed sections read the same queries; cache()
@@ -85,7 +86,19 @@ export default async function DashboardPage() {
   const canCheckIn = hasPermission(user, 'job_card.create', scope);
   const canQuote = hasPermission(user, 'job_card.edit', scope);
   const canInvoice = hasPermission(user, 'invoice.create', scope);
-  const standardJobCards = await usesDetailedJobCards(user);
+  const preferences = await getWorkshopPreferences(user.organizationId);
+  const standardJobCards = preferences.detailedJobCards;
+  // A menu the workshop chose to hide takes its dashboard pieces with it:
+  // hiding Parts hides Low stock, hiding Quotations hides their tile, etc.
+  const menu = (href: string) => isMenuShown(href, preferences);
+  const show = {
+    quotations: menu('/quotations'),
+    invoices: canFinance && menu('/finance/invoices'),
+    payments: canFinance && menu('/finance/payments'),
+    appointments: menu('/appointments'),
+    lowStock: canInventory && menu('/inventory/parts'),
+  };
+  const sideColumn = show.appointments || show.lowStock;
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -98,10 +111,19 @@ export default async function DashboardPage() {
       </header>
 
       {/* The three things done every day, first and biggest. */}
-      <StartActions canCheckIn={canCheckIn} canQuote={canQuote} canInvoice={canInvoice} />
+      <StartActions
+        canCheckIn={canCheckIn}
+        canQuote={canQuote && show.quotations}
+        canInvoice={canInvoice && menu('/finance/invoices')}
+      />
 
       <Suspense fallback={<CountsSkeleton />}>
-        <DocumentCounts organizationId={org} canFinance={canFinance} />
+        <DocumentCounts
+          organizationId={org}
+          quotations={show.quotations}
+          invoices={show.invoices}
+          payments={show.payments}
+        />
       </Suspense>
 
       <Section
@@ -109,7 +131,16 @@ export default async function DashboardPage() {
         description="Work orders opened, quotations started, invoices issued and payments taken today."
       >
         <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
-          <TodaysActivity organizationId={org} canFinance={canFinance} />
+          <TodaysActivity
+            organizationId={org}
+            canFinance={canFinance}
+            kinds={[
+              'work_order',
+              ...(show.quotations ? (['quotation'] as const) : []),
+              ...(menu('/finance/invoices') ? (['invoice'] as const) : []),
+              ...(show.payments ? (['payment'] as const) : []),
+            ]}
+          />
         </Suspense>
       </Section>
 
@@ -125,7 +156,7 @@ export default async function DashboardPage() {
           description="Work orders that are going through inspection, repair and quality check."
           action={
             <span className="flex flex-wrap gap-2">
-              {canCheckIn ? (
+              {canCheckIn && show.appointments ? (
                 <QuickAction href="/appointments/new" icon={CalendarPlus} label="New appointment" />
               ) : null}
             </span>
@@ -150,51 +181,54 @@ export default async function DashboardPage() {
               <ArrowRight className="size-4" />
             </Link>
           }
-          className="xl:col-span-8"
+          className={sideColumn ? 'xl:col-span-8' : 'xl:col-span-12'}
         >
           <Suspense fallback={<Skeleton className="h-80 rounded-xl" />}>
             <WorkshopActivity organizationId={org} detailed={standardJobCards} />
           </Suspense>
         </Section>
 
-        <Stack gap="xl" className="xl:col-span-4">
-          <Section
-            title="Today's appointments"
-            action={
-              <Link
-                href="/appointments"
-                className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
+        {sideColumn ? (
+          <Stack gap="xl" className="xl:col-span-4">
+            {show.appointments ? (
+              <Section
+                title="Today's appointments"
+                action={
+                  <Link
+                    href="/appointments"
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
+                  >
+                    All
+                    <ArrowRight className="size-4" />
+                  </Link>
+                }
               >
-                All
-                <ArrowRight className="size-4" />
-              </Link>
-            }
-          >
-            <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
-              <TodaysAppointments organizationId={org} canCheckIn={canCheckIn} />
-            </Suspense>
-          </Section>
-          {canInventory ? (
-            <Section
-              title="Low stock"
-              action={
-                <Link
-                  href="/inventory/parts?stock=low"
-                  className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
-                >
-                  Parts
-                  <ArrowRight className="size-4" />
-                </Link>
-              }
-            >
-              <Suspense fallback={<Skeleton className="h-24 rounded-xl" />}>
-                <LowStock user={user} />
-              </Suspense>
-            </Section>
-          ) : null}
-        </Stack>
+                <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
+                  <TodaysAppointments organizationId={org} canCheckIn={canCheckIn} />
+                </Suspense>
+              </Section>
+            ) : null}
+            {show.lowStock ? (
+              <Section
+                title="Low stock"
+                action={
+                  <Link
+                    href="/inventory/parts?stock=low"
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
+                  >
+                    Parts
+                    <ArrowRight className="size-4" />
+                  </Link>
+                }
+              >
+                <Suspense fallback={<Skeleton className="h-24 rounded-xl" />}>
+                  <LowStock user={user} />
+                </Suspense>
+              </Section>
+            ) : null}
+          </Stack>
+        ) : null}
       </Grid>
-
     </Stack>
   );
 }
@@ -273,14 +307,19 @@ function StartActions({
 /** What is open right now: the numbers behind "is there anything I've forgotten?" */
 async function DocumentCounts({
   organizationId,
-  canFinance,
+  quotations,
+  invoices,
+  payments,
 }: {
   organizationId: string;
-  canFinance: boolean;
+  /** Which tiles to show — each follows its menu (and money, the finance permission). */
+  quotations: boolean;
+  invoices: boolean;
+  payments: boolean;
 }) {
   const [counts, finance] = await Promise.all([
     getDocumentCounts(organizationId),
-    canFinance ? getFinanceSnapshot(organizationId) : Promise.resolve(null),
+    invoices || payments ? getFinanceSnapshot(organizationId) : Promise.resolve(null),
   ]);
   const tiles = [
     {
@@ -290,7 +329,7 @@ async function DocumentCounts({
       href: '/job-cards',
       warn: false,
     },
-    {
+    quotations && {
       label: 'Quotations awaiting approval',
       value: String(counts.quotationsAwaiting),
       hint:
@@ -300,28 +339,32 @@ async function DocumentCounts({
       href: '/quotations?status=awaiting',
       warn: false,
     },
-    ...(finance
-      ? [
-          {
-            label: 'Unpaid invoices',
-            value: String(counts.unpaidInvoices),
-            hint: `${formatMoney(finance.customerOutstanding)} owed`,
-            href: '/finance/invoices?status=unpaid',
-            warn: counts.unpaidInvoices > 0,
-          },
-          {
-            label: 'Collected today',
-            value: formatMoney(finance.todaysCollections),
-            hint: `${formatMoney(finance.todaysSales)} invoiced today`,
-            href: '/finance/payments',
-            warn: false,
-          },
-        ]
-      : []),
-  ];
+    finance &&
+      invoices && {
+        label: 'Unpaid invoices',
+        value: String(counts.unpaidInvoices),
+        hint: `${formatMoney(finance.customerOutstanding)} owed`,
+        href: '/finance/invoices?status=unpaid',
+        warn: counts.unpaidInvoices > 0,
+      },
+    finance &&
+      payments && {
+        label: 'Collected today',
+        value: formatMoney(finance.todaysCollections),
+        hint: `${formatMoney(finance.todaysSales)} invoiced today`,
+        href: '/finance/payments',
+        warn: false,
+      },
+  ].filter((tile) => tile !== false && tile !== null);
 
   return (
-    <ul className={cn('grid grid-cols-2 gap-3', tiles.length > 2 && 'lg:grid-cols-4')}>
+    <ul
+      className={cn(
+        'grid grid-cols-2 gap-3',
+        tiles.length === 3 && 'lg:grid-cols-3',
+        tiles.length === 4 && 'lg:grid-cols-4',
+      )}
+    >
       {tiles.map((tile) => (
         <li key={tile.label}>
           <Link
@@ -359,11 +402,16 @@ const ACTIVITY: Record<ActivityKind, { label: string; icon: LucideIcon }> = {
 async function TodaysActivity({
   organizationId,
   canFinance,
+  kinds,
 }: {
   organizationId: string;
   canFinance: boolean;
+  /** Only the kinds whose menu is shown. */
+  kinds: readonly ActivityKind[];
 }) {
-  const items = await getTodaysActivity(organizationId, { includeMoney: canFinance });
+  const items = (await getTodaysActivity(organizationId, { includeMoney: canFinance })).filter(
+    (item) => kinds.includes(item.kind),
+  );
   if (items.length === 0) {
     return (
       <Panel>

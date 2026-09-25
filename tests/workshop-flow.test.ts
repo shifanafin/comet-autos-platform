@@ -36,7 +36,7 @@ import {
 } from '@/lib/workshop/estimates';
 import { getJobWorkspace, getNextAction } from '@/lib/workshop/workspace';
 import { transitionJobStatus } from '@/lib/workshop/job-status';
-import { getQuoteAccess, verifyQuoteAccess, loadCustomerQuote, decideQuoteAsCustomer } from '@/lib/customer-access/quote';
+import { getQuoteAccess, loadCustomerQuote, decideQuoteAsCustomer } from '@/lib/customer-access/quote';
 import { hashToken } from '@/lib/customer-access/tokens';
 import { toLocalDateTimeInput, localDateString } from '@/lib/format';
 import { resolveDefaultVatRate, UAE_STANDARD_VAT_RATE } from '@/lib/tax';
@@ -450,21 +450,12 @@ describe('core workshop journey', () => {
     assert.equal(getNextAction(workspace).title, 'Waiting for customer approval');
   });
 
-  test('11. customer link: verification and isolation', async () => {
-    assert.equal((await getQuoteAccess('not-a-real-token', undefined)).state, 'invalid');
-    assert.equal((await getQuoteAccess(rawToken.slice(0, -1) + (rawToken.endsWith('A') ? 'B' : 'A'), undefined)).state, 'invalid');
-    assert.equal((await getQuoteAccess(rawToken, undefined)).state, 'needs_verification');
-    assert.equal((await getQuoteAccess(rawToken, 'f'.repeat(64))).state, 'needs_verification');
-
-    assert.deepEqual(await verifyQuoteAccess(rawToken, plate, '050 000 0000'), { ok: false, state: 'mismatch' });
-    assert.deepEqual(await verifyQuoteAccess(rawToken, 'Q 99999', '0507654321'), { ok: false, state: 'mismatch' });
-    // Registration + mobile alone are not enough without the token.
-    assert.equal((await verifyQuoteAccess('x'.repeat(43), plate, '0507654321')).ok, false);
-
-    const verified = await verifyQuoteAccess(rawToken, plate.replace(' ', '').toLowerCase(), '+971 50 765 4321');
-    assert.equal(verified.ok, true);
-    const proof = verified.ok ? verified.proof : '';
-    assert.equal((await getQuoteAccess(rawToken, proof)).state, 'verified');
+  test('11. customer link: opens with one tap, and only its own quotation', async () => {
+    assert.equal((await getQuoteAccess('not-a-real-token')).state, 'invalid');
+    // One character off is a different (unknown) link.
+    assert.equal((await getQuoteAccess(rawToken.slice(0, -1) + (rawToken.endsWith('A') ? 'B' : 'A'))).state, 'invalid');
+    assert.equal((await getQuoteAccess('x'.repeat(43))).state, 'invalid');
+    assert.equal((await getQuoteAccess(rawToken)).state, 'open');
 
     const quote = await loadCustomerQuote(rawToken);
     assert.ok(quote);
@@ -472,17 +463,15 @@ describe('core workshop journey', () => {
     assert.equal(quote.jobCard?.inspections[0].items.length, 2, 'only attention/fail findings are shown');
     assert.equal('id' in quote, false, 'internal ids are not exposed');
 
-    // A proof for this link doesn't unlock a different customer's link.
+    // Another customer's link opens their quotation, never this one.
     const other = await createOtherSentEstimate(a);
-    assert.equal((await getQuoteAccess(other.rawToken, proof)).state, 'needs_verification');
-    await expectDomainError(decideQuoteAsCustomer(other.rawToken, proof, 'APPROVED', null), /confirm your vehicle details/);
+    const otherAccess = await getQuoteAccess(other.rawToken);
+    assert.equal(otherAccess.state === 'open' && otherAccess.resourceId, other.estimateId);
     otherJob = other;
   });
 
   test('12. customer approves → workshop sees it', async () => {
-    const verified = await verifyQuoteAccess(rawToken, plate, '0507654321');
-    const proof = verified.ok ? verified.proof : '';
-    await decideQuoteAsCustomer(rawToken, proof, 'APPROVED', 'Please go ahead');
+    await decideQuoteAsCustomer(rawToken, 'APPROVED', 'Please go ahead');
 
     const estimate = await prisma.estimate.findUniqueOrThrow({ where: { id: estimateId }, include: { approvals: { include: { items: true } }, items: true } });
     assert.equal(estimate.status, 'APPROVED');
@@ -497,7 +486,7 @@ describe('core workshop journey', () => {
     assert.equal(estimate.approvals[0].items.length, estimate.items.length);
     assert.equal(await jobStatus(jobCardId), 'APPROVED');
 
-    await expectDomainError(decideQuoteAsCustomer(rawToken, proof, 'REJECTED', null), /already been recorded/);
+    await expectDomainError(decideQuoteAsCustomer(rawToken, 'REJECTED', null), /already been recorded/);
 
     const approvalAudit = await prisma.auditLog.findFirstOrThrow({ where: { entityId: estimate.approvals[0].id } });
     assert.equal(approvalAudit.action, 'approval.approved');
@@ -543,7 +532,7 @@ describe('core workshop journey', () => {
     assert.equal(revision.previousVersionId, est2);
     assert.match(revision.estimateNumber, /^EST-\d{6}-R2$/);
     assert.equal(await prisma.estimateItem.count({ where: { estimateId: revision.id } }), 1);
-    assert.equal((await getQuoteAccess(token2, undefined)).state, 'invalid', 'old link revoked');
+    assert.equal((await getQuoteAccess(token2)).state, 'invalid', 'old link revoked');
     assert.equal((await prisma.estimate.findUniqueOrThrow({ where: { id: est2 } })).status, 'REJECTED', 'history kept');
 
     const resent = await sendEstimate(a.owner, revision.id);
@@ -557,9 +546,8 @@ describe('core workshop journey', () => {
       where: { tokenHash: hashToken(resent.rawToken) },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
-    assert.equal((await getQuoteAccess(resent.rawToken, undefined)).state, 'expired');
-    assert.deepEqual(await verifyQuoteAccess(resent.rawToken, 'any', 'any'), { ok: false, state: 'expired' });
-    await expectDomainError(decideQuoteAsCustomer(resent.rawToken, 'x', 'APPROVED', null), /confirm your vehicle details/);
+    assert.equal((await getQuoteAccess(resent.rawToken)).state, 'expired');
+    await expectDomainError(decideQuoteAsCustomer(resent.rawToken, 'APPROVED', null), /link has expired/);
   });
 
   test('13b. database enforces attribution rules', async () => {

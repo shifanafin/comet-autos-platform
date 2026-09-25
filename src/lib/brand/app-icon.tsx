@@ -17,26 +17,24 @@ export const APP_BACKGROUND = '#f4f5f8';
 export function appIcon(size: number, { maskable = false } = {}) {
   const letter = Math.round(size * (maskable ? 0.46 : 0.6));
   return new ImageResponse(
-    (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 55%, #6d28d9 100%)',
-          borderRadius: maskable ? 0 : Math.round(size * 0.22),
-          color: '#ffffff',
-          fontSize: letter,
-          fontWeight: 700,
-          lineHeight: 1,
-          letterSpacing: '-0.04em',
-        }}
-      >
-        C
-      </div>
-    ),
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 55%, #6d28d9 100%)',
+        borderRadius: maskable ? 0 : Math.round(size * 0.22),
+        color: '#ffffff',
+        fontSize: letter,
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: '-0.04em',
+      }}
+    >
+      C
+    </div>,
     { width: size, height: size },
   );
 }

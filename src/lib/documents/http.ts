@@ -1,11 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { cookies } from 'next/headers';
 import type { CustomerAccessResourceType } from '@/generated/prisma/enums';
 import { getCurrentUser, type AuthenticatedUser } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
-import { customerAccessCookie, getCustomerAccess } from '@/lib/customer-access/access';
-import { hashToken } from '@/lib/customer-access/tokens';
+import { getCustomerAccess } from '@/lib/customer-access/access';
 import type { CustomerDocumentModel } from '@/lib/documents/model';
 import { renderDocumentPdf } from '@/lib/documents/pdf/render';
 
@@ -48,9 +46,8 @@ export async function staffPdf(
 }
 
 /**
- * Customer PDFs: only for a browser that has verified this link (the same
- * proof cookie the customer page sets). Anyone else is sent to the page,
- * which asks for the registration and mobile number first.
+ * Customer PDFs: for a live link, like the customer page itself. An expired
+ * or revoked link is sent to the page, which explains what happened.
  */
 export async function customerPdf(
   request: NextRequest,
@@ -58,11 +55,9 @@ export async function customerPdf(
   rawToken: string,
   load: (organizationId: string, resourceId: string) => Promise<CustomerDocumentModel | null>,
 ) {
-  const store = await cookies();
-  const cookie = customerAccessCookie(type, hashToken(rawToken));
-  const access = await getCustomerAccess(rawToken, type, store.get(cookie.name)?.value);
-  const pagePath = `${cookie.path}/${encodeURIComponent(rawToken)}`;
-  if (access.state !== 'verified') return NextResponse.redirect(new URL(pagePath, request.url));
+  const access = await getCustomerAccess(rawToken, type);
+  const pagePath = `/customer/${type === 'ESTIMATE' ? 'quote' : 'invoice'}/${encodeURIComponent(rawToken)}`;
+  if (access.state !== 'open') return NextResponse.redirect(new URL(pagePath, request.url));
   const document = await load(access.organizationId, access.resourceId);
   if (!document) return new NextResponse('Not found', { status: 404 });
   return pdfResponse(document, request);

@@ -1,8 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma } from '@/generated/prisma/client';
 import type { CustomerAccessResourceType } from '@/generated/prisma/enums';
 import { prisma } from '@/lib/prisma';
-import { compactPlate, phoneCore } from '@/lib/normalize';
 
 /*
  * Customer secure access (CustomerAccessToken):
@@ -10,13 +9,11 @@ import { compactPlate, phoneCore } from '@/lib/normalize';
  * - One token = one resource (here: one Estimate version). Never a login.
  * - The raw token is 256 bits of randomness and exists only in the link
  *   given to the customer; the database stores its SHA-256 hash.
- * - Holding the link is necessary but not sufficient: before anything is
- *   shown the customer must also enter the vehicle registration and mobile
- *   number on file. Passing that check sets an httpOnly cookie holding a
- *   proof hash bound to this specific token, so the proof is useless for any
- *   other resource.
+ * - Holding the link is what opens the document — the customer taps it in
+ *   WhatsApp and sees it, with nothing to type. That is only safe because
+ *   the link can't be guessed or reused for anything else.
  * - Tokens expire, are revoked when a newer estimate version supersedes the
- *   one they point at, and every decision re-checks all of the above.
+ *   one they point at, and every decision re-checks the link.
  */
 
 const RAW_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -101,19 +98,3 @@ export async function resolveAccessToken(
   if (token.expiresAt.getTime() <= Date.now()) return { state: 'expired', token };
   return { state: 'valid', token };
 }
-
-/** The proof a verified browser holds for one token. Bound to the token hash and the owner's identifiers. */
-export function computeAccessProof(tokenHash: string, plateNumber: string, phone: string): string {
-  return createHash('sha256')
-    .update(
-      `comet-customer-access:v1:${tokenHash}:${compactPlate(plateNumber)}:${phoneCore(phone)}`,
-    )
-    .digest('hex');
-}
-
-export function proofMatches(expected: string, provided: string | undefined | null): boolean {
-  if (!provided || provided.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-}
-
-export const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60;
