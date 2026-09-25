@@ -8,6 +8,7 @@ and [docs/08-architecture/architecture-principles.md](./docs/08-architecture/arc
 for the architectural rules this codebase follows.
 
 
+
 ## Architecture
 
 ```
