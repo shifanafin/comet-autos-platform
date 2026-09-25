@@ -7,6 +7,7 @@ See [PROJECT-STATUS.md](./PROJECT-STATUS.md) for what has been built so far
 and [docs/08-architecture/architecture-principles.md](./docs/08-architecture/architecture-principles.md)
 for the architectural rules this codebase follows.
 
+
 ## Architecture
 
 ```
