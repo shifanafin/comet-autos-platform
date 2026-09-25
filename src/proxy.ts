@@ -28,6 +28,10 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// Static files and the installable-app files are public: a phone reads the
+// manifest, icons and service worker before anyone has signed in.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|manifest\\.webmanifest$|icon$|apple-icon$|app-icons/|sw\\.js$|offline\\.html$).*)',
+  ],
 };

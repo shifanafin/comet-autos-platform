@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   ArrowRight,
-  Camera,
   ClipboardCheck,
+  Images,
   FileText,
   Stethoscope,
   Wrench,
@@ -684,19 +684,14 @@ function WorkOrderDocuments({
 
       <div className={card}>
         <span className="flex items-center gap-2 text-sm font-medium">
-          <Camera className="size-4 text-muted-foreground" />
+          <Images className="size-4 text-muted-foreground" />
           Photos
         </span>
-        {canPhoto ? (
-          <a href="#photos" className={secondary}>
-            <Camera className="size-4" />
-            Take or add photos
-          </a>
-        ) : (
-          <a href="#photos" className={secondary}>
-            View photos
-          </a>
-        )}
+        {/* A jump to the gallery, not a second camera: the camera lives there. */}
+        <a href="#photos" className={secondary}>
+          {canPhoto ? 'Go to photos' : 'View photos'}
+          <ArrowRight className="size-4" />
+        </a>
       </div>
     </section>
   );

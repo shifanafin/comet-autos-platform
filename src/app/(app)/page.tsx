@@ -44,6 +44,7 @@ import { StockPill } from '@/components/inventory/stock-level';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { usesDetailedJobCards } from '@/lib/organization/settings';
+import { visibleStages } from '@/lib/workshop/stages';
 
 // Several independently-streamed sections read the same queries; cache()
 // dedupes them to one database round-trip per request.
@@ -152,7 +153,7 @@ export default async function DashboardPage() {
           className="xl:col-span-8"
         >
           <Suspense fallback={<Skeleton className="h-80 rounded-xl" />}>
-            <WorkshopActivity organizationId={org} />
+            <WorkshopActivity organizationId={org} detailed={standardJobCards} />
           </Suspense>
         </Section>
 
@@ -599,7 +600,14 @@ async function ActionBoard({ organizationId }: { organizationId: string }) {
   );
 }
 
-async function WorkshopActivity({ organizationId }: { organizationId: string }) {
+async function WorkshopActivity({
+  organizationId,
+  detailed,
+}: {
+  organizationId: string;
+  /** Whether the workshop uses the standard job card, with every step. */
+  detailed: boolean;
+}) {
   const [flow, recent] = await Promise.all([
     getWorkshopFlow(organizationId),
     getRecentJobCards(organizationId),
@@ -608,7 +616,7 @@ async function WorkshopActivity({ organizationId }: { organizationId: string }) 
   return (
     <Panel padding="none">
       <div className="p-4 sm:p-6">
-        <WorkshopFlowRow stages={flow.workflowStages} />
+        <WorkshopFlowRow stages={visibleStages(flow.workflowStages, detailed)} />
       </div>
       <div className="border-t border-border">
         <p className="px-4 pt-5 pb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase sm:px-6">

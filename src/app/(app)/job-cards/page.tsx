@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ClipboardList, Plus } from 'lucide-react';
 import { requireUser } from '@/lib/auth/authorize';
+import { usesDetailedJobCards } from '@/lib/organization/settings';
 import { countJobCards, listJobCards } from '@/lib/workshop/job-card-list';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { ListDataActions } from '@/components/shared/list-data-actions';
@@ -31,10 +32,11 @@ export default async function JobCardsPage({
   const query = q?.trim() ?? '';
 
   const filters = { q: query, status };
-  const [jobCards, total, unfilteredTotal] = await Promise.all([
+  const [jobCards, total, unfilteredTotal, detailed] = await Promise.all([
     listJobCards(user, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
     countJobCards(user, filters),
     countJobCards(user, {}),
+    usesDetailedJobCards(user),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -81,7 +83,7 @@ export default async function JobCardsPage({
       />
 
       <Stack gap="base">
-        <JobCardFilters status={status ?? ''} q={query} />
+        <JobCardFilters status={status ?? ''} q={query} detailed={detailed} />
 
         {jobCards.length === 0 ? (
           isFiltered ? (

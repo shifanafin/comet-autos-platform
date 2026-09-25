@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { GlobalSearch } from '@/components/shell/global-search';
+import { InstallAppButton } from '@/components/shell/install-app';
 import { CONTAINER_X } from '@/components/layout/primitives';
 import { cn } from '@/lib/utils';
 import { logout } from '@/lib/auth/logout-action';
@@ -33,7 +34,7 @@ export function Topbar({
 }) {
   const role = user.roleNames.join(' / ') || 'Staff';
   return (
-    <header className="sticky top-0 z-30 h-16 shrink-0 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-30 h-[calc(4rem+env(safe-area-inset-top))] shrink-0 border-b pt-[env(safe-area-inset-top)] border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div className={cn(CONTAINER_X, 'flex h-full items-center gap-4')}>
         {/* Navigation on phones lives in the bottom bar; the mark here only says where you are. */}
         <Link
@@ -47,7 +48,7 @@ export function Topbar({
           <GlobalSearch />
         </div>
 
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           {branchName ? (
             <span className="hidden items-center gap-2 text-sm text-muted-foreground xl:flex">
               <MapPin className="size-4" />
@@ -55,6 +56,8 @@ export function Topbar({
             </span>
           ) : null}
           {branchName ? <span className="hidden h-6 w-px bg-border xl:block" aria-hidden /> : null}
+
+          <InstallAppButton />
 
           <DropdownMenu>
             <DropdownMenuTrigger

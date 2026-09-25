@@ -1,11 +1,11 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { CheckCircle2, Clock, Link2Off, XCircle } from 'lucide-react';
 import { getQuoteAccess, loadCustomerQuote } from '@/lib/customer-access/quote';
 import { browserProof } from '@/lib/customer-access/verify-browser';
 import { getQuotationDocumentForLink } from '@/lib/documents/build';
 import { formatAed } from '@/lib/documents/model';
 import { formatCalendarDate, formatDateTime } from '@/lib/format';
-import { CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
+import { CUSTOMER_BAR_COLOR, CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
 import { VerifyForm } from '@/components/customer/verify-form';
 import {
   DocumentItems,
@@ -17,6 +17,8 @@ import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { cn } from '@/lib/utils';
 import { verifyQuoteAction } from './actions';
 import { DecisionBar } from './quote-forms';
+
+export const viewport: Viewport = { themeColor: CUSTOMER_BAR_COLOR };
 
 export const metadata: Metadata = {
   title: 'Your quotation — Comet Autos',

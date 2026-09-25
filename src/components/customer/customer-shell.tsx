@@ -3,6 +3,9 @@ import type { LucideIcon } from 'lucide-react';
 import { Lock } from 'lucide-react';
 import type { OrganizationBranding } from '@/lib/customer-access/access';
 
+/** The shell's graphite bar; customer pages give the phone's browser bar the same colour. */
+export const CUSTOMER_BAR_COLOR = '#111118';
+
 /*
  * The frame of every customer page opened from a WhatsApp link: a slim
  * branded bar, a single readable column sized for phones, and the workshop's

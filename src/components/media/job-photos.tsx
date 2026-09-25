@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Camera, ImagePlus, Loader2, Upload } from 'lucide-react';
+import { Camera, ImagePlus, Images, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MediaStage } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
@@ -14,9 +14,6 @@ import { PhotoViewer, type PhotoItem } from '@/components/media/photo-viewer';
 import { cn } from '@/lib/utils';
 
 export type { PhotoItem };
-
-/** Ask any "Add photo" button on the page to open the camera/gallery picker. */
-export const ADD_PHOTO_EVENT = 'comet:add-photo';
 
 export function JobPhotos({
   jobCardId,
@@ -40,16 +37,6 @@ export function JobPhotos({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const requestKey = useRef<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);
-
-  useEffect(() => {
-    function open() {
-      // On a phone the quick-action button goes straight to the camera.
-      const target = matchMedia('(pointer: coarse)').matches ? cameraRef.current : inputRef.current;
-      target?.click();
-    }
-    window.addEventListener(ADD_PHOTO_EVENT, open);
-    return () => window.removeEventListener(ADD_PHOTO_EVENT, open);
-  }, []);
 
   const counts = useMemo(() => {
     const map = new Map<MediaStage, number>();
@@ -177,9 +164,11 @@ export function JobPhotos({
           ))}
         </div>
         {canEdit ? (
+          // One way in per device: a phone gets its camera and its gallery;
+          // a computer has no camera to open, so it gets a single upload.
           <div className="flex shrink-0 gap-2">
             <Button
-              className="h-11"
+              className="h-11 pointer-fine:hidden"
               disabled={progress !== null}
               onClick={() => cameraRef.current?.click()}
             >
@@ -193,7 +182,8 @@ export function JobPhotos({
               onClick={() => inputRef.current?.click()}
             >
               <ImagePlus />
-              <span className="sr-only sm:not-sr-only">Gallery</span>
+              <span className="sr-only sm:not-sr-only pointer-fine:hidden">Gallery</span>
+              <span className="hidden pointer-fine:inline">Upload photos</span>
             </Button>
           </div>
         ) : null}
@@ -208,18 +198,14 @@ export function JobPhotos({
       ) : null}
 
       {photos.length === 0 ? (
-        <button
-          type="button"
-          disabled={!canEdit}
-          onClick={() => cameraRef.current?.click()}
-          className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-8 text-center transition-colors enabled:hover:bg-muted/40"
-        >
-          <Camera className="size-6 text-muted-foreground" />
+        // Words, not another camera: the buttons above are the way in.
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-8 text-center">
+          <Images className="size-6 text-muted-foreground" />
           <span className="text-sm font-medium">No photos yet</span>
           <span className="max-w-sm text-xs text-muted-foreground">
             {canEdit ? 'Photograph the vehicle at intake, and the work as it happens — they are kept with this job.' : 'Photos added to this job appear here.'}
           </span>
-        </button>
+        </div>
       ) : (
         <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-4 2xl:grid-cols-6">
           {shown.slice(0, VISIBLE).map((photo, index) => (

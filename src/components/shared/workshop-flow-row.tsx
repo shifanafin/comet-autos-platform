@@ -15,9 +15,22 @@ export interface FlowStage {
  * count and a progress rule. Laid out as an even grid (not a row of cards)
  * so it reads as a single continuous process across the available width.
  */
+// A short path (the simple job card's) fits on one line; the full one wraps into two even rows.
+const WIDE_COLUMNS: Record<number, string> = {
+  5: 'lg:grid-cols-5',
+  6: 'lg:grid-cols-6',
+  7: 'lg:grid-cols-7',
+  8: 'lg:grid-cols-8',
+};
+
 export function WorkshopFlowRow({ stages }: { stages: FlowStage[] }) {
   return (
-    <ol className="grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-4 lg:grid-cols-6">
+    <ol
+      className={cn(
+        'grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-4',
+        WIDE_COLUMNS[stages.length] ?? 'lg:grid-cols-6',
+      )}
+    >
       {stages.map((stage) => {
         const tone = TONE_CLASSES[JOB_STATUS_TONE[stage.status as WorkflowStatus]];
         const active = stage.count > 0;

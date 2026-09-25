@@ -54,6 +54,34 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
   { key: 'delivered', label: 'Delivered', status: 'DELIVERED' },
 ];
 
+/**
+ * The simple job card's path through WORKFLOW_STAGES: in, optionally
+ * quoted, billed, paid, handed back. Screens that list stages show only
+ * these when the workshop uses the simple job card.
+ */
+export const SIMPLE_WORKFLOW_STATUSES: WorkflowStatus[] = [
+  'ARRIVED',
+  'ESTIMATE',
+  'WAITING_APPROVAL',
+  'APPROVED',
+  'INVOICED',
+  'PAID',
+  'DELIVERED',
+];
+
+/**
+ * The stages to show for the workshop's job card style. A simple workshop
+ * still sees a detailed stage while a job is sitting in it — say, one left
+ * over from before it switched — so no job ever drops out of sight.
+ */
+export function visibleStages<T extends { status: WorkflowStatus; count?: number }>(
+  stages: T[],
+  detailed: boolean,
+): T[] {
+  if (detailed) return stages;
+  return stages.filter((stage) => SIMPLE_WORKFLOW_STATUSES.includes(stage.status) || (stage.count ?? 0) > 0);
+}
+
 const WORKFLOW_LABEL: Record<WorkflowStatus, string> = {
   ARRIVED: 'Arrived',
   INSPECTION: 'In inspection',

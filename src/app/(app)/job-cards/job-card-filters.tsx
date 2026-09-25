@@ -4,17 +4,38 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { WORKFLOW_STAGES } from '@/lib/workshop/stages';
+import { SIMPLE_WORKFLOW_STATUSES, WORKFLOW_STAGES } from '@/lib/workshop/stages';
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'All statuses' },
-  ...WORKFLOW_STAGES.map((stage) => ({ value: stage.status, label: stage.label })),
-  { value: 'REJECTED', label: 'Estimate rejected' },
-  { value: 'ON_HOLD', label: 'On hold' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-];
+/**
+ * The statuses to filter by. A simple workshop sees only its own short
+ * path — plus whatever status is already selected, so a link to a
+ * detailed stage still reads correctly.
+ */
+function statusOptions(detailed: boolean, selected: string) {
+  const stages = detailed
+    ? WORKFLOW_STAGES
+    : WORKFLOW_STAGES.filter(
+        (stage) => SIMPLE_WORKFLOW_STATUSES.includes(stage.status) || stage.status === selected,
+      );
+  return [
+    { value: '', label: 'All statuses' },
+    ...stages.map((stage) => ({ value: stage.status, label: stage.label })),
+    { value: 'REJECTED', label: 'Estimate rejected' },
+    { value: 'ON_HOLD', label: 'On hold' },
+    { value: 'CANCELLED', label: 'Cancelled' },
+  ];
+}
 
-export function JobCardFilters({ status, q }: { status: string; q: string }) {
+export function JobCardFilters({
+  status,
+  q,
+  detailed,
+}: {
+  status: string;
+  q: string;
+  /** Whether the workshop uses the standard job card, with every step. */
+  detailed: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [query, setQuery] = useState(q);
@@ -54,7 +75,7 @@ export function JobCardFilters({ status, q }: { status: string; q: string }) {
         onChange={(event) => updateStatus(event.target.value)}
         className="h-9 rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        {STATUS_OPTIONS.map((option) => (
+        {statusOptions(detailed, status).map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

@@ -1,21 +1,18 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import { Camera, ClipboardCheck, Package, ShieldCheck, Stethoscope, Timer, Wallet } from 'lucide-react';
+import { ClipboardCheck, Package, ShieldCheck, Stethoscope, Timer, Wallet } from 'lucide-react';
 import type { WorkflowStatus } from '@/lib/workshop/stages';
-import { ADD_PHOTO_EVENT } from '@/components/media/job-photos';
 
 interface QuickAction {
   label: string;
   icon: LucideIcon;
-  href?: string;
-  photo?: boolean;
+  href: string;
 }
 
 /** The one-tap actions that make sense at each stage. */
 function actionsFor(status: WorkflowStatus, base: string, can: { edit: boolean; parts: boolean; pay: boolean }): QuickAction[] {
   const actions: QuickAction[] = [];
-  if (can.edit) actions.push({ label: 'Photo', icon: Camera, photo: true });
   if (status === 'ARRIVED' || status === 'INSPECTION') actions.push({ label: 'Inspection', icon: ClipboardCheck, href: `${base}/inspection` });
   if (status === 'DIAGNOSIS') actions.push({ label: 'Diagnosis', icon: Stethoscope, href: `${base}/diagnosis` });
   if (status === 'REPAIR' && can.edit) {
@@ -27,10 +24,9 @@ function actionsFor(status: WorkflowStatus, base: string, can: { edit: boolean; 
   return actions;
 }
 
-/** The minimal job card has no stages to jump to: a photo, and the payment when one is due. */
+/** The minimal job card has no stages to jump to: only the payment, when one is due. The camera lives in the Photos section. */
 function minimalActionsFor(status: WorkflowStatus, can: { edit: boolean; pay: boolean }): QuickAction[] {
   const actions: QuickAction[] = [];
-  if (can.edit) actions.push({ label: 'Photo', icon: Camera, photo: true });
   if (status === 'INVOICED' && can.pay) actions.push({ label: 'Payment', icon: Wallet, href: '#next-step' });
   return actions;
 }
@@ -74,17 +70,10 @@ export function JobQuickActions({
               'flex h-12 min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium active:bg-muted';
             return (
               <li key={action.label} className="flex flex-1">
-                {action.photo ? (
-                  <button type="button" className={className} onClick={() => window.dispatchEvent(new Event(ADD_PHOTO_EVENT))}>
-                    <Icon className="size-5 text-primary" />
-                    {action.label}
-                  </button>
-                ) : (
-                  <a href={action.href} className={className}>
-                    <Icon className="size-5 text-primary" />
-                    {action.label}
-                  </a>
-                )}
+                <a href={action.href} className={className}>
+                  <Icon className="size-5 text-primary" />
+                  {action.label}
+                </a>
               </li>
             );
           })}

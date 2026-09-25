@@ -160,11 +160,12 @@ export function StagePhotos({
       </div>
 
       {canEdit ? (
-        <div className="grid grid-cols-2 gap-2">
+        // A phone gets its camera and its gallery; a computer, one upload.
+        <div className="grid grid-cols-2 gap-2 pointer-fine:grid-cols-1">
           <button
             type="button"
             onClick={() => cameraRef.current?.click()}
-            className="flex h-14 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition-colors hover:bg-primary-hover active:bg-primary-hover sm:h-12 sm:text-sm"
+            className="flex h-14 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition-colors hover:bg-primary-hover active:bg-primary-hover pointer-fine:hidden sm:h-12 sm:text-sm"
           >
             <Camera className="size-5" />
             Take photo
@@ -175,7 +176,8 @@ export function StagePhotos({
             className="flex h-14 items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 text-base font-medium transition-colors hover:bg-muted active:bg-muted sm:h-12 sm:text-sm"
           >
             <ImagePlus className="size-5" />
-            Gallery
+            <span className="pointer-fine:hidden">Gallery</span>
+            <span className="hidden pointer-fine:inline">Upload {label} photos</span>
           </button>
         </div>
       ) : null}

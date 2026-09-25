@@ -1,11 +1,11 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { CheckCircle2, Clock, FileDown, Link2Off, Receipt } from 'lucide-react';
 import { getCustomerAccess } from '@/lib/customer-access/access';
 import { browserProof } from '@/lib/customer-access/verify-browser';
 import { getInvoiceDocumentForLink } from '@/lib/documents/build';
 import { formatAed } from '@/lib/documents/model';
 import { formatDate } from '@/lib/format';
-import { CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
+import { CUSTOMER_BAR_COLOR, CustomerNotice, CustomerShell } from '@/components/customer/customer-shell';
 import { VerifyForm } from '@/components/customer/verify-form';
 import {
   DocumentItems,
@@ -16,6 +16,8 @@ import { CustomerDocumentActions } from '@/components/documents/share-menu';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { cn } from '@/lib/utils';
 import { verifyInvoiceAction } from './actions';
+
+export const viewport: Viewport = { themeColor: CUSTOMER_BAR_COLOR };
 
 export const metadata: Metadata = {
   title: 'Your invoice — Comet Autos',
