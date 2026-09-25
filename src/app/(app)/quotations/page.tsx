@@ -4,6 +4,7 @@ import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { listQuotations, type QuotationListItem } from '@/lib/workshop/quotations';
 import { formatCalendarDate, formatDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { RecordCard, RecordList, TableWrap } from '@/components/shared/record-card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EstimateStatusPill } from '@/components/workshop/status-pills';
@@ -44,12 +45,21 @@ export default async function QuotationsPage({
         title="Quotations"
         description="What you have quoted, what the customer has not answered yet, and what they approved."
         actions={
-          canCreate ? (
-            <LinkButton href="/quotations/new" size="lg" className="w-full sm:w-auto">
-              <FilePlus2 />
-              New quotation
-            </LinkButton>
-          ) : undefined
+          <>
+            <ListDataActions
+              entity="quotations"
+              label="quotations"
+              search={new URLSearchParams(
+                Object.entries(params).filter(([, value]) => Boolean(value)) as [string, string][],
+              ).toString()}
+            />
+            {canCreate ? (
+              <LinkButton href="/quotations/new" size="lg" className="w-full sm:w-auto">
+                <FilePlus2 />
+                New quotation
+              </LinkButton>
+            ) : null}
+          </>
         }
       />
 

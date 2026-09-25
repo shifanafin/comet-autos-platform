@@ -6,6 +6,7 @@ import { listInvoices } from '@/lib/billing/lists';
 import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { filsToString, toFils } from '@/lib/money';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
 import { StatusPill } from '@/components/shared/status-pill';
@@ -53,12 +54,21 @@ export default async function InvoicesPage({
         title="Invoices"
         description="Every tax invoice issued — billed from a work order, from a quotation, or on its own."
         actions={
-          canCreate ? (
-            <LinkButton href="/finance/invoices/new" size="lg" className="w-full sm:w-auto">
-              <ReceiptText />
-              New invoice
-            </LinkButton>
-          ) : undefined
+          <>
+            <ListDataActions
+              entity="invoices"
+              label="invoices"
+              search={new URLSearchParams(
+                Object.entries(params).filter(([, value]) => Boolean(value)) as [string, string][],
+              ).toString()}
+            />
+            {canCreate ? (
+              <LinkButton href="/finance/invoices/new" size="lg" className="w-full sm:w-auto">
+                <ReceiptText />
+                New invoice
+              </LinkButton>
+            ) : null}
+          </>
         }
       />
       <Stack gap="base">

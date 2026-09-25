@@ -43,6 +43,7 @@ import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { StockPill } from '@/components/inventory/stock-level';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { usesDetailedJobCards } from '@/lib/organization/settings';
 
 // Several independently-streamed sections read the same queries; cache()
 // dedupes them to one database round-trip per request.
@@ -83,6 +84,7 @@ export default async function DashboardPage() {
   const canCheckIn = hasPermission(user, 'job_card.create', scope);
   const canQuote = hasPermission(user, 'job_card.edit', scope);
   const canInvoice = hasPermission(user, 'invoice.create', scope);
+  const standardJobCards = await usesDetailedJobCards(user);
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -113,23 +115,26 @@ export default async function DashboardPage() {
       {/*
        * The detailed workshop lifecycle — inspection, diagnosis, approval,
        * repair, quality check, delivery — stays here for the jobs that go
-       * through it. It is below the daily work, not in front of it.
+       * through it. It is below the daily work, not in front of it, and only
+       * shown when the workshop uses the standard job card.
        */}
-      <Section
-        title="Detailed workflow"
-        description="Work orders that are going through inspection, repair and quality check."
-        action={
-          <span className="flex flex-wrap gap-2">
-            {canCheckIn ? (
-              <QuickAction href="/appointments/new" icon={CalendarPlus} label="New appointment" />
-            ) : null}
-          </span>
-        }
-      >
-        <Suspense fallback={<ActionsSkeleton />}>
-          <ActionBoard organizationId={org} />
-        </Suspense>
-      </Section>
+      {standardJobCards ? (
+        <Section
+          title="Detailed workflow"
+          description="Work orders that are going through inspection, repair and quality check."
+          action={
+            <span className="flex flex-wrap gap-2">
+              {canCheckIn ? (
+                <QuickAction href="/appointments/new" icon={CalendarPlus} label="New appointment" />
+              ) : null}
+            </span>
+          }
+        >
+          <Suspense fallback={<ActionsSkeleton />}>
+            <ActionBoard organizationId={org} />
+          </Suspense>
+        </Section>
+      ) : null}
 
       <Grid gap="xl" className="items-start xl:grid-cols-12">
         <Section

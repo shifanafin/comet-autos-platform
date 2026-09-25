@@ -6,6 +6,8 @@ import { formatDateTime } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { OrganizationForm } from '@/components/settings/organization-form';
+import { JobCardStyleForm } from '@/components/settings/job-card-style-form';
+import { MenusForm } from '@/components/settings/menus-form';
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -34,6 +36,28 @@ export default async function SettingsPage() {
             <ReadOnlySettings settings={settings} />
           )}
         </Panel>
+      </Section>
+
+      <Section
+        title="Job card"
+        description="How much a work order asks for. Choose the minimal job card while one person does everything; switch to standard once there is a team to share the steps."
+      >
+        <div className="max-w-3xl">
+          <JobCardStyleForm detailed={settings.detailedJobCards} canEdit={canEdit} />
+        </div>
+      </Section>
+
+      <Section
+        title="Menus"
+        description="Show only the menus the workshop uses. Hiding a menu doesn't remove anything or change what anyone is allowed to do."
+      >
+        <div className="max-w-3xl">
+          <MenusForm
+            hiddenMenus={settings.hiddenMenus}
+            detailedJobCards={settings.detailedJobCards}
+            canEdit={canEdit}
+          />
+        </div>
       </Section>
 
       {hasPermission(user, 'user.view') ? (

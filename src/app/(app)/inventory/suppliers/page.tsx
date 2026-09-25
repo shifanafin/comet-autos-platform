@@ -6,6 +6,8 @@ import { formatDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
+import { ListDataActions } from '@/components/shared/list-data-actions';
+import { importColumns } from '@/lib/data-transfer/imports';
 import { SearchField } from '@/components/shared/search-field';
 import { StatusPill } from '@/components/shared/status-pill';
 import {
@@ -35,12 +37,21 @@ export default async function SuppliersPage({
         title="Suppliers"
         description="Who you buy parts from, what has been received from them and what is still owed."
         actions={
-          canManage ? (
-            <LinkButton href="/inventory/suppliers/new" size="lg">
-              <Plus />
-              New supplier
-            </LinkButton>
-          ) : null
+          <>
+            <ListDataActions
+              entity="suppliers"
+              label="suppliers"
+              search={query ? new URLSearchParams({ q: query }).toString() : ''}
+              canImport={canManage}
+              columns={importColumns('suppliers')}
+            />
+            {canManage ? (
+              <LinkButton href="/inventory/suppliers/new" size="lg">
+                <Plus />
+                New supplier
+              </LinkButton>
+            ) : null}
+          </>
         }
       />
       <Stack gap="base">

@@ -6,6 +6,7 @@ import { listPurchases } from '@/lib/inventory/purchases';
 import { PURCHASE_STATUS_LABEL } from '@/lib/inventory/labels';
 import { formatCalendarDate, formatDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
 import { ListFilters } from '@/components/inventory/list-filters';
@@ -43,12 +44,21 @@ export default async function PurchasesPage({
         title="Purchases"
         description="Supplier invoices and deliveries. Stock goes up only when a purchase is received."
         actions={
-          canCreate ? (
-            <LinkButton href="/inventory/purchases/new" size="lg">
-              <Plus />
-              New purchase
-            </LinkButton>
-          ) : null
+          <>
+            <ListDataActions
+              entity="purchases"
+              label="purchases"
+              search={new URLSearchParams(
+                Object.entries(params).filter(([, value]) => Boolean(value)) as [string, string][],
+              ).toString()}
+            />
+            {canCreate ? (
+              <LinkButton href="/inventory/purchases/new" size="lg">
+                <Plus />
+                New purchase
+              </LinkButton>
+            ) : null}
+          </>
         }
       />
       <Stack gap="base">

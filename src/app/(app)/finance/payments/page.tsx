@@ -6,6 +6,7 @@ import { listPayments } from '@/lib/billing/lists';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { filsToString } from '@/lib/money';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusPill } from '@/components/shared/status-pill';
 import { SearchField } from '@/components/shared/search-field';
@@ -44,6 +45,13 @@ export default async function PaymentsPage({
         eyebrow="Finance"
         title="Payments"
         description="Money received from customers, newest first. Payments are taken against an invoice — from the invoice itself or its work order."
+        actions={
+          <ListDataActions
+            entity="payments"
+            label="payments"
+            search={query ? new URLSearchParams({ q: query }).toString() : ''}
+          />
+        }
       />
       <Stack gap="base">
         <SearchField initialQuery={query} placeholder="Receipt, reference, invoice or customer" />

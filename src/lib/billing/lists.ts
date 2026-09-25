@@ -15,6 +15,8 @@ export type InvoiceFilter = '' | 'unpaid' | 'paid';
 export async function listInvoices(
   user: AuthenticatedUser,
   filters: { q?: string; status?: string },
+  /** Rows to return. The screens show a page; an export asks for everything. */
+  limit = 200,
 ) {
   requirePermission(user, 'invoice.view');
   const q = filters.q?.trim();
@@ -45,7 +47,7 @@ export async function listInvoices(
         : {}),
     },
     orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
-    take: 200,
+    take: limit,
     select: {
       id: true,
       invoiceNumber: true,
@@ -76,7 +78,7 @@ export async function listInvoices(
   };
 }
 
-export async function listPayments(user: AuthenticatedUser, filters: { q?: string }) {
+export async function listPayments(user: AuthenticatedUser, filters: { q?: string }, limit = 200) {
   requirePermission(user, 'invoice.view');
   const q = filters.q?.trim();
   const payments = await prisma.payment.findMany({
@@ -94,7 +96,7 @@ export async function listPayments(user: AuthenticatedUser, filters: { q?: strin
         : {}),
     },
     orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
-    take: 200,
+    take: limit,
     select: {
       id: true,
       paymentNumber: true,

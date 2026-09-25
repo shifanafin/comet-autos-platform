@@ -149,11 +149,16 @@ function partData(input: z.infer<typeof partSchema>, defaultVatRate: string) {
 }
 
 /** Creates a part; an opening quantity is posted to the ledger as OPENING_STOCK in the same transaction. */
-export async function createPart(user: AuthenticatedUser, rawInput: unknown) {
+export async function createPart(
+  user: AuthenticatedUser,
+  rawInput: unknown,
+  /** Join the caller's transaction (a bulk import) instead of opening one. */
+  client?: Prisma.TransactionClient,
+) {
   const input = parseInput(createPartSchema, rawInput);
   requirePermission(user, 'inventory.manage');
 
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     await claimRequestKey(tx, user, rawInput, 'part.create');
     const branch = await resolveInventoryBranch(user, tx);
     await assertSkuFree(tx, user.organizationId, input.sku);
@@ -199,7 +204,8 @@ export async function createPart(user: AuthenticatedUser, rawInput: unknown) {
     });
     await settleRequestKey(tx, user, rawInput, part.id);
     return part;
-  });
+  };
+  return client ? run(client) : prisma.$transaction(run);
 }
 
 /** Edits catalogue details. Stock is never edited here — only through ledger movements. */
@@ -583,6 +589,8 @@ export async function getPartForEdit(user: AuthenticatedUser, partId: string) {
 export async function listMovements(
   user: AuthenticatedUser,
   filters: { type?: string; q?: string },
+  /** Rows to return. The screen shows a page; an export asks for everything. */
+  limit = 200,
 ) {
   requirePermission(user, 'inventory.view');
   const branch = await resolveInventoryBranch(user);
@@ -607,7 +615,7 @@ export async function listMovements(
         : {}),
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: 200,
+    take: limit,
     include: {
       ...movementInclude,
       part: { select: { id: true, sku: true, name: true, unitOfMeasure: true } },

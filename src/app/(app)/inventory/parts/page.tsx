@@ -7,6 +7,8 @@ import { formatMilli, signedToMilli } from '@/lib/money';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
+import { ListDataActions } from '@/components/shared/list-data-actions';
+import { importColumns } from '@/lib/data-transfer/imports';
 import { StatusPill } from '@/components/shared/status-pill';
 import { ListFilters } from '@/components/inventory/list-filters';
 import { StockPill, StockQuantity } from '@/components/inventory/stock-level';
@@ -82,6 +84,15 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         description={`Stock on hand at ${branch.name}. Every change is recorded in the stock history.`}
         actions={
           <>
+            <ListDataActions
+              entity="parts"
+              label="parts"
+              search={new URLSearchParams(
+                Object.entries(params).filter(([, value]) => Boolean(value)) as [string, string][],
+              ).toString()}
+              canImport={canManage}
+              columns={importColumns('parts')}
+            />
             <LinkButton href="/inventory/movements" variant="outline" size="lg">
               <History />
               Stock movements

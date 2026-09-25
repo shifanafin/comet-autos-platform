@@ -142,6 +142,8 @@ export type QuotationFilter = '' | 'draft' | 'awaiting' | 'approved';
 export async function listQuotations(
   user: AuthenticatedUser,
   filters: { q?: string; status?: string } = {},
+  /** Rows to return. The screen shows a page; an export asks for everything. */
+  limit = 200,
 ) {
   requirePermission(user, 'job_card.view');
   const q = filters.q?.trim();
@@ -174,7 +176,7 @@ export async function listQuotations(
         : {}),
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: 200,
+    take: limit,
     select: {
       id: true,
       estimateNumber: true,

@@ -27,6 +27,14 @@ function actionsFor(status: WorkflowStatus, base: string, can: { edit: boolean; 
   return actions;
 }
 
+/** The minimal job card has no stages to jump to: a photo, and the payment when one is due. */
+function minimalActionsFor(status: WorkflowStatus, can: { edit: boolean; pay: boolean }): QuickAction[] {
+  const actions: QuickAction[] = [];
+  if (can.edit) actions.push({ label: 'Photo', icon: Camera, photo: true });
+  if (status === 'INVOICED' && can.pay) actions.push({ label: 'Payment', icon: Wallet, href: '#next-step' });
+  return actions;
+}
+
 /**
  * On phones and small tablets, the actions a technician takes most often
  * sit in a bar at the bottom of the screen, above the navigation — within
@@ -38,14 +46,18 @@ export function JobQuickActions({
   canEdit,
   canIssueParts,
   canPay,
+  minimal = false,
 }: {
   jobCardId: string;
   status: WorkflowStatus;
   canEdit: boolean;
   canIssueParts: boolean;
   canPay: boolean;
+  minimal?: boolean;
 }) {
-  const actions = actionsFor(status, `/job-cards/${jobCardId}`, { edit: canEdit, parts: canIssueParts, pay: canPay });
+  const actions = minimal
+    ? minimalActionsFor(status, { edit: canEdit, pay: canPay })
+    : actionsFor(status, `/job-cards/${jobCardId}`, { edit: canEdit, parts: canIssueParts, pay: canPay });
   if (actions.length === 0) return null;
 
   return (

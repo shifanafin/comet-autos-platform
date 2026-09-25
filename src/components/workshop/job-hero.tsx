@@ -14,6 +14,7 @@ import { formatDateTime } from '@/lib/format';
 export function JobHero({
   jobCard,
   technician,
+  showTechnician = true,
 }: {
   jobCard: {
     id: string;
@@ -31,6 +32,8 @@ export function JobHero({
     customer: { id: string; name: string; phone: string };
   };
   technician: string | null;
+  /** Off on the minimal job card, where nobody is assigned. */
+  showTechnician?: boolean;
 }) {
   const { vehicle } = jobCard;
   return (
@@ -90,13 +93,15 @@ export function JobHero({
       </div>
 
       <dl className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <Wrench className="size-4" />
-          <dt className="sr-only">Technician</dt>
-          <dd className={technician ? 'text-foreground' : undefined}>
-            {technician ?? 'No technician assigned'}
-          </dd>
-        </div>
+        {showTechnician ? (
+          <div className="flex items-center gap-1.5">
+            <Wrench className="size-4" />
+            <dt className="sr-only">Technician</dt>
+            <dd className={technician ? 'text-foreground' : undefined}>
+              {technician ?? 'No technician assigned'}
+            </dd>
+          </div>
+        ) : null}
         {jobCard.odometerReading !== null ? (
           <div className="flex items-center gap-1.5">
             <Gauge className="size-4" />

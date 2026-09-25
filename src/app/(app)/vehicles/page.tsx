@@ -1,17 +1,20 @@
 import Link from 'next/link';
 import { Car, UserPlus } from 'lucide-react';
-import { requireUser } from '@/lib/auth/authorize';
+import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { listVehicles } from '@/lib/vehicles/service';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { SearchField } from '@/components/shared/search-field';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
+import { ListDataActions } from '@/components/shared/list-data-actions';
+import { importColumns } from '@/lib/data-transfer/imports';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default async function VehiclesPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
   const query = ((await searchParams).q ?? '').trim();
+  const canImport = hasPermission(user, 'vehicle.create');
   const vehicles = await listVehicles(user, query);
 
   return (
@@ -21,10 +24,19 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
         title="Vehicles"
         description="Search by registration, VIN, or the owner's name or mobile number."
         actions={
-          <LinkButton href="/customers/new" size="lg" variant="outline">
-            <UserPlus />
-            New customer &amp; vehicle
-          </LinkButton>
+          <>
+            <ListDataActions
+              entity="vehicles"
+              label="vehicles"
+              search={query ? new URLSearchParams({ q: query }).toString() : ''}
+              canImport={canImport}
+              columns={importColumns('vehicles')}
+            />
+            <LinkButton href="/customers/new" size="lg" variant="outline">
+              <UserPlus />
+              New customer &amp; vehicle
+            </LinkButton>
+          </>
         }
       />
       <Stack gap="base">

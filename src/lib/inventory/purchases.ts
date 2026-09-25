@@ -508,6 +508,8 @@ export function receivedValueFils(
 export async function listPurchases(
   user: AuthenticatedUser,
   filters: { q?: string; status?: string; supplierId?: string },
+  /** Rows to return. The screen shows a page; an export asks for everything. */
+  limit = 200,
 ) {
   requirePermission(user, 'inventory.view');
   const q = filters.q?.trim();
@@ -544,7 +546,7 @@ export async function listPurchases(
           : {}),
       },
       orderBy: [{ createdAt: 'desc' }],
-      take: 200,
+      take: limit,
       include: {
         supplier: { select: { id: true, name: true } },
         _count: { select: { items: true } },

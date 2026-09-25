@@ -281,15 +281,16 @@ describe('security', () => {
     const readOnly = { ...a.owner, orgWidePermissions: new Set(['payroll.view']) };
     assert.ok(await getAttendanceDay(readOnly));
     for (const call of [
-      clockIn(readOnly, tech, { date: daysAgo(5), requestKey: `att-noperm-in-${RUN}` }),
-      clockOut(readOnly, tech, { date: daysAgo(5), requestKey: `att-noperm-out-${RUN}` }),
-      markAttendance(readOnly, tech, {
-        status: 'ABSENT',
-        date: daysAgo(5),
-        requestKey: `att-noperm-mark-${RUN}`,
-      }),
+      () => clockIn(readOnly, tech, { date: daysAgo(5), requestKey: `att-noperm-in-${RUN}` }),
+      () => clockOut(readOnly, tech, { date: daysAgo(5), requestKey: `att-noperm-out-${RUN}` }),
+      () =>
+        markAttendance(readOnly, tech, {
+          status: 'ABSENT',
+          date: daysAgo(5),
+          requestKey: `att-noperm-mark-${RUN}`,
+        }),
     ]) {
-      await assert.rejects(call, (e: unknown) => e instanceof AuthError);
+      await assert.rejects(call(), (e: unknown) => e instanceof AuthError);
     }
   });
 
@@ -300,14 +301,15 @@ describe('security', () => {
       'another workshop gets "not found", never the employee',
     );
     for (const call of [
-      clockIn(b.owner, tech, { date: daysAgo(4), requestKey: `att-crossorg-in-${RUN}` }),
-      markAttendance(b.owner, tech, {
-        status: 'ABSENT',
-        date: daysAgo(4),
-        requestKey: `att-crossorg-mark-${RUN}`,
-      }),
+      () => clockIn(b.owner, tech, { date: daysAgo(4), requestKey: `att-crossorg-in-${RUN}` }),
+      () =>
+        markAttendance(b.owner, tech, {
+          status: 'ABSENT',
+          date: daysAgo(4),
+          requestKey: `att-crossorg-mark-${RUN}`,
+        }),
     ]) {
-      await assert.rejects(call, (e: unknown) => e instanceof NotFoundError);
+      await assert.rejects(call(), (e: unknown) => e instanceof NotFoundError);
     }
 
     const theirs = await getAttendanceDay(b.owner);

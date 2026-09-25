@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { ClipboardList, Plus } from 'lucide-react';
 import { requireUser } from '@/lib/auth/authorize';
-import { prisma } from '@/lib/prisma';
+import { countJobCards, listJobCards } from '@/lib/workshop/job-card-list';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { JobStatusBadge } from '@/components/shared/job-status-badge';
 import { EmptyState } from '@/components/shared/empty-state';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
@@ -15,7 +16,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import type { JobCardStatus } from '@/generated/prisma/enums';
 import { JobCardFilters } from './job-card-filters';
 
 const PAGE_SIZE = 25;
@@ -30,30 +30,11 @@ export default async function JobCardsPage({
   const page = Math.max(1, Number(pageParam) || 1);
   const query = q?.trim() ?? '';
 
-  const where = {
-    organizationId: user.organizationId,
-    ...(status ? { status: status as JobCardStatus } : {}),
-    ...(query
-      ? {
-          OR: [
-            { jobNumber: { contains: query, mode: 'insensitive' as const } },
-            { vehicle: { plateNumber: { contains: query, mode: 'insensitive' as const } } },
-            { customer: { name: { contains: query, mode: 'insensitive' as const } } },
-          ],
-        }
-      : {}),
-  };
-
+  const filters = { q: query, status };
   const [jobCards, total, unfilteredTotal] = await Promise.all([
-    prisma.jobCard.findMany({
-      where,
-      include: { customer: true, vehicle: true },
-      orderBy: { openedAt: 'desc' },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    prisma.jobCard.count({ where }),
-    prisma.jobCard.count({ where: { organizationId: user.organizationId } }),
+    listJobCards(user, filters, PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    countJobCards(user, filters),
+    countJobCards(user, {}),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -77,15 +58,25 @@ export default async function JobCardsPage({
             : `${unfilteredTotal} work order${unfilteredTotal === 1 ? '' : 's'} in total.`
         }
         actions={
-          <Button
-            size="lg"
-            className="w-full sm:w-auto"
-            nativeButton={false}
-            render={<Link href="/check-in" />}
-          >
-            <Plus />
-            New work order
-          </Button>
+          <>
+            <ListDataActions
+              entity="work-orders"
+              label="work orders"
+              search={new URLSearchParams({
+                ...(query ? { q: query } : {}),
+                ...(status ? { status } : {}),
+              }).toString()}
+            />
+            <Button
+              size="lg"
+              className="w-full sm:w-auto"
+              nativeButton={false}
+              render={<Link href="/check-in" />}
+            >
+              <Plus />
+              New work order
+            </Button>
+          </>
         }
       />
 

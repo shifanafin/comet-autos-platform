@@ -4,6 +4,7 @@ import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { listMovements, REVERSIBLE_TYPES } from '@/lib/inventory/parts';
 import { MOVEMENT_LABEL } from '@/lib/inventory/labels';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
+import { ListDataActions } from '@/components/shared/list-data-actions';
 import { EmptyState } from '@/components/shared/empty-state';
 import { ListFilters } from '@/components/inventory/list-filters';
 import { MovementTable } from '@/components/inventory/movement-table';
@@ -37,6 +38,15 @@ export default async function MovementsPage({
           >
             ← Parts
           </Link>
+        }
+        actions={
+          <ListDataActions
+            entity="stock-movements"
+            label="stock movements"
+            search={new URLSearchParams(
+              Object.entries(params).filter(([, value]) => Boolean(value)) as [string, string][],
+            ).toString()}
+          />
         }
         title="Stock movements"
         description={`Every stock change at ${branch.name}, newest first — the 200 most recent that match.`}

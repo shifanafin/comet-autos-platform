@@ -11,7 +11,14 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/authorize';
-import { getOrganizationSettings, updateOrganizationSettings } from '@/lib/organization/settings';
+import {
+  getOrganizationSettings,
+  getWorkshopPreferences,
+  setDetailedJobCards,
+  setHiddenMenus,
+  updateOrganizationSettings,
+} from '@/lib/organization/settings';
+import { isMenuShown } from '@/lib/nav';
 import { resolveDefaultVatRate, getVatSettings } from '@/lib/tax';
 import { checkInVehicle } from '@/lib/workshop/check-in';
 import { startInspection, saveInspection } from '@/lib/workshop/inspection';
@@ -240,5 +247,74 @@ describe('workshop settings', () => {
       },
     });
     assert.equal(audits, 1, 'only one change is recorded');
+  });
+});
+
+describe('job card style and menus', () => {
+  test('a new workshop starts on the minimal job card with every menu shown', async () => {
+    const preferences = await getWorkshopPreferences(b.organizationId);
+    assert.equal(preferences.detailedJobCards, false);
+    assert.deepEqual(preferences.hiddenMenus, []);
+    // The standard job card's own screens stay out of the way meanwhile.
+    assert.equal(isMenuShown('/inspections', preferences), false);
+    assert.equal(isMenuShown('/approvals', preferences), false);
+    assert.equal(isMenuShown('/inventory/parts', preferences), true);
+  });
+
+  test('switching to the standard job card is saved, audited, and brings its menus back', async () => {
+    await setDetailedJobCards(a.owner, true);
+    const preferences = await getWorkshopPreferences(a.organizationId);
+    assert.equal(preferences.detailedJobCards, true);
+    assert.equal(isMenuShown('/inspections', preferences), true);
+    assert.equal(
+      await prisma.auditLog.count({
+        where: { entityId: a.organizationId, action: 'organization.job_card_mode_changed' },
+      }),
+      1,
+    );
+    // Choosing what is already chosen records nothing.
+    await setDetailedJobCards(a.owner, true);
+    assert.equal(
+      await prisma.auditLog.count({
+        where: { entityId: a.organizationId, action: 'organization.job_card_mode_changed' },
+      }),
+      1,
+    );
+    await setDetailedJobCards(a.owner, false);
+    assert.equal((await getWorkshopPreferences(a.organizationId)).detailedJobCards, false);
+  });
+
+  test('menus can be hidden, but never the ones the app needs, and never unknown ones', async () => {
+    await setHiddenMenus(a.owner, [
+      '/inventory/parts',
+      '/finance/payables',
+      '/settings',
+      '/job-cards',
+      '/',
+      '/not-a-menu',
+      '/inventory/parts',
+    ]);
+    const preferences = await getWorkshopPreferences(a.organizationId);
+    assert.deepEqual(preferences.hiddenMenus, ['/finance/payables', '/inventory/parts']);
+    assert.equal(isMenuShown('/inventory/parts', preferences), false);
+    assert.equal(isMenuShown('/settings', preferences), true);
+    assert.equal(isMenuShown('/job-cards', preferences), true);
+
+    await setHiddenMenus(a.owner, []);
+    assert.deepEqual((await getWorkshopPreferences(a.organizationId)).hiddenMenus, []);
+  });
+
+  test('changing either needs accounting.edit, and stays inside the workshop', async () => {
+    const readOnly = { ...a.owner, orgWidePermissions: new Set(['accounting.view']) };
+    await assert.rejects(
+      setDetailedJobCards(readOnly, true),
+      (error: unknown) => error instanceof AuthError,
+    );
+    await assert.rejects(
+      setHiddenMenus(a.viewer, ['/customers']),
+      (error: unknown) => error instanceof AuthError,
+    );
+    await setHiddenMenus(b.owner, ['/customers']);
+    assert.deepEqual((await getWorkshopPreferences(a.organizationId)).hiddenMenus, []);
   });
 });

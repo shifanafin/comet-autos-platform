@@ -38,6 +38,8 @@ import { getBillingPreview, getJobInvoice } from '@/lib/billing/invoice';
 import { getJobDocuments, type JobDocuments } from '@/lib/documents/build';
 import { CreateEstimateButton } from '@/components/workshop/quotation-controls';
 import { CustomerCommunication } from '@/components/documents/customer-communication';
+import { usesDetailedJobCards } from '@/lib/organization/settings';
+import { MinimalJobCard } from './minimal-job-card';
 
 const BILLING_PHASE: WorkflowStatus[] = ['READY', 'INVOICED', 'PAID', 'DELIVERED'];
 const REPAIR_PHASE: WorkflowStatus[] = [
@@ -48,6 +50,15 @@ const REPAIR_PHASE: WorkflowStatus[] = [
   'INVOICED',
   'PAID',
   'DELIVERED',
+];
+/** Stages only the standard job card's steps lead into, or out of. */
+const STANDARD_ONLY: WorkflowStatus[] = [
+  'INSPECTION',
+  'DIAGNOSIS',
+  'REPAIR',
+  'QUALITY_CHECK',
+  'READY',
+  'ON_HOLD',
 ];
 
 export default async function JobCardWorkspacePage({
@@ -65,6 +76,12 @@ export default async function JobCardWorkspacePage({
     if (error instanceof NotFoundError) notFound();
     throw error;
   }
+  // The minimal job card unless the workshop chose the standard one — or
+  // this job is already part-way through the standard steps, which only
+  // the standard job card can finish.
+  const standard = STANDARD_ONLY.includes(workspace.status) || (await usesDetailedJobCards(user));
+  if (!standard) return <MinimalJobCard user={user} workspace={workspace} />;
+
   const {
     jobCard,
     status,
@@ -315,9 +332,8 @@ export default async function JobCardWorkspacePage({
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Labour and parts priced with VAT, sent to the customer to approve.
-                      Inspection and diagnosis are optional — a work order can be quoted straight
-                      away.
+                      Labour and parts priced with VAT, sent to the customer to approve. Inspection
+                      and diagnosis are optional — a work order can be quoted straight away.
                     </p>
                   )}
                 </ProgressRow>
@@ -380,10 +396,7 @@ export default async function JobCardWorkspacePage({
             />
           </section>
 
-          <Section
-            title="Signatures"
-            description="Signed approvals and handovers on this job."
-          >
+          <Section title="Signatures" description="Signed approvals and handovers on this job.">
             <Panel padding="none">
               <JobSignatures signatures={signatures} />
             </Panel>
@@ -457,9 +470,7 @@ export default async function JobCardWorkspacePage({
                       <span className="font-medium">{jobCard.customer.name}</span>
                       <span className="truncate text-xs text-muted-foreground">
                         {jobCard.customer.phone}
-                        {jobCard.customer.email
-                          ? ` · ${jobCard.customer.email}`
-                          : ''}
+                        {jobCard.customer.email ? ` · ${jobCard.customer.email}` : ''}
                       </span>
                     </span>
                     <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
@@ -586,7 +597,12 @@ function WorkOrderDocuments({
 }: {
   jobCardId: string;
   status: WorkflowStatus;
-  estimate: { id: string; estimateNumber: string; status: string; totalAmount: { toString(): string } } | null;
+  estimate: {
+    id: string;
+    estimateNumber: string;
+    status: string;
+    totalAmount: { toString(): string };
+  } | null;
   invoice: JobDocuments['invoice'];
   canQuote: boolean;
   canInvoice: boolean;

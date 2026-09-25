@@ -205,3 +205,31 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+
+/*
+ * Menus the workshop can switch off in Settings. Hiding is display only:
+ * a hidden page still opens from a link, and permissions still decide who
+ * may use it.
+ */
+
+/** Always shown, so the workshop can never hide its way out of the app. */
+export const ALWAYS_SHOWN_MENUS = ['/', '/job-cards', '/settings'];
+
+/** Menus that only serve the standard job card's steps — hidden with the minimal one. */
+export const STANDARD_JOB_CARD_MENUS = ['/inspections', '/approvals'];
+
+export function isMenuShown(
+  href: string,
+  preferences: { hiddenMenus: string[]; detailedJobCards: boolean },
+): boolean {
+  if (ALWAYS_SHOWN_MENUS.includes(href)) return true;
+  if (!preferences.detailedJobCards && STANDARD_JOB_CARD_MENUS.includes(href)) return false;
+  return !preferences.hiddenMenus.includes(href);
+}
+
+/** Every menu a workshop may hide. */
+export function hideableMenuHrefs(): string[] {
+  return NAV_GROUPS.flatMap((group) => group.items)
+    .map((item) => item.href)
+    .filter((href) => !ALWAYS_SHOWN_MENUS.includes(href));
+}

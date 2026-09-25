@@ -345,6 +345,13 @@ model Organization {
   phone           String?
   email           String?
   baseCurrency    String   @default("AED") @map("base_currency")
+  /// Whether work orders open as the full step-by-step job card (inspection,
+  /// diagnosis, approval, repair, quality check). Off: the simple job card —
+  /// one person takes the vehicle in, bills it and hands it back.
+  detailedJobCards Boolean @default(false) @map("detailed_job_cards")
+  /// Menu items (their hrefs, from lib/nav.ts) the workshop chose not to show.
+  /// Display only — permissions still decide what each user may open.
+  hiddenMenus     String[] @default([]) @map("hidden_menus")
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz

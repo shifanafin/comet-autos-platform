@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { prisma } from '@/lib/prisma';
-import { NAV_GROUPS } from '@/lib/nav';
+import { NAV_GROUPS, isMenuShown } from '@/lib/nav';
+import { getWorkshopPreferences } from '@/lib/organization/settings';
 import { SidebarNav } from '@/components/shell/sidebar-nav';
 import { BottomNav } from '@/components/shell/bottom-nav';
 import { Topbar } from '@/components/shell/topbar';
@@ -10,17 +11,22 @@ import { PageContainer } from '@/components/layout/primitives';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
-  const branch = user.primaryBranchId
-    ? await prisma.branch.findUnique({
-        where: { id: user.primaryBranchId },
-        select: { name: true },
-      })
-    : null;
-  // Navigation shows only what the user's permissions allow. Convenience only:
-  // every page and action checks permissions again on the server.
+  const [branch, preferences] = await Promise.all([
+    user.primaryBranchId
+      ? prisma.branch.findUnique({
+          where: { id: user.primaryBranchId },
+          select: { name: true },
+        })
+      : null,
+    getWorkshopPreferences(user.organizationId),
+  ]);
+  // Navigation shows only what the user's permissions allow and the workshop
+  // chose to show. Convenience only: every page and action checks
+  // permissions again on the server.
   const branchScope = user.primaryBranchId ? { branchId: user.primaryBranchId } : undefined;
   const allowedHrefs = NAV_GROUPS.flatMap((group) => group.items)
     .filter((item) => !item.permission || hasPermission(user, item.permission, branchScope))
+    .filter((item) => isMenuShown(item.href, preferences))
     .map((item) => item.href);
 
   return (

@@ -1,5 +1,7 @@
+import { cache } from 'react';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { hideableMenuHrefs } from '@/lib/nav';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
 import { writeAuditLog } from '@/lib/audit';
@@ -74,11 +76,94 @@ export async function getOrganizationSettings(user: AuthenticatedUser) {
       isVatRegistered: true,
       vatRate: true,
       baseCurrency: true,
+      detailedJobCards: true,
+      hiddenMenus: true,
       updatedAt: true,
     },
   });
   if (!organization) throw new NotFoundError('workshop');
   return { ...organization, vatRate: organization.vatRate.toFixed(2) };
+}
+
+/**
+ * How the workshop chose to see the app: which job card, which menus. Any
+ * signed-in user may read it — it only decides what is shown. Read once per
+ * request however many places ask.
+ */
+export const getWorkshopPreferences = cache(async (organizationId: string) => {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { detailedJobCards: true, hiddenMenus: true },
+  });
+  return organization ?? { detailedJobCards: false, hiddenMenus: [] };
+});
+
+/** Whether this workshop works jobs through the standard (detailed) job card. */
+export async function usesDetailedJobCards(user: AuthenticatedUser): Promise<boolean> {
+  return (await getWorkshopPreferences(user.organizationId)).detailedJobCards;
+}
+
+/**
+ * Saves which menus are hidden. Unknown and always-shown menus are dropped,
+ * so a stale or tampered list can never hide Settings.
+ */
+export async function setHiddenMenus(user: AuthenticatedUser, hrefs: string[]) {
+  requirePermission(user, 'accounting.edit');
+  const hideable = hideableMenuHrefs();
+  const hidden = [...new Set(hrefs)].filter((href) => hideable.includes(href)).sort();
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.organization.findUnique({
+      where: { id: user.organizationId },
+      select: { hiddenMenus: true },
+    });
+    if (!before) throw new NotFoundError('workshop');
+    if (before.hiddenMenus.join('\n') === hidden.join('\n')) return;
+    await tx.organization.update({
+      where: { id: user.organizationId },
+      data: { hiddenMenus: hidden },
+    });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: user.primaryBranchId,
+      actorUserId: user.id,
+      action: 'organization.menus_changed',
+      entityType: 'Organization',
+      entityId: user.organizationId,
+      beforeData: before,
+      afterData: { hiddenMenus: hidden },
+    });
+  });
+}
+
+/**
+ * Switches between the simple and the detailed job card. Only what is shown
+ * changes: no job's status or history is touched, and a job already part-way
+ * through the detailed steps keeps showing them.
+ */
+export async function setDetailedJobCards(user: AuthenticatedUser, detailed: boolean) {
+  requirePermission(user, 'accounting.edit');
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.organization.findUnique({
+      where: { id: user.organizationId },
+      select: { detailedJobCards: true },
+    });
+    if (!before) throw new NotFoundError('workshop');
+    if (before.detailedJobCards === detailed) return;
+    await tx.organization.update({
+      where: { id: user.organizationId },
+      data: { detailedJobCards: detailed },
+    });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: user.primaryBranchId,
+      actorUserId: user.id,
+      action: 'organization.job_card_mode_changed',
+      entityType: 'Organization',
+      entityId: user.organizationId,
+      beforeData: before,
+      afterData: { detailedJobCards: detailed },
+    });
+  });
 }
 
 export type OrganizationSettings = Awaited<ReturnType<typeof getOrganizationSettings>>;

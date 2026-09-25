@@ -1,18 +1,21 @@
 import Link from 'next/link';
 import { UserPlus, Users } from 'lucide-react';
-import { requireUser } from '@/lib/auth/authorize';
+import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { listCustomers } from '@/lib/customers/service';
 import { formatDate } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { SearchField } from '@/components/shared/search-field';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
+import { ListDataActions } from '@/components/shared/list-data-actions';
+import { importColumns } from '@/lib/data-transfer/imports';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
   const query = ((await searchParams).q ?? '').trim();
+  const canImport = hasPermission(user, 'customer.create');
   const customers = await listCustomers(user, query);
 
   return (
@@ -22,10 +25,19 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         title="Customers"
         description="Find a customer by name, mobile number, vehicle registration or VIN."
         actions={
-          <LinkButton href="/customers/new" size="lg">
-            <UserPlus />
-            New customer
-          </LinkButton>
+          <>
+            <ListDataActions
+              entity="customers"
+              label="customers"
+              search={query ? new URLSearchParams({ q: query }).toString() : ''}
+              canImport={canImport}
+              columns={importColumns('customers')}
+            />
+            <LinkButton href="/customers/new" size="lg">
+              <UserPlus />
+              New customer
+            </LinkButton>
+          </>
         }
       />
 

@@ -52,7 +52,12 @@ function supplierData(input: z.infer<typeof supplierSchema>) {
   };
 }
 
-async function assertNameFree(organizationId: string, name: string, exceptId?: string, client: Prisma.TransactionClient = prisma) {
+async function assertNameFree(
+  organizationId: string,
+  name: string,
+  exceptId?: string,
+  client: Prisma.TransactionClient = prisma,
+) {
   const clash = await client.supplier.findFirst({
     where: {
       organizationId,
@@ -64,10 +69,15 @@ async function assertNameFree(organizationId: string, name: string, exceptId?: s
   if (clash) throw new DomainError('A supplier with this name already exists.', 'name');
 }
 
-export async function createSupplier(user: AuthenticatedUser, rawInput: unknown) {
+export async function createSupplier(
+  user: AuthenticatedUser,
+  rawInput: unknown,
+  /** Join the caller's transaction (a bulk import) instead of opening one. */
+  client?: Prisma.TransactionClient,
+) {
   const input = parseInput(supplierSchema, rawInput);
   requirePermission(user, 'inventory.manage');
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     await claimRequestKey(tx, user, rawInput, 'supplier.create');
     await assertNameFree(user.organizationId, input.name, undefined, tx);
     const supplier = await tx.supplier.create({
@@ -83,7 +93,8 @@ export async function createSupplier(user: AuthenticatedUser, rawInput: unknown)
     });
     await settleRequestKey(tx, user, rawInput, supplier.id);
     return supplier;
-  });
+  };
+  return client ? run(client) : prisma.$transaction(run);
 }
 
 export async function updateSupplier(
