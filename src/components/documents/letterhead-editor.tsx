@@ -14,7 +14,6 @@ import {
   List,
   ListOrdered,
   Mail,
-  MapPin,
   Phone,
   Printer,
   Trash2,
@@ -26,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ConfirmAction } from '@/components/shared/confirm-action';
 import { formatDate } from '@/lib/format';
+import { cleanPastedHtml } from '@/lib/documents/letter-paste';
 import type { LetterheadDetails } from '@/lib/documents/letterhead';
 import { cn } from '@/lib/utils';
 
@@ -37,9 +37,10 @@ import { cn } from '@/lib/utils';
  * website and logo are kept in this browser (with the draft), so nothing
  * about the letterhead is written into the code.
  *
- * The body is a contentEditable area with a small toolbar. Pasted content
- * arrives as plain text, so formatting from other programs — and anything
- * that isn't text — never comes along.
+ * The body is a contentEditable area with a small toolbar. Text pasted from
+ * Word or a web page keeps its bold, italic, underline, headings and lists;
+ * everything else — fonts, colours, images, links, scripts — is dropped
+ * (see lib/documents/letter-paste.ts).
  */
 
 interface LocalExtras {
@@ -50,6 +51,9 @@ interface LocalExtras {
 }
 
 const EMPTY_EXTRAS: LocalExtras = { arabicName: '', website: '', logo: '' };
+/** A plain office typeface; each computer uses the first it has. */
+const LETTER_FONT = "Calibri, Carlito, 'Segoe UI', Arial, sans-serif";
+const ARABIC_FONT = "'Traditional Arabic', 'Segoe UI', 'Noto Naskh Arabic', serif";
 /** Large enough for a logo, small enough for browser storage. */
 const MAX_LOGO_BYTES = 300 * 1024;
 
@@ -76,6 +80,16 @@ const TOOLS: Tool[] = [
   { label: 'Insert today’s date', icon: CalendarDays, command: 'insertText', today: true },
   { label: 'Clear formatting', icon: Eraser, command: 'removeFormat' },
 ];
+
+/** The letterhead's double line: a heavy rule over a hairline. */
+function Rule({ className }: { className?: string }) {
+  return (
+    <div aria-hidden className={cn('flex flex-col gap-0.5', className)}>
+      <div className="h-0.75 bg-neutral-600" />
+      <div className="h-px bg-neutral-600" />
+    </div>
+  );
+}
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -138,7 +152,10 @@ export function LetterheadEditor({
 
   function onPaste(event: ClipboardEvent<HTMLDivElement>) {
     event.preventDefault();
-    format('insertText', event.clipboardData.getData('text/plain'));
+    const html = event.clipboardData.getData('text/html');
+    if (html) format('insertHTML', cleanPastedHtml(html));
+    else format('insertText', event.clipboardData.getData('text/plain'));
+    saveDraft();
   }
 
   function onLogo(event: ChangeEvent<HTMLInputElement>) {
@@ -266,67 +283,104 @@ export function LetterheadEditor({
         </div>
       </div>
 
-      {/* The A4 page — the only thing printed. */}
+      {/*
+       * The A4 page — the only thing printed.
+       *
+       * On screen it is one sheet. In print the header, footer and watermark
+       * are fixed to the page, so the browser repeats them on every page of a
+       * long letter; the table's header and footer rows are blank spacers the
+       * browser also repeats, keeping the text clear of them on each page.
+       * Sizes: header 38mm + 8mm gap, footer 28mm + 8mm gap.
+       */}
       <div className="overflow-x-auto pb-2">
         <article
-          className="letterhead-page relative mx-auto flex min-h-[297mm] w-[210mm] flex-col justify-between bg-white px-[20mm] pt-[15mm] pb-[20mm] text-black shadow-md ring-1 ring-black/5"
+          className="letterhead-page relative mx-auto flex min-h-[297mm] w-[210mm] flex-col bg-white px-[18mm] text-black shadow-md ring-1 ring-black/5 print:block print:min-h-0 print:w-auto print:shadow-none print:ring-0"
+          style={{ fontFamily: LETTER_FONT }}
           aria-label="Letter"
         >
-          {/* Watermark */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-[15%] top-1/2 -translate-y-1/2 text-center text-[32px] leading-tight font-black tracking-[2px] uppercase opacity-[0.07]"
+            className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 print:fixed"
           >
-            {details.legalName}
+            {extras.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a local data URL, not a remote image
+              <img src={extras.logo} alt="" className="w-[125mm] max-w-none opacity-[0.09]" />
+            ) : (
+              <p className="w-[150mm] text-center text-[34px] leading-tight font-black tracking-[2px] uppercase opacity-[0.07]">
+                {details.legalName}
+              </p>
+            )}
           </div>
 
-          <div className="relative flex flex-1 flex-col">
-            <header className="flex items-start justify-between gap-6 pb-2.5">
-              <div className="flex min-w-0 flex-col gap-1">
-                {extras.arabicName ? (
-                  <p
-                    dir="rtl"
-                    className="text-[18px] font-bold"
-                    style={{ fontFamily: "'Amiri', 'Traditional Arabic', 'Segoe UI', sans-serif" }}
-                  >
-                    {extras.arabicName}
-                  </p>
-                ) : null}
-                <p className="text-[14px] font-bold tracking-[0.5px] uppercase">
-                  {details.legalName}
+          <header className="relative flex h-[38mm] items-center gap-5 pt-[12mm] print:fixed print:inset-x-[18mm] print:top-0">
+            <div className="min-w-0 flex-1">
+              {extras.arabicName ? (
+                <p
+                  dir="rtl"
+                  className="w-fit text-[19px] leading-snug font-bold text-neutral-800"
+                  style={{ fontFamily: ARABIC_FONT }}
+                >
+                  {extras.arabicName}
                 </p>
-              </div>
-              {extras.logo ? (
-                // eslint-disable-next-line @next/next/no-img-element -- a local data URL, not a remote image
-                <img src={extras.logo} alt="" className="max-h-20 max-w-[45mm] object-contain" />
               ) : null}
-            </header>
+              <Rule className="mt-1.5" />
+              <p className="mt-2 text-[15px] tracking-[0.6px] text-neutral-700 uppercase">
+                {details.legalName}
+              </p>
+            </div>
+            {extras.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a local data URL, not a remote image
+              <img
+                src={extras.logo}
+                alt=""
+                className="max-h-[26mm] max-w-[48mm] shrink-0 object-contain"
+              />
+            ) : null}
+          </header>
 
-            <div
-              ref={bodyRef}
-              contentEditable
-              suppressContentEditableWarning
-              role="textbox"
-              aria-multiline
-              aria-label="Letter text"
-              data-placeholder="Type the letter here…"
-              onInput={saveDraft}
-              onBlur={saveDraft}
-              onPaste={onPaste}
-              className={cn(
-                'mt-[30px] mb-10 flex-1 text-[14px] leading-relaxed outline-none',
-                'empty:before:text-neutral-400 empty:before:content-[attr(data-placeholder)]',
-                '[&_h3]:mb-1 [&_h3]:text-[17px] [&_h3]:font-bold [&_h4]:font-bold',
-                '[&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:my-0.5',
-                '[&_p]:my-2 [&_div]:min-h-[1lh]',
-              )}
-            />
-          </div>
+          <table className="relative my-[8mm] w-full border-collapse print:my-0">
+            <thead className="hidden print:table-header-group">
+              <tr>
+                <td className="h-[46mm] p-0" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="p-0 align-top">
+                  <div
+                    ref={bodyRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    role="textbox"
+                    aria-multiline
+                    aria-label="Letter text"
+                    data-placeholder="Type or paste the letter here…"
+                    onInput={saveDraft}
+                    onBlur={saveDraft}
+                    onPaste={onPaste}
+                    className={cn(
+                      'min-h-[150mm] px-[6mm] text-[14.5px] leading-relaxed outline-none print:min-h-0',
+                      'empty:before:text-neutral-400 empty:before:content-[attr(data-placeholder)]',
+                      '[&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-[18px] [&_h3]:font-bold [&_h4]:font-bold',
+                      '[&_ol]:list-decimal [&_ol]:pl-7 [&_ul]:list-disc [&_ul]:pl-7 [&_li]:my-0.5',
+                      '[&_ol_ol]:list-[lower-alpha] [&_ul_ul]:list-[circle]',
+                      '[&_p]:my-2 [&_div]:min-h-lh [&_li]:break-inside-avoid',
+                    )}
+                  />
+                </td>
+              </tr>
+            </tbody>
+            <tfoot className="hidden print:table-footer-group">
+              <tr>
+                <td className="h-[36mm] p-0" />
+              </tr>
+            </tfoot>
+          </table>
 
-          <footer className="relative">
-            <div className="mb-3 h-[2px] border-t-2 border-b border-black" />
+          <footer className="relative mt-auto flex h-[28mm] flex-col justify-end pb-[10mm] print:fixed print:inset-x-[18mm] print:bottom-0">
+            <Rule />
             {contact.length ? (
-              <div className="mb-1.5 flex flex-wrap items-center justify-around gap-x-6 gap-y-1 text-[12px] font-bold">
+              <div className="mt-3 flex flex-wrap items-center justify-around gap-x-6 gap-y-1 text-[13px] text-neutral-800">
                 {contact.map(({ icon: Icon, value }) => (
                   <span key={value} className="flex items-center gap-1.5">
                     <Icon className="size-3.5" aria-hidden />
@@ -336,8 +390,7 @@ export function LetterheadEditor({
               </div>
             ) : null}
             {details.address ? (
-              <p className="flex items-center justify-center gap-1.5 text-center text-[11px] font-bold">
-                <MapPin className="size-3" aria-hidden />
+              <p className="mt-1 text-center text-[13px] font-semibold text-neutral-800">
                 {details.address}
               </p>
             ) : null}
