@@ -2,19 +2,24 @@ import Link from 'next/link';
 import { Building2, ChevronRight, Info, ShieldCheck } from 'lucide-react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { getOrganizationSettings } from '@/lib/organization/settings';
+import { listBranches } from '@/lib/organization/branches';
 import { formatDateTime } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { OrganizationForm } from '@/components/settings/organization-form';
 import { JobCardStyleForm } from '@/components/settings/job-card-style-form';
 import { MenusForm } from '@/components/settings/menus-form';
+import { BranchForm } from '@/components/settings/branch-form';
 
 export default async function SettingsPage() {
   const user = await requireUser();
   if (!hasPermission(user, 'accounting.view')) {
     return <AccessDenied what="the workshop's settings" />;
   }
-  const settings = await getOrganizationSettings(user);
+  const [settings, branches] = await Promise.all([
+    getOrganizationSettings(user),
+    listBranches(user),
+  ]);
   const canEdit = hasPermission(user, 'accounting.edit');
 
   return (
@@ -39,8 +44,31 @@ export default async function SettingsPage() {
       </Section>
 
       <Section
+        title={branches.length === 1 ? 'Branch' : 'Branches'}
+        description="Where the workshop works from. The name shows in the top bar and on stock and staff screens."
+      >
+        <Stack gap="base" className="max-w-3xl">
+          {branches.map((branch) => (
+            <Panel key={branch.id}>
+              {canEdit ? (
+                <BranchForm branch={branch} />
+              ) : (
+                <dl className="flex flex-col gap-1 text-sm">
+                  <dt className="text-xs font-medium text-muted-foreground">Branch</dt>
+                  <dd>
+                    {branch.name}
+                    {branch.address ? ` · ${branch.address}` : ''}
+                  </dd>
+                </dl>
+              )}
+            </Panel>
+          ))}
+        </Stack>
+      </Section>
+
+      <Section
         title="Job card"
-        description="How much a work order asks for. Choose the minimal job card while one person does everything; switch to standard once there is a team to share the steps."
+        description="How much a job card asks for. Choose the minimal job card while one person does everything; switch to standard once there is a team to share the steps."
       >
         <div className="max-w-3xl">
           <JobCardStyleForm detailed={settings.detailedJobCards} canEdit={canEdit} />

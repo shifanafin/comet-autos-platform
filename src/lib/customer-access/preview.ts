@@ -24,7 +24,7 @@ export interface LinkPreview {
 
 export async function quotePreview(rawToken: string): Promise<LinkPreview> {
   const access = await getCustomerAccess(rawToken, 'ESTIMATE');
-  const workshop = access.state === 'invalid' ? 'Comet Autos' : access.organization.name;
+  const workshop = access.state === 'invalid' ? 'Your workshop' : access.organization.name;
   const quote = access.state === 'open' ? await loadCustomerQuote(rawToken) : null;
   if (!quote) {
     return {
@@ -54,7 +54,7 @@ export async function quotePreview(rawToken: string): Promise<LinkPreview> {
 
 export async function invoicePreview(rawToken: string): Promise<LinkPreview> {
   const access = await getCustomerAccess(rawToken, 'INVOICE');
-  const workshop = access.state === 'invalid' ? 'Comet Autos' : access.organization.name;
+  const workshop = access.state === 'invalid' ? 'Your workshop' : access.organization.name;
   const data =
     access.state === 'open'
       ? await getInvoiceDocumentForLink(access.organizationId, access.resourceId)

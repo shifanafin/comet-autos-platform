@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ClipboardList, FileText, Home, Menu, Receipt, type LucideIcon } from 'lucide-react';
 import { MobileNav } from '@/components/shell/mobile-nav';
+import type { Brand } from '@/lib/brand/brand';
 import { cn } from '@/lib/utils';
 
 interface Tab {
@@ -21,7 +22,7 @@ interface Tab {
  */
 const TABS: Tab[] = [
   { label: 'Home', href: '/', icon: Home },
-  { label: 'Work orders', href: '/job-cards', icon: ClipboardList, requires: '/job-cards' },
+  { label: 'Job cards', href: '/job-cards', icon: ClipboardList, requires: '/job-cards' },
   { label: 'Quotes', href: '/quotations', icon: FileText, requires: '/quotations' },
   { label: 'Invoices', href: '/finance/invoices', icon: Receipt, requires: '/finance/invoices' },
 ];
@@ -32,7 +33,13 @@ const TABS: Tab[] = [
  * everything else behind "More". Hidden from tablets in landscape and
  * desktops upward, where the sidebar takes over.
  */
-export function BottomNav({ allowedHrefs }: { allowedHrefs: string[] }) {
+export function BottomNav({
+  allowedHrefs,
+  brand,
+}: {
+  allowedHrefs: string[];
+  brand: Pick<Brand, 'shortName' | 'initial'>;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const allowed = new Set(allowedHrefs);
@@ -78,7 +85,7 @@ export function BottomNav({ allowedHrefs }: { allowedHrefs: string[] }) {
           </button>
         </div>
       </nav>
-      <MobileNav allowedHrefs={allowedHrefs} open={open} onOpenChange={setOpen} />
+      <MobileNav allowedHrefs={allowedHrefs} brand={brand} open={open} onOpenChange={setOpen} />
     </>
   );
 }

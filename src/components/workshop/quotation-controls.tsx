@@ -44,7 +44,7 @@ function useSimpleAction() {
 
 export function CreateEstimateButton({
   jobCardId,
-  /** Full-width, for a card on the work order screen. */
+  /** Full-width, for a card on the job card screen. */
   compact = false,
 }: {
   jobCardId: string;

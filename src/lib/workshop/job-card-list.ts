@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
 
 /*
- * The work-order list, in one place, so the screen and its export always
+ * The job-card list, in one place, so the screen and its export always
  * show the same rows for the same search and status.
  */
 
@@ -30,7 +30,7 @@ export function jobCardWhere(user: AuthenticatedUser, filters: JobCardFilters) {
   };
 }
 
-/** Work orders, newest first. `skip` pages the screen; `limit` bounds an export. */
+/** Job cards, newest first. `skip` pages the screen; `limit` bounds an export. */
 export async function listJobCards(
   user: AuthenticatedUser,
   filters: JobCardFilters,

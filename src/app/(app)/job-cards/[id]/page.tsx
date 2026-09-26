@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
-import { formatCalendarDate, formatDateTime, formatMoney } from '@/lib/format';
+import { formatCalendarDate, formatDateTime, formatKm, formatMoney } from '@/lib/format';
 import { getJobWorkspace, getNextAction } from '@/lib/workshop/workspace';
 import { getSecondaryNextStatuses } from '@/lib/workshop/job-status';
 import { employeeName, listWorkshopEmployees } from '@/lib/workshop/assignment';
@@ -30,6 +30,7 @@ import { JobSignatures } from '@/components/media/job-signatures';
 import { listJobPhotos, listJobSignatures } from '@/lib/media/photos';
 import { defaultMediaStage } from '@/lib/media/stages';
 import { cn } from '@/lib/utils';
+import { JobDetailsEditor } from '@/components/workshop/job-details-editor';
 import { getRepairWorkspace } from '@/lib/workshop/repair';
 import type { WorkflowStatus } from '@/lib/workshop/stages';
 import { RepairSections } from './repair/repair-sections';
@@ -143,7 +144,7 @@ export default async function JobCardWorkspacePage({
 
       {/*
        * The detailed lifecycle — technician, inspection, diagnosis, repair,
-       * quality check, delivery. Available on every work order, required on
+       * quality check, delivery. Available on every job card, required on
        * none: the documents above work at any stage.
        */}
       <Section
@@ -333,7 +334,7 @@ export default async function JobCardWorkspacePage({
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       Labour and parts priced with VAT, sent to the customer to approve. Inspection
-                      and diagnosis are optional — a work order can be quoted straight away.
+                      and diagnosis are optional — a job card can be quoted straight away.
                     </p>
                   )}
                 </ProgressRow>
@@ -366,7 +367,7 @@ export default async function JobCardWorkspacePage({
                     <p className="text-sm text-muted-foreground">
                       {documents.invoice
                         ? `Invoiced as ${documents.invoice.number}.`
-                        : 'The work order can be invoiced at any stage from the documents above, or after the quality check from the repair records.'}
+                        : 'The job card can be invoiced at any stage from the documents above, or after the quality check from the repair records.'}
                     </p>
                   </ProgressRow>
                 ) : null}
@@ -416,27 +417,34 @@ export default async function JobCardWorkspacePage({
 
           <Section title="Visit">
             <Panel>
-              <dl className="flex flex-col gap-4 text-sm">
-                <DetailRow label="Customer complaint">
-                  <span className="whitespace-pre-wrap">{jobCard.customerComplaint ?? '—'}</span>
-                </DetailRow>
-                <DetailRow label="Mileage at check-in">
-                  {jobCard.odometerReading !== null
-                    ? `${jobCard.odometerReading.toLocaleString('en-AE')} km`
-                    : '—'}
-                </DetailRow>
-                <DetailRow label="Checked in">
-                  {formatDateTime(jobCard.openedAt)} by {jobCard.createdBy.fullName}
-                </DetailRow>
-                <DetailRow label="Arrived as">
-                  {jobCard.appointment
-                    ? `Appointment (${formatDateTime(jobCard.appointment.scheduledAt)})`
-                    : 'Walk-in'}
-                </DetailRow>
-                {jobCard.closedAt ? (
-                  <DetailRow label="Closed">{formatDateTime(jobCard.closedAt)}</DetailRow>
-                ) : null}
-              </dl>
+              <JobDetailsEditor
+                jobCardId={jobCard.id}
+                complaint={jobCard.customerComplaint}
+                mileage={jobCard.odometerReading}
+                canEdit={canEdit && !isFinished}
+              >
+                <dl className="flex flex-col gap-4 text-sm">
+                  <DetailRow label="Customer complaint">
+                    <span className="whitespace-pre-wrap">{jobCard.customerComplaint ?? '—'}</span>
+                  </DetailRow>
+                  <DetailRow label="Mileage at check-in">
+                    {jobCard.odometerReading !== null
+                      ? `${formatKm(jobCard.odometerReading)}`
+                      : '—'}
+                  </DetailRow>
+                  <DetailRow label="Checked in">
+                    {formatDateTime(jobCard.openedAt)} by {jobCard.createdBy.fullName}
+                  </DetailRow>
+                  <DetailRow label="Arrived as">
+                    {jobCard.appointment
+                      ? `Appointment (${formatDateTime(jobCard.appointment.scheduledAt)})`
+                      : 'Walk-in'}
+                  </DetailRow>
+                  {jobCard.closedAt ? (
+                    <DetailRow label="Closed">{formatDateTime(jobCard.closedAt)}</DetailRow>
+                  ) : null}
+                </dl>
+              </JobDetailsEditor>
             </Panel>
           </Section>
 
@@ -578,11 +586,11 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/** Stages a work order can be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
+/** Stages a job card can be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
 const QUOTABLE: WorkflowStatus[] = ['ARRIVED', 'INSPECTION', 'DIAGNOSIS'];
 
 /**
- * The work order's documents as three cards: its quotation, its invoice and
+ * The job card's documents as three cards: its quotation, its invoice and
  * its photos. Each one offers the next thing to do with it, whatever stage
  * the detailed workflow below has or hasn't reached.
  */
@@ -641,7 +649,7 @@ function WorkOrderDocuments({
         ) : canQuote && QUOTABLE.includes(status) ? (
           <CreateEstimateButton jobCardId={jobCardId} compact />
         ) : (
-          <p className="text-sm text-muted-foreground">No quotation on this work order.</p>
+          <p className="text-sm text-muted-foreground">No quotation on this job card.</p>
         )}
       </div>
 

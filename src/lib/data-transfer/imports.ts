@@ -20,7 +20,7 @@ import { csvTemplate, field, parseCsv } from '@/lib/data-transfer/csv';
  * if any row is wrong, nothing is written and the report says which row and
  * why. A row that already exists is reported as skipped, not duplicated.
  *
- * Documents (quotations, invoices, payments, work orders) are deliberately
+ * Documents (quotations, invoices, payments, job cards) are deliberately
  * not importable: their numbering, VAT and audit trail have to come from the
  * system that issued them.
  */
@@ -80,7 +80,7 @@ export const IMPORTS: Record<string, ImportDefinition> = {
       { header: 'Name', required: true, example: 'Ahmed Al Qasimi' },
       { header: 'Mobile', required: true, example: '050 123 4567' },
       { header: 'Email', example: 'ahmed@example.com' },
-      { header: 'Address', example: 'Al Qusais, Dubai' },
+      { header: 'Address', example: 'Industrial Area 1, Dubai' },
       { header: 'TRN', example: '100000000000003', hint: 'Tax registration number' },
     ],
     async run(tx, user, records, outcome) {

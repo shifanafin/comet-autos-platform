@@ -10,7 +10,7 @@ import { DomainError, NotFoundError } from '@/lib/errors';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { parseInput } from '@/lib/form-data';
 import { emptyToNull } from '@/lib/normalize';
-import { milliToString, signedToMilli, toMilli } from '@/lib/money';
+import { formatMilli, milliToString, signedToMilli, toMilli } from '@/lib/money';
 import { ADJUSTMENT_REASONS, MOVEMENT_LABEL } from '@/lib/inventory/labels';
 import {
   getStockByPart,
@@ -256,6 +256,94 @@ export async function updatePart(user: AuthenticatedUser, partId: string, rawInp
       });
     }
     return part;
+  });
+}
+
+/**
+ * Deletes a part from the catalogue.
+ *
+ * A part that was never used — no quotation, purchase, job or stock
+ * movement names it — is removed outright; the audit log keeps what it was.
+ * A part with history is archived instead (inactive: out of the pickers,
+ * still on every document that used it, and back with Edit → Active). It is
+ * refused while stock is still on hand, which would vanish from the count,
+ * or while an open purchase is waiting for it.
+ */
+export async function deletePart(
+  user: AuthenticatedUser,
+  partId: string,
+): Promise<{ outcome: 'deleted' | 'archived' }> {
+  requirePermission(user, 'inventory.manage');
+
+  return prisma.$transaction(async (tx) => {
+    await lockPart(tx, user.organizationId, partId);
+    const part = await tx.part.findUniqueOrThrow({
+      where: { id: partId },
+      include: {
+        _count: {
+          select: {
+            estimateItems: true,
+            purchaseItems: true,
+            partUsages: true,
+            inventoryTransactions: true,
+          },
+        },
+      },
+    });
+    if (!part.isActive) throw new DomainError(`${part.name} is already deleted.`);
+
+    const used = Object.values(part._count).some((count) => count > 0);
+    if (!used) {
+      await tx.part.delete({ where: { id: part.id } });
+      await writeAuditLog(tx, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'part.deleted',
+        entityType: 'Part',
+        entityId: part.id,
+        beforeData: { sku: part.sku, name: part.name, category: part.category },
+      });
+      return { outcome: 'deleted' as const };
+    }
+
+    // Every branch counts: stock anywhere would disappear from sight.
+    const stock = await tx.inventoryTransaction.aggregate({
+      where: { organizationId: user.organizationId, partId: part.id },
+      _sum: { quantity: true },
+    });
+    const onHand = signedToMilli(stock._sum.quantity);
+    if (onHand !== 0) {
+      throw new DomainError(
+        `${part.name} still has ${formatMilli(onHand)} ${part.unitOfMeasure} in stock. Adjust it to zero first, then delete.`,
+      );
+    }
+    const openPurchase = await tx.purchaseItem.findFirst({
+      where: {
+        partId: part.id,
+        purchase: {
+          organizationId: user.organizationId,
+          status: { in: ['DRAFT', 'ORDERED', 'PARTIALLY_RECEIVED'] },
+        },
+      },
+      select: { purchase: { select: { purchaseNumber: true } } },
+    });
+    if (openPurchase) {
+      throw new DomainError(
+        `${part.name} is on open purchase ${openPurchase.purchase.purchaseNumber}. Receive or cancel it first.`,
+      );
+    }
+
+    await tx.part.update({ where: { id: part.id }, data: { isActive: false } });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'part.archived',
+      entityType: 'Part',
+      entityId: part.id,
+      beforeData: { isActive: true },
+      afterData: { isActive: false },
+    });
+    return { outcome: 'archived' as const };
   });
 }
 

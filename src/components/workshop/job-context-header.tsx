@@ -46,7 +46,7 @@ export function JobContextHeader({
             href="/job-cards"
             className="inline-flex min-h-9 items-center hover:text-foreground md:min-h-0"
           >
-            Work Orders
+            Job Cards
           </Link>
           <ChevronRight className="size-3.5" />
           {section ? (

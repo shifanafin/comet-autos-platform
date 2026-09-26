@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ReverseMovementButton } from '@/components/inventory/stock-actions';
+import { SelectCell, SelectHead } from '@/components/shared/record-selection';
 import { MOVEMENT_LABEL } from '@/lib/inventory/labels';
 import { formatDateTime } from '@/lib/format';
 import { formatMilli } from '@/lib/money';
@@ -91,18 +92,27 @@ export function MovementTable({
   showBalance = false,
   unit,
   canReverse = false,
+  selectable = false,
 }: {
   movements: MovementRow[];
   showPart?: boolean;
   showBalance?: boolean;
   unit?: string;
   canReverse?: boolean;
+  /** Tick boxes for reversing several at once; needs a surrounding <RecordSelection>. */
+  selectable?: boolean;
 }) {
+  const labelOf = (movement: MovementRow) =>
+    `${MOVEMENT_LABEL[movement.transactionType]}${movement.part ? ` · ${movement.part.name}` : ''}`;
+  const reversibleRows = movements
+    .filter((movement) => movement.reversible)
+    .map((movement) => ({ id: movement.id, label: labelOf(movement) }));
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader className="bg-muted/40">
           <TableRow className="hover:bg-transparent">
+            {selectable ? <SelectHead rows={reversibleRows} /> : null}
             <TableHead>When</TableHead>
             {showPart ? <TableHead>Part</TableHead> : null}
             <TableHead>Movement</TableHead>
@@ -120,6 +130,13 @@ export function MovementTable({
               key={movement.id}
               className={cn(movement.reversedBy && 'text-muted-foreground')}
             >
+              {selectable ? (
+                <SelectCell
+                  id={movement.id}
+                  label={labelOf(movement)}
+                  removable={Boolean(movement.reversible)}
+                />
+              ) : null}
               <TableCell className="whitespace-nowrap tabular-nums">
                 {formatDateTime(movement.createdAt)}
               </TableCell>

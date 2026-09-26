@@ -179,7 +179,7 @@ describe('customer documents and sharing', () => {
     const document = await getQuotationDocument(a.owner, estimateId);
     const estimate = await prisma.estimate.findUniqueOrThrow({ where: { id: estimateId } });
     assert.equal(document.number, estimate.estimateNumber);
-    assert.equal(document.status.label, 'Awaiting approval');
+    assert.equal(document.status?.label, 'Awaiting approval');
     // The workshop's sheet: one numbered list, each line marked parts or labour.
     assert.deepEqual(
       document.sections.map((s) => s.title),
@@ -333,7 +333,8 @@ describe('customer documents and sharing', () => {
     const document = await getInvoiceDocument(a.owner, invoiceId);
     const staffView = (await getJobInvoice(a.owner, jobCardId))!;
     assert.equal(document.number, invoice.invoiceNumber);
-    assert.equal(document.status.label, 'Partially paid');
+    // The customer's invoice carries no paid/unpaid badge; its totals say it.
+    assert.equal(document.status, null);
     assert.deepEqual(
       document.sections.map((s) => s.title),
       [''],
@@ -368,10 +369,10 @@ describe('customer documents and sharing', () => {
       'Balance due',
       'AED 597.75',
       'TRN 100200300400003',
-      'PARTIALLY PAID',
     ]) {
       assert.ok(pdf.includes(expected), `invoice PDF shows ${expected}`);
     }
+    assert.ok(!pdf.includes('PARTIALLY PAID'), 'the invoice PDF prints no payment badge');
 
     secondPaymentId = (
       await recordPayment(a.owner, jobCardId, {
@@ -387,10 +388,10 @@ describe('customer documents and sharing', () => {
     assert.equal(details(first)['Balance before this payment'], 'AED 897.75');
     assert.equal(details(first)['Remaining balance'], 'AED 597.75');
     assert.equal(details(first)['Reference'], 'SLIP-9');
-    assert.equal(first.status.label, 'Partially paid');
+    assert.equal(first.status?.label, 'Partially paid');
     assert.equal(details(second)['Balance before this payment'], 'AED 597.75');
     assert.equal(details(second)['Remaining balance'], 'AED 0.00');
-    assert.equal(second.status.label, 'Paid in full');
+    assert.equal(second.status?.label, 'Paid in full');
     assert.match(first.number, /^RCT-\d{6}$/);
     const receiptPdf = renderDocumentPdf(second);
     assertValidPdf(receiptPdf);
@@ -403,7 +404,7 @@ describe('customer documents and sharing', () => {
     ]) {
       assert.ok(pdfText(receiptPdf).includes(expected), `receipt PDF shows ${expected}`);
     }
-    assert.equal((await getInvoiceDocument(a.owner, invoiceId)).status.label, 'Paid');
+    assert.equal((await getInvoiceDocument(a.owner, invoiceId)).status, null);
   });
 
   test('invoice and receipt sharing; the customer invoice link shows only that invoice and its receipts', async () => {

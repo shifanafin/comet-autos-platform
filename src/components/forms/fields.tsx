@@ -28,7 +28,11 @@ export function Field({
     <div className={cn('flex min-w-0 flex-col gap-2', className)}>
       <Label htmlFor={htmlFor}>
         {label}
-        {required ? <span className="text-destructive" aria-hidden>*</span> : null}
+        {required ? (
+          <span className="text-destructive" aria-hidden>
+            *
+          </span>
+        ) : null}
       </Label>
       {children}
       {error ? (
@@ -42,7 +46,12 @@ export function Field({
   );
 }
 
+/**
+ * A labelled input. Its id defaults to its name; pass `id` when the same
+ * field name appears twice on a page (two forms, or a form in a dialog).
+ */
 export function TextField({
+  id,
   label,
   name,
   error,
@@ -56,14 +65,22 @@ export function TextField({
   error?: string;
   hint?: ReactNode;
 }) {
+  const inputId = id ?? name;
   return (
-    <Field label={label} htmlFor={name} error={error} hint={hint} required={required} className={className}>
+    <Field
+      label={label}
+      htmlFor={inputId}
+      error={error}
+      hint={hint}
+      required={required}
+      className={className}
+    >
       <Input
-        id={name}
+        id={inputId}
         name={name}
         required={required}
         aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${name}-error` : undefined}
+        aria-describedby={error ? `${inputId}-error` : undefined}
         {...inputProps}
       />
     </Field>
@@ -71,10 +88,14 @@ export function TextField({
 }
 
 export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
-  return <textarea className={cn(CONTROL, 'min-h-24 py-2 leading-relaxed', className)} {...props} />;
+  return (
+    <textarea className={cn(CONTROL, 'min-h-24 py-2 leading-relaxed', className)} {...props} />
+  );
 }
 
+/** A labelled textarea. Like TextField, its id defaults to its name. */
 export function TextareaField({
+  id,
   label,
   name,
   error,
@@ -82,10 +103,30 @@ export function TextareaField({
   required,
   className,
   ...props
-}: Omit<ComponentProps<'textarea'>, 'name'> & { label: ReactNode; name: string; error?: string; hint?: ReactNode }) {
+}: Omit<ComponentProps<'textarea'>, 'name'> & {
+  label: ReactNode;
+  name: string;
+  error?: string;
+  hint?: ReactNode;
+}) {
+  const inputId = id ?? name;
   return (
-    <Field label={label} htmlFor={name} error={error} hint={hint} required={required} className={className}>
-      <Textarea id={name} name={name} required={required} aria-invalid={error ? true : undefined} {...props} />
+    <Field
+      label={label}
+      htmlFor={inputId}
+      error={error}
+      hint={hint}
+      required={required}
+      className={className}
+    >
+      <Textarea
+        id={inputId}
+        name={name}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${inputId}-error` : undefined}
+        {...props}
+      />
     </Field>
   );
 }
@@ -98,7 +139,10 @@ export function NativeSelect({ className, ...props }: ComponentProps<'select'>) 
 export function FormError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+    <div
+      role="alert"
+      className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+    >
       {message}
     </div>
   );

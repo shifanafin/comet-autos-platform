@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ClipboardList, Plus } from 'lucide-react';
-import { requireUser } from '@/lib/auth/authorize';
+import { hasPermission, requireUser } from '@/lib/auth/authorize';
+import { getAllowedNextStatuses } from '@/lib/workshop/job-status';
 import { usesDetailedJobCards } from '@/lib/organization/settings';
 import { countJobCards, listJobCards } from '@/lib/workshop/job-card-list';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
@@ -18,6 +19,17 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { JobCardFilters } from './job-card-filters';
+import {
+  RecordSelection,
+  RemoveCell,
+  RemoveHead,
+  RowCheckbox,
+  RowRemoveButton,
+  SelectCell,
+  SelectHead,
+} from '@/components/shared/record-selection';
+import { REMOVAL } from '@/lib/records/removal';
+import { WORKSHOP_LOCALE } from '@/lib/format';
 
 const PAGE_SIZE = 25;
 
@@ -39,6 +51,19 @@ export default async function JobCardsPage({
     usesDetailedJobCards(user),
   ]);
 
+  const canRemove = hasPermission(
+    user,
+    REMOVAL['job-cards'].permission,
+    user.primaryBranchId ? { branchId: user.primaryBranchId } : undefined,
+  );
+  // Cancel is offered only where the job card could be cancelled today —
+  // not once it is invoiced or handed over. The server checks again.
+  const removable = (jobCard: (typeof jobCards)[number]) =>
+    getAllowedNextStatuses(jobCard.status).includes('CANCELLED');
+  const removableRows = jobCards
+    .filter(removable)
+    .map((jobCard) => ({ id: jobCard.id, label: jobCard.jobNumber }));
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   // Paging keeps the filters the user set, rather than dropping them on page 2.
   const pageLink = (target: number) =>
@@ -53,17 +78,17 @@ export default async function JobCardsPage({
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
         eyebrow="Workshop"
-        title="Work Orders"
+        title="Job Cards"
         description={
           isFiltered
-            ? `Showing ${total} of ${unfilteredTotal} work orders.`
-            : `${unfilteredTotal} work order${unfilteredTotal === 1 ? '' : 's'} in total.`
+            ? `Showing ${total} of ${unfilteredTotal} job cards.`
+            : `${unfilteredTotal} job card${unfilteredTotal === 1 ? '' : 's'} in total.`
         }
         actions={
           <>
             <ListDataActions
               entity="work-orders"
-              label="work orders"
+              label="job cards"
               search={new URLSearchParams({
                 ...(query ? { q: query } : {}),
                 ...(status ? { status } : {}),
@@ -76,7 +101,7 @@ export default async function JobCardsPage({
               render={<Link href="/check-in" />}
             >
               <Plus />
-              New work order
+              New job card
             </Button>
           </>
         }
@@ -89,32 +114,39 @@ export default async function JobCardsPage({
           isFiltered ? (
             <EmptyState
               icon={ClipboardList}
-              title="No work orders match your filters"
+              title="No job cards match your filters"
               description="Try a different search or clear the status filter."
             />
           ) : (
             <EmptyState
               icon={ClipboardList}
-              title="No work orders yet"
+              title="No job cards yet"
               description="Open one for a customer's vehicle — just who, which car, and what needs doing."
               action={
                 <Button nativeButton={false} render={<Link href="/check-in" />}>
                   <Plus />
-                  New work order
+                  New job card
                 </Button>
               }
             />
           )
         ) : (
-          <>
+          <RecordSelection entity="job-cards" enabled={canRemove}>
             <Panel padding="none" className="overflow-hidden">
               {/* Phone: one tappable card per job — plate first, then who and where it stands. */}
               <ul className="divide-y divide-border md:hidden">
                 {jobCards.map((jobCard) => (
-                  <li key={jobCard.id}>
+                  <li key={jobCard.id} className="flex items-start">
+                    {removable(jobCard) ? (
+                      <RowCheckbox
+                        id={jobCard.id}
+                        label={jobCard.jobNumber}
+                        className="mt-5 ml-4"
+                      />
+                    ) : null}
                     <Link
                       href={`/job-cards/${jobCard.id}`}
-                      className="flex flex-col gap-2 px-4 py-4 active:bg-muted"
+                      className="flex min-w-0 flex-1 flex-col gap-2 px-4 py-4 active:bg-muted"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <VehiclePlate
@@ -132,13 +164,20 @@ export default async function JobCardsPage({
                           {jobCard.customer.name}
                         </span>
                         <span className="tabular-nums">
-                          {jobCard.openedAt.toLocaleString('en-AE', {
+                          {jobCard.openedAt.toLocaleString(WORKSHOP_LOCALE, {
                             dateStyle: 'medium',
                             timeStyle: 'short',
                           })}
                         </span>
                       </span>
                     </Link>
+                    {removable(jobCard) ? (
+                      <RowRemoveButton
+                        id={jobCard.id}
+                        label={jobCard.jobNumber}
+                        className="mt-auto mr-2 mb-2"
+                      />
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -146,16 +185,23 @@ export default async function JobCardsPage({
                 <Table>
                   <TableHeader className="bg-muted/40">
                     <TableRow className="hover:bg-transparent">
+                      <SelectHead rows={removableRows} />
                       <TableHead>Job #</TableHead>
                       <TableHead>Vehicle</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Opened</TableHead>
+                      <RemoveHead />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {jobCards.map((jobCard) => (
                       <TableRow key={jobCard.id} className="relative cursor-pointer">
+                        <SelectCell
+                          id={jobCard.id}
+                          label={jobCard.jobNumber}
+                          removable={removable(jobCard)}
+                        />
                         <TableCell>
                           <Link
                             href={`/job-cards/${jobCard.id}`}
@@ -180,11 +226,16 @@ export default async function JobCardsPage({
                           <JobStatusBadge status={jobCard.status} />
                         </TableCell>
                         <TableCell className="text-muted-foreground tabular-nums">
-                          {jobCard.openedAt.toLocaleString('en-AE', {
+                          {jobCard.openedAt.toLocaleString(WORKSHOP_LOCALE, {
                             dateStyle: 'medium',
                             timeStyle: 'short',
                           })}
                         </TableCell>
+                        <RemoveCell
+                          id={jobCard.id}
+                          label={jobCard.jobNumber}
+                          removable={removable(jobCard)}
+                        />
                       </TableRow>
                     ))}
                   </TableBody>
@@ -209,7 +260,7 @@ export default async function JobCardsPage({
                 ) : null}
               </div>
             ) : null}
-          </>
+          </RecordSelection>
         )}
       </Stack>
     </Stack>

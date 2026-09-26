@@ -10,7 +10,7 @@ import { PAYMENT_METHOD_LABEL } from '@/lib/documents/build';
  * recalculated differently here.
  */
 
-export type InvoiceFilter = '' | 'unpaid' | 'paid';
+export type InvoiceFilter = '' | 'unpaid' | 'paid' | 'void';
 
 export async function listInvoices(
   user: AuthenticatedUser,
@@ -21,7 +21,7 @@ export async function listInvoices(
   requirePermission(user, 'invoice.view');
   const q = filters.q?.trim();
   const status = (
-    ['unpaid', 'paid'].includes(filters.status ?? '') ? filters.status : ''
+    ['unpaid', 'paid', 'void'].includes(filters.status ?? '') ? filters.status : ''
   ) as InvoiceFilter;
   const invoices = await prisma.invoice.findMany({
     where: {
@@ -31,7 +31,9 @@ export async function listInvoices(
           ? { in: ['ISSUED', 'PARTIALLY_PAID'] }
           : status === 'paid'
             ? 'PAID'
-            : { notIn: ['DRAFT', 'VOID', 'CANCELLED'] },
+            : status === 'void'
+              ? 'VOID'
+              : { notIn: ['DRAFT', 'VOID', 'CANCELLED'] },
       ...(q
         ? {
             OR: [
@@ -39,7 +41,7 @@ export async function listInvoices(
               { customerName: { contains: q, mode: 'insensitive' } },
               { customer: { name: { contains: q, mode: 'insensitive' } } },
               { customer: { phone: { contains: q, mode: 'insensitive' } } },
-              // The invoice's own vehicle, so one raised without a work order is found too.
+              // The invoice's own vehicle, so one raised without a job card is found too.
               { vehicle: { plateNumber: { contains: q, mode: 'insensitive' } } },
               { jobCard: { jobNumber: { contains: q, mode: 'insensitive' } } },
             ],
@@ -107,8 +109,11 @@ export async function listPayments(user: AuthenticatedUser, filters: { q?: strin
       reversalOfPaymentId: true,
       receivedAt: true,
       receivedBy: { select: { fullName: true } },
+      // Whether it can still be reversed: not already, and not on a void invoice.
+      reversals: { select: { id: true } },
       invoice: {
         select: {
+          status: true,
           invoiceNumber: true,
           customerName: true,
           jobCard: { select: { id: true, jobNumber: true } },

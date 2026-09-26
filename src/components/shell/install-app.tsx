@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 
 /*
- * Installing Comet Autos as an app on a phone, tablet or computer.
+ * Installing the app on a phone, tablet or computer.
  *
  * Android and desktop Chrome/Edge offer an install prompt the page can
  * trigger; iPhone and iPad have none, so there the button explains the two
@@ -68,7 +68,7 @@ function installMode(): InstallMode {
 }
 
 /** The "Install app" button for the top bar. Renders nothing where there is nothing to install. */
-export function InstallAppButton() {
+export function InstallAppButton({ appName }: { appName: string }) {
   const mode = useSyncExternalStore(subscribe, installMode, () => 'none' as const);
   const [iosHelp, setIosHelp] = useState(false);
   if (mode === 'none') return null;
@@ -89,7 +89,7 @@ export function InstallAppButton() {
       <button
         type="button"
         onClick={install}
-        aria-label="Install the Comet Autos app"
+        aria-label={`Install the ${appName} app`}
         className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted sm:px-3.5"
       >
         <Download className="size-4 text-primary" />
@@ -99,7 +99,7 @@ export function InstallAppButton() {
       <Dialog open={iosHelp} onOpenChange={setIosHelp}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Install Comet Autos</DialogTitle>
+            <DialogTitle>Install {appName}</DialogTitle>
             <DialogDescription>
               Add it to your Home Screen and it opens full-screen, like any other app.
             </DialogDescription>

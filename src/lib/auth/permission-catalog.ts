@@ -211,7 +211,7 @@ export const PERMISSION_MODULES: PermissionModule[] = [
   {
     key: 'user',
     label: 'Access management',
-    covers: 'Who can sign in to Comet Autos, and what they are allowed to do.',
+    covers: 'Who can sign in, and what they are allowed to do.',
     permissions: [
       {
         code: 'user.view',

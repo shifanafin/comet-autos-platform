@@ -25,7 +25,9 @@ export async function findMatchingIds(
   const phone = core.length >= 4 ? likePattern(core) : null;
   const plate = likePattern(compactPlate(query));
 
-  const rows = await prisma.$queryRaw<{ customer_id: string; vehicle_id: string | null }[]>(Prisma.sql`
+  const rows = await prisma.$queryRaw<
+    { customer_id: string; vehicle_id: string | null }[]
+  >(Prisma.sql`
     SELECT c.id AS customer_id, v.id AS vehicle_id
     FROM customers c
     LEFT JOIN vehicles v
@@ -71,14 +73,16 @@ export async function vehiclePlateExists(
   organizationId: string,
   plateNumber: string,
   excludeVehicleId?: string,
-): Promise<boolean> {
+): Promise<false | 'active' | 'deleted'> {
   const compact = compactPlate(plateNumber);
-  const rows = await client.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT id FROM vehicles
+  const rows = await client.$queryRaw<{ id: string; is_active: boolean }[]>(Prisma.sql`
+    SELECT id, is_active FROM vehicles
     WHERE organization_id = ${organizationId}::uuid
       AND replace(upper(plate_number), ' ', '') = ${compact}
       AND (${excludeVehicleId ?? null}::uuid IS NULL OR id <> ${excludeVehicleId ?? null}::uuid)
+    ORDER BY is_active DESC
     LIMIT 1
   `);
-  return rows.length > 0;
+  if (rows.length === 0) return false;
+  return rows[0].is_active ? 'active' : 'deleted';
 }

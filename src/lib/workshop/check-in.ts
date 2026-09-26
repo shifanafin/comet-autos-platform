@@ -11,6 +11,7 @@ import { parseInput } from '@/lib/form-data';
 import { createCustomer, type CustomerInput } from '@/lib/customers/service';
 import { createVehicle, MAX_MILEAGE, type VehicleInput } from '@/lib/vehicles/service';
 import { OPEN_APPOINTMENT_STATUSES } from '@/lib/appointments/service';
+import { formatKm } from '@/lib/format';
 
 /**
  * A job is "in the workshop" until it is delivered or cancelled. Legacy
@@ -39,9 +40,9 @@ export const OPEN_JOB_STATUSES: JobCardStatus[] = [
 ];
 
 /**
- * What a work order needs to exist: who, which vehicle, and what they want
+ * What a job card needs to exist: who, which vehicle, and what they want
  * done. Mileage is optional — the odometer is often not to hand when the
- * car is dropped off, and refusing to open the work order over it helps
+ * car is dropped off, and refusing to open the job card over it helps
  * nobody. When it is given it is still checked as strictly as before.
  */
 const visitSchema = z.object({
@@ -130,7 +131,7 @@ export async function checkInVehicle(
 
     if (visit.mileage !== null && vehicle.lastMileage !== null && visit.mileage < vehicle.lastMileage) {
       throw new DomainError(
-        `Mileage can't be lower than the last recorded reading (${vehicle.lastMileage.toLocaleString('en-AE')} km).`,
+        `Mileage can't be lower than the last recorded reading (${formatKm(vehicle.lastMileage)}).`,
         'mileage',
       );
     }

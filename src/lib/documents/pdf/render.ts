@@ -115,7 +115,7 @@ function header(page: PdfPage, doc: CustomerDocumentModel) {
     align: 'right',
   });
   page.text(doc.number, RIGHT, 66, { font: 'bold', size: 11, color: INK, align: 'right' });
-  pill(page, doc.status.label, doc.status.tone, RIGHT, 76);
+  if (doc.status) pill(page, doc.status.label, doc.status.tone, RIGHT, 76);
 
   let metaY = 112;
   for (const field of doc.meta) {

@@ -62,7 +62,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Daily work',
     items: [
       {
-        label: 'Work Orders',
+        label: 'Job Cards',
         href: '/job-cards',
         icon: ClipboardList,
         permission: 'job_card.view',
@@ -82,7 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Workshop',
     items: [
-      { label: 'New work order', href: '/check-in', icon: LogIn, permission: 'job_card.create' },
+      { label: 'New job card', href: '/check-in', icon: LogIn, permission: 'job_card.create' },
       {
         label: 'Appointments',
         href: '/appointments',

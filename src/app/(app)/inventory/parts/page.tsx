@@ -21,6 +21,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import {
+  RecordSelection,
+  RemoveCell,
+  RemoveHead,
+  SelectCell,
+  SelectHead,
+} from '@/components/shared/record-selection';
+import { REMOVAL } from '@/lib/records/removal';
 
 type Search = { q?: string; category?: string; supplier?: string; stock?: string; status?: string };
 
@@ -41,6 +49,12 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     status,
   });
   const canManage = hasPermission(user, 'inventory.manage');
+  const canRemove = hasPermission(user, REMOVAL.parts.permission);
+  // Stock on hand would vanish from the count, so only an active part with
+  // none here is offered. The server also checks other branches and open
+  // purchases.
+  const removable = (part: (typeof parts)[number]) => part.isActive && part.onHandMilli === 0;
+  const removableRows = parts.filter(removable).map((part) => ({ id: part.id, label: part.name }));
   const filtered = Boolean(
     params.q || params.category || params.supplier || stock || status !== 'active',
   );
@@ -182,73 +196,81 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
             }
           />
         ) : (
-          <Panel padding="none" className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-muted/40">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Part</TableHead>
-                    <TableHead className="hidden md:table-cell">Category</TableHead>
-                    <TableHead className="hidden lg:table-cell">Supplier</TableHead>
-                    <TableHead className="text-right">On hand</TableHead>
-                    <TableHead className="hidden text-right sm:table-cell">Min.</TableHead>
-                    <TableHead className="hidden text-right lg:table-cell">Cost</TableHead>
-                    <TableHead className="text-right">Price</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {parts.map((part) => (
-                    <TableRow
-                      key={part.id}
-                      className={cn('relative', !part.isActive && 'text-muted-foreground')}
-                    >
-                      <TableCell>
-                        <Link
-                          href={`/inventory/parts/${part.id}`}
-                          className="font-medium after:absolute after:inset-0 hover:underline"
-                        >
-                          {part.name}
-                        </Link>
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {part.sku}
-                          </span>
-                          {!part.isActive ? <StatusPill tone="neutral">Inactive</StatusPill> : null}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        {part.category ?? <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell">
-                        {part.preferredSupplier?.name ?? (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          <StockQuantity
-                            onHandMilli={part.onHandMilli}
-                            unit={part.unitOfMeasure}
-                            state={part.state}
-                          />
-                          {part.state !== 'IN_STOCK' ? <StockPill state={part.state} /> : null}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden text-right tabular-nums sm:table-cell">
-                        {part.reorderLevel ? formatMilli(signedToMilli(part.reorderLevel)) : '—'}
-                      </TableCell>
-                      <TableCell className="hidden text-right tabular-nums lg:table-cell">
-                        {part.defaultCostPrice ? formatMoney(part.defaultCostPrice) : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {part.defaultSellingPrice ? formatMoney(part.defaultSellingPrice) : '—'}
-                      </TableCell>
+          <RecordSelection entity="parts" enabled={canRemove}>
+            <Panel padding="none" className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-muted/40">
+                    <TableRow className="hover:bg-transparent">
+                      <SelectHead rows={removableRows} />
+                      <TableHead>Part</TableHead>
+                      <TableHead className="hidden md:table-cell">Category</TableHead>
+                      <TableHead className="hidden lg:table-cell">Supplier</TableHead>
+                      <TableHead className="text-right">On hand</TableHead>
+                      <TableHead className="hidden text-right sm:table-cell">Min.</TableHead>
+                      <TableHead className="hidden text-right lg:table-cell">Cost</TableHead>
+                      <TableHead className="text-right">Price</TableHead>
+                      <RemoveHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Panel>
+                  </TableHeader>
+                  <TableBody>
+                    {parts.map((part) => (
+                      <TableRow
+                        key={part.id}
+                        className={cn('relative', !part.isActive && 'text-muted-foreground')}
+                      >
+                        <SelectCell id={part.id} label={part.name} removable={removable(part)} />
+                        <TableCell>
+                          <Link
+                            href={`/inventory/parts/${part.id}`}
+                            className="font-medium after:absolute after:inset-0 hover:underline"
+                          >
+                            {part.name}
+                          </Link>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {part.sku}
+                            </span>
+                            {!part.isActive ? (
+                              <StatusPill tone="neutral">Inactive</StatusPill>
+                            ) : null}
+                          </span>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {part.category ?? <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {part.preferredSupplier?.name ?? (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-col items-end gap-1">
+                            <StockQuantity
+                              onHandMilli={part.onHandMilli}
+                              unit={part.unitOfMeasure}
+                              state={part.state}
+                            />
+                            {part.state !== 'IN_STOCK' ? <StockPill state={part.state} /> : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden text-right tabular-nums sm:table-cell">
+                          {part.reorderLevel ? formatMilli(signedToMilli(part.reorderLevel)) : '—'}
+                        </TableCell>
+                        <TableCell className="hidden text-right tabular-nums lg:table-cell">
+                          {part.defaultCostPrice ? formatMoney(part.defaultCostPrice) : '—'}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {part.defaultSellingPrice ? formatMoney(part.defaultSellingPrice) : '—'}
+                        </TableCell>
+                        <RemoveCell id={part.id} label={part.name} removable={removable(part)} />
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Panel>
+          </RecordSelection>
         )}
       </Stack>
     </Stack>

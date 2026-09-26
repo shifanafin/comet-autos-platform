@@ -14,6 +14,7 @@ import { InstallAppButton } from '@/components/shell/install-app';
 import { CONTAINER_X } from '@/components/layout/primitives';
 import { cn } from '@/lib/utils';
 import { logout } from '@/lib/auth/logout-action';
+import type { Brand } from '@/lib/brand/brand';
 
 function initials(fullName: string): string {
   return fullName
@@ -28,9 +29,11 @@ function initials(fullName: string): string {
 export function Topbar({
   user,
   branchName,
+  brand,
 }: {
   user: { fullName: string; email: string; roleNames: string[] };
   branchName: string | null;
+  brand: Pick<Brand, 'shortName' | 'initial'>;
 }) {
   const role = user.roleNames.join(' / ') || 'Staff';
   return (
@@ -39,10 +42,10 @@ export function Topbar({
         {/* Navigation on phones lives in the bottom bar; the mark here only says where you are. */}
         <Link
           href="/"
-          aria-label="Comet Autos dashboard"
+          aria-label={`${brand.shortName} dashboard`}
           className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground md:hidden"
         >
-          C
+          {brand.initial}
         </Link>
         <div className="min-w-0 flex-1">
           <GlobalSearch />
@@ -57,7 +60,7 @@ export function Topbar({
           ) : null}
           {branchName ? <span className="hidden h-6 w-px bg-border xl:block" aria-hidden /> : null}
 
-          <InstallAppButton />
+          <InstallAppButton appName={brand.shortName} />
 
           <DropdownMenu>
             <DropdownMenuTrigger

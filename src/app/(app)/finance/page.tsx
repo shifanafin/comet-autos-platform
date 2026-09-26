@@ -408,7 +408,7 @@ export default async function FinanceOverviewPage({
                 href="/job-cards"
                 className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
               >
-                Work orders
+                Job cards
                 <ArrowRight className="size-4" />
               </Link>
             }

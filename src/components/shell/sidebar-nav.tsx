@@ -5,10 +5,17 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NavList } from '@/components/shell/nav-list';
 import { BrandMark } from '@/components/shell/brand-mark';
+import type { Brand } from '@/lib/brand/brand';
 
 const COLLAPSE_STORAGE_KEY = 'comet:sidebar-collapsed';
 
-export function SidebarNav({ allowedHrefs }: { allowedHrefs: string[] }) {
+export function SidebarNav({
+  allowedHrefs,
+  brand,
+}: {
+  allowedHrefs: string[];
+  brand: Pick<Brand, 'shortName' | 'initial'>;
+}) {
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -56,7 +63,7 @@ export function SidebarNav({ allowedHrefs }: { allowedHrefs: string[] }) {
           collapsed ? 'justify-center' : 'px-5',
         )}
       >
-        <BrandMark collapsed={collapsed} />
+        <BrandMark brand={brand} collapsed={collapsed} />
       </div>
 
       <NavList allowedHrefs={allowedHrefs} collapsed={collapsed} />

@@ -1,13 +1,13 @@
 /**
- * Integration tests for the simple daily path — Work Order, Quotation,
+ * Integration tests for the simple daily path — Job Card, Quotation,
  * Invoice, Payment — as documents in their own right, and for the promise
  * that making them optional broke nothing underneath:
  *
- *  - a work order needs only customer, vehicle and the work requested;
- *  - a quotation can exist with no work order (and with no vehicle), and can
+ *  - a job card needs only customer, vehicle and the work requested;
+ *  - a quotation can exist with no job card (and with no vehicle), and can
  *    still be filed against one;
- *  - an invoice can exist with no work order, be raised from a quotation
- *    (billing exactly what was quoted), or bill a work order at any stage;
+ *  - an invoice can exist with no job card, be raised from a quotation
+ *    (billing exactly what was quoted), or bill a job card at any stage;
  *  - payments, receipts, PDFs, WhatsApp links and online approval work for
  *    all of them through the same services;
  *  - every quotation and invoice that existed before the migration still
@@ -73,7 +73,7 @@ function assertPdf(pdf: Buffer) {
   return text;
 }
 
-/** A customer with one vehicle, created directly — no work order involved. */
+/** A customer with one vehicle, created directly — no job card involved. */
 async function customerWithVehicle(org: TestOrg, suffix: string) {
   const customer = await prisma.customer.create({
     data: { organizationId: org.organizationId, name: `Simple Customer ${suffix}`, phone: `050 ${suffix.padStart(3, '0')} 4411` },
@@ -129,7 +129,7 @@ describe('existing data after the migration', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('work order: created simply', () => {
+describe('job card: created simply', () => {
   test('customer, vehicle and the work requested are enough — no mileage, no inspection', async () => {
     const { vehicle } = await customerWithVehicle(a, '10');
     const { jobCardId, jobNumber } = await checkInVehicle(a.owner, {
@@ -167,12 +167,12 @@ describe('work order: created simply', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('quotation without a work order', () => {
+describe('quotation without a job card', () => {
   let customerId: string;
   let vehicleId: string;
   let estimateId: string;
 
-  test('customer only: saves, prices with the organization VAT rate, prints — no work order, no vehicle', async () => {
+  test('customer only: saves, prices with the organization VAT rate, prints — no job card, no vehicle', async () => {
     const party = await customerWithVehicle(a, '20');
     customerId = party.customer.id;
     vehicleId = party.vehicle.id;
@@ -206,7 +206,7 @@ describe('quotation without a work order', () => {
     const document = await getQuotationDocument(a.owner, quote.id);
     assert.equal(document.customer.name, party.customer.name);
     assert.equal(document.vehicle, null);
-    assert.equal(document.meta.some((m) => m.label === 'Work order'), false);
+    assert.equal(document.meta.some((m) => m.label === 'Job card'), false);
     assertPdf(renderDocumentPdf(document));
 
     // The link opens by itself, so a quotation with no car on file still sends —
@@ -265,7 +265,7 @@ describe('quotation without a work order', () => {
     assert.deepEqual(screen.versions.map((v) => v.version), [2, 1]);
   });
 
-  test('listed with the rest, whether or not it has a work order', async () => {
+  test('listed with the rest, whether or not it has a job card', async () => {
     const { quotations } = await listQuotations(a.owner, { q: 'Simple Customer 20' });
     assert.ok(quotations.some((q) => q.id === estimateId && q.jobCard === null));
   });
@@ -273,8 +273,8 @@ describe('quotation without a work order', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('quotation connected to a work order', () => {
-  test('a work order can be quoted straight away — inspection and diagnosis are optional', async () => {
+describe('quotation connected to a job card', () => {
+  test('a job card can be quoted straight away — inspection and diagnosis are optional', async () => {
     const { vehicle } = await customerWithVehicle(a, '30');
     const { jobCardId } = await checkInVehicle(a.owner, {
       mode: 'existing',
@@ -289,7 +289,7 @@ describe('quotation connected to a work order', () => {
     assert.deepEqual(await historyStatuses(jobCardId), ['ARRIVED', 'ESTIMATE']);
   });
 
-  test('a quotation raised from the customer can be filed against their open work order', async () => {
+  test('a quotation raised from the customer can be filed against their open job card', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '31');
     const { jobCardId } = await checkInVehicle(a.owner, {
       mode: 'existing',
@@ -298,7 +298,7 @@ describe('quotation connected to a work order', () => {
     });
     const quote = await createQuotation(a.owner, { customerId: customer.id, jobCardId });
     assert.equal(quote.jobCardId, jobCardId);
-    assert.equal(quote.vehicleId, vehicle.id, 'the work order’s vehicle is taken');
+    assert.equal(quote.vehicleId, vehicle.id, 'the job card’s vehicle is taken');
     assert.equal(await jobStatus(jobCardId), 'ESTIMATE');
     await expectDomainError(
       createQuotation(a.owner, { customerId: customer.id, jobCardId }),
@@ -306,7 +306,7 @@ describe('quotation connected to a work order', () => {
     );
   });
 
-  test('a work order and a vehicle must belong to the customer', async () => {
+  test('a job card and a vehicle must belong to the customer', async () => {
     const one = await customerWithVehicle(a, '32');
     const two = await customerWithVehicle(a, '33');
     await expectDomainError(
@@ -327,11 +327,11 @@ describe('quotation connected to a work order', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('invoice without a work order', () => {
+describe('invoice without a job card', () => {
   let invoiceId: string;
   let customerId: string;
 
-  test('typed lines: issued straight away, VAT from the organization, own number, no work order', async () => {
+  test('typed lines: issued straight away, VAT from the organization, own number, no job card', async () => {
     const party = await customerWithVehicle(a, '40');
     customerId = party.customer.id;
     const result = await createDirectInvoice(a.owner, {
@@ -433,7 +433,7 @@ describe('invoice without a work order', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('invoice from a quotation, and from a work order', () => {
+describe('invoice from a quotation, and from a job card', () => {
   test('quotation → invoice bills exactly what was quoted', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '50');
     const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
@@ -486,7 +486,7 @@ describe('invoice from a quotation, and from a work order', () => {
     );
   });
 
-  test('journey: work order → quotation → approval → invoice → payment → receipt', async () => {
+  test('journey: job card → quotation → approval → invoice → payment → receipt', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '53');
     const { jobCardId } = await checkInVehicle(a.owner, {
       mode: 'existing',
@@ -502,14 +502,14 @@ describe('invoice from a quotation, and from a work order', () => {
     await recordCustomerDecision(a.owner, estimate.id, { decision: 'APPROVED', method: 'IN_PERSON' });
     assert.equal(await jobStatus(jobCardId), 'APPROVED');
 
-    // Billed from the quotation: the work order it belongs to is billed with it.
+    // Billed from the quotation: the job card it belongs to is billed with it.
     const { invoiceId } = await createDirectInvoice(a.owner, { customerId: customer.id, estimateId: estimate.id });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(invoice.jobCardId, jobCardId);
     assert.equal(money(invoice.totalAmount), '420.00');
     assert.equal(await jobStatus(jobCardId), 'INVOICED');
 
-    // The work order's own payment screen and the invoice's share one rule.
+    // The job card's own payment screen and the invoice's share one rule.
     await recordPayment(a.owner, jobCardId, { amount: '420', method: 'CASH', receivedAt: now() });
     assert.equal(await jobStatus(jobCardId), 'PAID');
     const payment = await prisma.payment.findFirstOrThrow({ where: { invoiceId } });
@@ -523,12 +523,12 @@ describe('invoice from a quotation, and from a work order', () => {
       'PAID',
     ]);
 
-    // Handover still works on a work order that skipped repair and QC.
+    // Handover still works on a job card that skipped repair and QC.
     await deliverVehicle(a.owner, jobCardId, {});
     assert.equal(await jobStatus(jobCardId), 'DELIVERED');
   });
 
-  test('a work order can be invoiced directly, once', async () => {
+  test('a job card can be invoiced directly, once', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '54');
     const { jobCardId } = await checkInVehicle(a.owner, {
       mode: 'existing',
@@ -542,7 +542,7 @@ describe('invoice from a quotation, and from a work order', () => {
     });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(invoice.jobCardId, jobCardId);
-    assert.equal(invoice.vehicleId, vehicle.id, 'the work order’s vehicle is billed');
+    assert.equal(invoice.vehicleId, vehicle.id, 'the job card’s vehicle is billed');
     assert.equal(await jobStatus(jobCardId), 'INVOICED');
     await expectDomainError(
       createDirectInvoice(a.owner, {
@@ -845,5 +845,35 @@ describe("the owner's quotation sheet", () => {
     });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.deepEqual(invoice.items.map((i) => i.itemType), ['PART', 'LABOUR']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('a renamed workshop', () => {
+  test('an invoice issued before the rename names the old business throughout; new ones the new', async () => {
+    const shop = await createTestOrg('Rename');
+    await prisma.organization.update({ where: { id: shop.organizationId }, data: { name: 'Old Name Garage', legalName: null } });
+    const customer = await prisma.customer.create({
+      data: { organizationId: shop.organizationId, name: 'Renamed Customer', phone: '050 123 9911' },
+    });
+    const line = [{ itemType: 'LABOUR' as const, description: 'Service', quantity: '1', unitPrice: '100' }];
+    const before = await createDirectInvoice(shop.owner, { customerId: customer.id, items: line });
+
+    await prisma.organization.update({
+      where: { id: shop.organizationId },
+      data: { name: 'New Name Auto LLC', legalName: 'New Name Auto LLC' },
+    });
+    const after = await createDirectInvoice(shop.owner, { customerId: customer.id, items: line });
+
+    const old = await getInvoiceDocument(shop.owner, before.invoiceId);
+    assert.equal(old.seller.name, 'Old Name Garage', 'never the new name above the old legal name');
+    assert.equal(old.seller.legalName, 'Old Name Garage');
+    assert.match(old.fileName, /^Old-Name-Garage-Tax-invoice-/);
+
+    const fresh = await getInvoiceDocument(shop.owner, after.invoiceId);
+    assert.equal(fresh.seller.name, 'New Name Auto LLC');
+    assert.match(fresh.fileName, /^New-Name-Auto-LLC-Tax-invoice-/);
+    assert.ok(!fresh.fileName.includes('Comet'), 'the file is named for the workshop, not the app');
   });
 });

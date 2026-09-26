@@ -139,11 +139,11 @@ export const EXPORTS: Record<string, ExportDefinition<unknown>> = {
   }),
 
   'work-orders': definition({
-    label: 'Work orders',
+    label: 'Job cards',
     load: (user, filters) =>
       listJobCards(user, { q: filters.q, status: filters.status }, EXPORT_LIMIT),
     columns: [
-      { header: 'Work order', value: (row) => row.jobNumber },
+      { header: 'Job card', value: (row) => row.jobNumber },
       { header: 'Status', value: (row) => JOB_STATUS_LABEL[row.status] },
       { header: 'Customer', value: (row) => row.customer.name },
       { header: 'Mobile', value: (row) => row.customer.phone },
@@ -170,7 +170,7 @@ export const EXPORTS: Record<string, ExportDefinition<unknown>> = {
       { header: 'Customer', value: (row) => row.customer.name },
       { header: 'Mobile', value: (row) => row.customer.phone },
       { header: 'Registration', value: (row) => row.vehicle?.plateNumber ?? '' },
-      { header: 'Work order', value: (row) => row.jobCard?.jobNumber ?? '' },
+      { header: 'Job card', value: (row) => row.jobCard?.jobNumber ?? '' },
       { header: 'Total', value: (row) => money(row.totalAmount) },
       { header: 'Valid until', value: (row) => date(row.validUntil) },
       { header: 'Sent', value: (row) => dateTime(row.sentAt) },
@@ -188,7 +188,7 @@ export const EXPORTS: Record<string, ExportDefinition<unknown>> = {
       { header: 'Customer', value: (row) => row.customerName ?? row.customer.name },
       { header: 'Mobile', value: (row) => row.customer.phone },
       { header: 'Registration', value: (row) => row.vehicle?.plateNumber ?? '' },
-      { header: 'Work order', value: (row) => row.jobCard?.jobNumber ?? '' },
+      { header: 'Job card', value: (row) => row.jobCard?.jobNumber ?? '' },
       { header: 'Total', value: (row) => money(row.balance.total) },
       { header: 'Paid', value: (row) => money(row.balance.paid) },
       { header: 'Balance due', value: (row) => money(row.balance.balance) },
@@ -208,7 +208,7 @@ export const EXPORTS: Record<string, ExportDefinition<unknown>> = {
       { header: 'Reference', value: (row) => row.referenceNumber },
       { header: 'Invoice', value: (row) => row.invoice.invoiceNumber },
       { header: 'Customer', value: (row) => row.invoice.customerName },
-      { header: 'Work order', value: (row) => row.invoice.jobCard?.jobNumber ?? '' },
+      { header: 'Job card', value: (row) => row.invoice.jobCard?.jobNumber ?? '' },
       { header: 'Received by', value: (row) => row.receivedBy.fullName },
       { header: 'Reversal of', value: (row) => (row.reversalOfPaymentId ? 'Yes' : '') },
     ],

@@ -41,7 +41,9 @@ export async function createCustomer(
 ) {
   requirePermission(user, 'customer.create');
   const data = toCustomerData(parseInput(customerSchema, rawInput));
-  const customer = await tx.customer.create({ data: { organizationId: user.organizationId, ...data } });
+  const customer = await tx.customer.create({
+    data: { organizationId: user.organizationId, ...data },
+  });
   await writeAuditLog(tx, {
     organizationId: user.organizationId,
     branchId: user.primaryBranchId,
@@ -105,11 +107,48 @@ export async function findCustomersByPhone(
   return customers.filter((c) => c.id !== excludeCustomerId && phoneCore(c.phone) === core);
 }
 
-export async function listCustomers(user: AuthenticatedUser, query: string, take = 50) {
+export async function listCustomers(
+  user: AuthenticatedUser,
+  query: string,
+  take = 50,
+  /** The deleted (archived) customers instead, to find one to restore. */
+  deleted = false,
+) {
   requirePermission(user, 'customer.view');
   const trimmed = query.trim();
+  if (deleted) {
+    return prisma.customer.findMany({
+      where: {
+        organizationId: user.organizationId,
+        isActive: false,
+        ...(trimmed
+          ? {
+              OR: [
+                { name: { contains: trimmed, mode: 'insensitive' } },
+                { phone: { contains: trimmed } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        createdAt: true,
+        vehicles: {
+          select: { id: true, plateNumber: true, make: true, model: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
   const ids =
-    trimmed.length >= 2 ? (await findMatchingIds(user.organizationId, trimmed, take)).customerIds : null;
+    trimmed.length >= 2
+      ? (await findMatchingIds(user.organizationId, trimmed, take)).customerIds
+      : null;
   if (ids && ids.length === 0) return [];
 
   return prisma.customer.findMany({

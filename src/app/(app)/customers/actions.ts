@@ -4,7 +4,13 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/authorize';
-import { runAction } from '@/lib/action';
+import { runAction, toClientResult } from '@/lib/action';
+import {
+  archiveCustomer,
+  archiveVehicle,
+  restoreCustomer,
+  restoreVehicle,
+} from '@/lib/customers/archive';
 import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
@@ -125,4 +131,49 @@ export async function transferVehicleAction(
   revalidatePath(`/vehicles/${vehicleId}`);
   revalidatePath('/customers', 'layout');
   redirect(`/vehicles/${vehicleId}?transferred=1`);
+}
+
+// ---------------------------------------------------------------------------
+// Delete (archive) and restore
+// ---------------------------------------------------------------------------
+
+function refreshPeople(customerId: string | null, vehicleId: string | null) {
+  revalidatePath('/customers');
+  revalidatePath('/vehicles');
+  if (customerId) revalidatePath(`/customers/${customerId}`);
+  if (vehicleId) revalidatePath(`/vehicles/${vehicleId}`);
+}
+
+export async function archiveCustomerAction(
+  customerId: string,
+  input: { reason: string; requestKey: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => archiveCustomer(user, customerId, input));
+  if (result.ok || result.duplicate) refreshPeople(customerId, null);
+  return toClientResult(result);
+}
+
+export async function restoreCustomerAction(customerId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => restoreCustomer(user, customerId));
+  if (result.ok) refreshPeople(customerId, null);
+  return toClientResult(result);
+}
+
+export async function archiveVehicleAction(
+  vehicleId: string,
+  input: { reason: string; requestKey: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => archiveVehicle(user, vehicleId, input));
+  if (result.ok || result.duplicate) refreshPeople(result.data?.customerId ?? null, vehicleId);
+  return toClientResult(result);
+}
+
+export async function restoreVehicleAction(vehicleId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => restoreVehicle(user, vehicleId));
+  if (result.ok) refreshPeople(null, vehicleId);
+  return toClientResult(result);
 }

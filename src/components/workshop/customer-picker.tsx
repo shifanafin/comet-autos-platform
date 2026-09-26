@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 
 /*
  * Who a document is for. The customer is the one thing every quotation and
- * invoice needs; the vehicle and the work order are offered beside it and
+ * invoice needs; the vehicle and the job card are offered beside it and
  * can be left alone. Everything is a large tap target, because this is the
  * first thing the owner does on his phone.
  */
@@ -26,7 +26,7 @@ export interface PickedParty {
 export function CustomerPicker({
   value,
   onChange,
-  /** Offer to file the document against one of the customer's open work orders. */
+  /** Offer to file the document against one of the customer's open job cards. */
   allowJobCard = true,
   autoFocus,
 }: {
@@ -121,7 +121,7 @@ export function CustomerPicker({
         {allowJobCard && customer.openJobCards.length > 0 ? (
           <fieldset className="flex flex-col gap-3">
             <legend className="text-sm font-medium">
-              Work order <span className="font-normal text-muted-foreground">— optional</span>
+              Job card <span className="font-normal text-muted-foreground">— optional</span>
             </legend>
             <div className="grid gap-2 sm:grid-cols-2">
               <ChoiceButton
@@ -138,7 +138,7 @@ export function CustomerPicker({
                   onClick={() => onChange({ ...value, jobCardId: job.id })}
                   icon={<ClipboardList className="size-4 text-muted-foreground" />}
                   title={job.jobNumber}
-                  subtitle="Open work order"
+                  subtitle="Open job card"
                 />
               ))}
             </div>
@@ -209,7 +209,7 @@ export function CustomerPicker({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        <span>New to Comet Autos?</span>
+        <span>A new customer?</span>
         <Button
           type="button"
           variant="outline"

@@ -5,7 +5,7 @@ import { findMatchingIds } from '@/lib/customers/search';
 import { OPEN_JOB_STATUSES } from '@/lib/workshop/check-in';
 
 /**
- * Customers with their vehicles and open work orders, for the document
+ * Customers with their vehicles and open job cards, for the document
  * screens where the customer is required and the vehicle is not. The
  * vehicle-first lookup (lib/vehicles/summary.ts) stays as it is for
  * check-in, where a car is always what arrives.
@@ -29,7 +29,7 @@ export interface CustomerOption {
   name: string;
   phone: string;
   vehicles: PickerVehicle[];
-  /** Work orders still in the workshop, so a document can be filed against one. */
+  /** Job cards still in the workshop, so a document can be filed against one. */
   openJobCards: PickerJobCard[];
 }
 

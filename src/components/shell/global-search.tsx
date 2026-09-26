@@ -104,7 +104,7 @@ export function GlobalSearch() {
           <div className="max-h-80 overflow-y-auto p-2">
             {trimmed.length < 2 ? (
               <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-                Start typing to search across customers, vehicles, and work orders.
+                Start typing to search across customers, vehicles, and job cards.
               </p>
             ) : !hasResults ? (
               <p className="px-2 py-6 text-center text-sm text-muted-foreground">
@@ -113,7 +113,7 @@ export function GlobalSearch() {
             ) : (
               <div className="flex flex-col gap-3">
                 {displayedResults.jobCards.length > 0 ? (
-                  <ResultGroup label="Work orders">
+                  <ResultGroup label="Job cards">
                     {displayedResults.jobCards.map((jc) => (
                       <ResultRow
                         key={jc.id}

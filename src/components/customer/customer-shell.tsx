@@ -21,7 +21,8 @@ export function CustomerShell({
   label: string;
   children: ReactNode;
 }) {
-  const name = organization?.name ?? 'Comet Autos';
+  // No organization means a dead link: nothing names the workshop, so neither do we.
+  const name = organization?.name ?? 'Your workshop';
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <header className="bg-sidebar text-sidebar-foreground">

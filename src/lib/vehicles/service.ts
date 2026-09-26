@@ -55,7 +55,14 @@ async function assertUniqueIdentifiers(
   vin: string | null,
   excludeVehicleId?: string,
 ) {
-  if (await vehiclePlateExists(tx, organizationId, plateNumber, excludeVehicleId)) {
+  const plateClash = await vehiclePlateExists(tx, organizationId, plateNumber, excludeVehicleId);
+  if (plateClash === 'deleted') {
+    throw new DomainError(
+      'A deleted vehicle has this registration. Restore it from Vehicles › Deleted instead.',
+      'plateNumber',
+    );
+  }
+  if (plateClash) {
     throw new DomainError('A vehicle with this registration is already on file.', 'plateNumber');
   }
   if (vin) {
@@ -151,8 +158,36 @@ export async function updateVehicle(
   });
 }
 
-export async function listVehicles(user: AuthenticatedUser, query: string, take = 50) {
+export async function listVehicles(
+  user: AuthenticatedUser,
+  query: string,
+  take = 50,
+  /** The deleted (archived) vehicles instead, to find one to restore. */
+  deleted = false,
+) {
   requirePermission(user, 'vehicle.view');
+  if (deleted) {
+    const trimmed = query.trim();
+    return prisma.vehicle.findMany({
+      where: {
+        organizationId: user.organizationId,
+        isActive: false,
+        ...(trimmed
+          ? {
+              OR: [
+                { plateNumber: { contains: trimmed, mode: 'insensitive' } },
+                { make: { contains: trimmed, mode: 'insensitive' } },
+                { model: { contains: trimmed, mode: 'insensitive' } },
+                { vin: { contains: trimmed, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take,
+      include: { customer: { select: { id: true, name: true, phone: true } } },
+    });
+  }
   if (query.trim().length >= 2) return searchVehicles(user.organizationId, query, take);
   return prisma.vehicle.findMany({
     where: { organizationId: user.organizationId, isActive: true },

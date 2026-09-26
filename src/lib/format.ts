@@ -1,10 +1,14 @@
 /**
- * Display + parsing helpers pinned to the workshop's time zone. Comet Autos
+ * Display + parsing helpers pinned to the workshop's time zone. The workshop
  * operates in Dubai (UTC+4, no daylight saving), so form inputs like
  * "2026-09-18T09:30" always mean Dubai local time regardless of where the
  * server process runs.
  */
 export const WORKSHOP_TIME_ZONE = 'Asia/Dubai';
+/** How numbers, dates and amounts are written: UAE English. */
+export const WORKSHOP_LOCALE = 'en-AE';
+/** The currency every amount is recorded in (Organization.baseCurrency). */
+export const WORKSHOP_CURRENCY = 'AED';
 const WORKSHOP_UTC_OFFSET = '+04:00';
 
 type DateLike = Date | string;
@@ -12,7 +16,7 @@ type DateLike = Date | string;
 const toDate = (value: DateLike) => (value instanceof Date ? value : new Date(value));
 
 export function formatDateTime(value: DateLike): string {
-  return toDate(value).toLocaleString('en-AE', {
+  return toDate(value).toLocaleString(WORKSHOP_LOCALE, {
     timeZone: WORKSHOP_TIME_ZONE,
     day: 'numeric',
     month: 'short',
@@ -23,7 +27,7 @@ export function formatDateTime(value: DateLike): string {
 }
 
 export function formatDate(value: DateLike): string {
-  return toDate(value).toLocaleDateString('en-AE', {
+  return toDate(value).toLocaleDateString(WORKSHOP_LOCALE, {
     timeZone: WORKSHOP_TIME_ZONE,
     day: 'numeric',
     month: 'short',
@@ -33,7 +37,7 @@ export function formatDate(value: DateLike): string {
 
 /** For @db.Date columns, which Prisma returns as UTC midnight. */
 export function formatCalendarDate(value: DateLike): string {
-  return toDate(value).toLocaleDateString('en-AE', {
+  return toDate(value).toLocaleDateString(WORKSHOP_LOCALE, {
     timeZone: 'UTC',
     day: 'numeric',
     month: 'short',
@@ -42,7 +46,7 @@ export function formatCalendarDate(value: DateLike): string {
 }
 
 export function formatTime(value: DateLike): string {
-  return toDate(value).toLocaleTimeString('en-AE', {
+  return toDate(value).toLocaleTimeString(WORKSHOP_LOCALE, {
     timeZone: WORKSHOP_TIME_ZONE,
     hour: 'numeric',
     minute: '2-digit',
@@ -50,7 +54,7 @@ export function formatTime(value: DateLike): string {
 }
 
 export function formatDayHeading(value: DateLike): string {
-  return toDate(value).toLocaleDateString('en-AE', {
+  return toDate(value).toLocaleDateString(WORKSHOP_LOCALE, {
     timeZone: WORKSHOP_TIME_ZONE,
     weekday: 'long',
     day: 'numeric',
@@ -58,10 +62,24 @@ export function formatDayHeading(value: DateLike): string {
   });
 }
 
-const aed = new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', minimumFractionDigits: 2 });
+const money = new Intl.NumberFormat(WORKSHOP_LOCALE, {
+  style: 'currency',
+  currency: WORKSHOP_CURRENCY,
+  minimumFractionDigits: 2,
+});
+
+/** A whole number with thousands separators, e.g. 120,000. */
+export function formatNumber(value: number): string {
+  return value.toLocaleString(WORKSHOP_LOCALE);
+}
+
+/** An odometer reading, e.g. "120,000 km". */
+export function formatKm(value: number): string {
+  return `${formatNumber(value)} km`;
+}
 
 export function formatMoney(value: { toString(): string } | number | string): string {
-  return aed.format(Number(value.toString()));
+  return money.format(Number(value.toString()));
 }
 
 /** "YYYY-MM-DD" for a moment, in Dubai. */

@@ -9,7 +9,7 @@ import { StatusPill } from '@/components/shared/status-pill';
 import { Button } from '@/components/ui/button';
 import { PasswordForm } from './password-form';
 
-export const metadata = { title: 'My profile — Comet Autos' };
+export const metadata = { title: 'My profile' };
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

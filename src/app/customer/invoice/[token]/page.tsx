@@ -145,8 +145,8 @@ export default async function CustomerInvoicePage({
               <p className="truncate font-medium">{document.vehicle.description}</p>
               <p className="text-sm text-muted-foreground">
                 {document.meta
-                  .filter((m) => m.label === 'Work order' || m.label === 'Invoice date')
-                  .map((m) => (m.label === 'Work order' ? `Job ${m.value}` : m.value))
+                  .filter((m) => m.label === 'Job card' || m.label === 'Invoice date')
+                  .map((m) => (m.label === 'Job card' ? `Job ${m.value}` : m.value))
                   .join(' · ')}
               </p>
             </div>

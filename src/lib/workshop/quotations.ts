@@ -6,7 +6,7 @@ import { localDateString } from '@/lib/format';
 
 /*
  * Reading quotations as documents in their own right — by customer and
- * vehicle, whether or not a work order stands behind them. The lifecycle
+ * vehicle, whether or not a job card stands behind them. The lifecycle
  * itself (create, price, send, revise, decide) is lib/workshop/estimates.ts;
  * nothing here writes.
  */
@@ -25,7 +25,7 @@ export function quotationExpired(estimate: {
 
 /**
  * One quotation with everything its screen shows: lines, the decision, the
- * versions in its chain, and the work order behind it when there is one.
+ * versions in its chain, and the job card behind it when there is one.
  */
 export async function getQuotation(user: AuthenticatedUser, estimateId: string) {
   const estimate = await prisma.estimate.findFirst({
@@ -63,7 +63,7 @@ export async function getQuotation(user: AuthenticatedUser, estimateId: string) 
   requirePermission(user, 'job_card.view', { branchId: estimate.branchId });
 
   // Every version of this quotation, newest first. A quotation on a work
-  // order groups its chain by that work order; a standalone one walks back
+  // order groups its chain by that job card; a standalone one walks back
   // through previousVersionId.
   const versions = estimate.jobCardId
     ? await prisma.estimate.findMany({
@@ -135,7 +135,7 @@ export type QuotationFilter = '' | 'draft' | 'awaiting' | 'approved';
 
 /**
  * The quotations list. One place to see what has been quoted, what the
- * customer has not answered yet, and what they said yes to — work orders or
+ * customer has not answered yet, and what they said yes to — job cards or
  * not. Only the current version of each chain is listed; superseded
  * versions are reached from the quotation itself.
  */

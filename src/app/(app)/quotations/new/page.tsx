@@ -28,7 +28,7 @@ export default async function NewQuotationPage({
       <PageHeader
         eyebrow="Quotations"
         title="New quotation"
-        description="Who is this quotation for? A work order is not needed — link one only if you want to."
+        description="Who is this quotation for? A job card is not needed — link one only if you want to."
       />
       <Panel className="w-full max-w-3xl sm:p-8">
         <NewQuotationForm initialCustomer={initialCustomer} />

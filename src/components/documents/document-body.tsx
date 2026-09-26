@@ -18,6 +18,7 @@ const TONE: Record<DocumentTone, PillTone> = {
 };
 
 export function DocumentStatus({ status }: { status: CustomerDocumentModel['status'] }) {
+  if (!status) return null;
   return <StatusPill tone={TONE[status.tone]}>{status.label}</StatusPill>;
 }
 

@@ -1,10 +1,16 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import { Package, Plus, Trash2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { calculateLine, calculateTotals, formatMilli, signedToMilli, type LineAmounts } from '@/lib/money';
+import {
+  calculateLine,
+  calculateTotals,
+  formatMilli,
+  signedToMilli,
+  type LineAmounts,
+} from '@/lib/money';
 import { formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -68,7 +74,9 @@ export function useLineTotals(lines: EditableLine[], defaultVatRate: string) {
     const priced = lines.map((line) => ({ line, amounts: price(line, defaultVatRate) }));
     const used = priced.filter((entry) => !isBlankLine(entry.line));
     const totals = calculateTotals(used.flatMap((entry) => (entry.amounts ? [entry.amounts] : [])));
-    const rates = new Set(used.map((entry) => formatMilli(signedToMilli(entry.line.taxRate || defaultVatRate))));
+    const rates = new Set(
+      used.map((entry) => formatMilli(signedToMilli(entry.line.taxRate || defaultVatRate))),
+    );
     return {
       priced,
       totals,
@@ -90,22 +98,67 @@ export function DocumentLinesEditor({
   defaultVatRate: string;
 }) {
   const { priced, totals, vatLabel } = useLineTotals(lines, defaultVatRate);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** A line just added, whose description should take the focus once it renders. */
+  const focusLine = useRef<string | null>(null);
+
+  useEffect(() => {
+    const key = focusLine.current;
+    if (!key) return;
+    focusLine.current = null;
+    // Both layouts are rendered; focus the one on screen.
+    const inputs =
+      rootRef.current?.querySelectorAll<HTMLInputElement>(`[data-line="${key}"] input`) ?? [];
+    Array.from(inputs)
+      .find((input) => input.offsetParent !== null)
+      ?.focus();
+  }, [lines]);
 
   const update = (key: string, patch: Partial<EditableLine>) =>
     onChange(lines.map((line) => (line.key === key ? { ...line, ...patch } : line)));
   const remove = (key: string) => onChange(lines.filter((line) => line.key !== key));
-  const add = (itemType: LineType) => onChange([...lines, newEditableLine(itemType, defaultVatRate)]);
+  const add = (itemType: LineType) => {
+    const line = newEditableLine(itemType, defaultVatRate);
+    focusLine.current = line.key;
+    onChange([...lines, line]);
+  };
+
+  /*
+   * Enter never submits the document from here — that issued invoices
+   * half-typed. It moves to the next box, like a spreadsheet, and from the
+   * last box of the last line it starts a new line.
+   */
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)) return;
+    event.preventDefault();
+    const layout = event.target.closest<HTMLElement>('[data-layout]');
+    if (!layout) return;
+    const inputs = Array.from(layout.querySelectorAll<HTMLInputElement>('input'));
+    const next = inputs[inputs.indexOf(event.target) + 1];
+    if (next) {
+      next.focus();
+      next.select();
+    } else {
+      add(lines.at(-1)?.itemType ?? 'PART');
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-4">
       {/* Phone: each line a small card with labelled fields — never a sideways table. */}
-      <ol className="flex flex-col gap-3 md:hidden">
+      <ol data-layout="cards" className="flex flex-col gap-3 md:hidden">
         {priced.map(({ line, amounts }, index) => {
           const n = index + 1;
           return (
-            <li key={line.key} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5">
+            <li
+              key={line.key}
+              data-line={line.key}
+              className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5"
+            >
               <div className="flex items-center gap-2">
-                <span className="w-6 text-sm font-semibold text-muted-foreground tabular-nums">{n}</span>
+                <span className="w-6 text-sm font-semibold text-muted-foreground tabular-nums">
+                  {n}
+                </span>
                 <TypeSwitch
                   value={line.itemType}
                   onChange={(itemType) => update(line.key, { itemType })}
@@ -128,7 +181,9 @@ export function DocumentLinesEditor({
                 aria={`Line ${n} description`}
                 value={line.description}
                 onChange={(value) => update(line.key, { description: value })}
-                placeholder={line.itemType === 'LABOUR' ? 'e.g. Labour and consumables' : 'e.g. Ignition coil'}
+                placeholder={
+                  line.itemType === 'LABOUR' ? 'e.g. Labour and consumables' : 'e.g. Ignition coil'
+                }
               />
               <div className="grid grid-cols-[1fr_1.4fr_1fr] gap-2">
                 <LabelledInput
@@ -164,7 +219,10 @@ export function DocumentLinesEditor({
       </ol>
 
       {/* Tablet and up: the sheet itself. */}
-      <div className="hidden overflow-x-auto rounded-xl border border-border md:block">
+      <div
+        data-layout="sheet"
+        className="hidden overflow-x-auto rounded-xl border border-border md:block"
+      >
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left text-xs font-semibold tracking-wider text-muted-foreground uppercase">
             <tr>
@@ -184,7 +242,7 @@ export function DocumentLinesEditor({
             {priced.map(({ line, amounts }, index) => {
               const n = index + 1;
               return (
-                <tr key={line.key} className="align-middle">
+                <tr key={line.key} data-line={line.key} className="align-middle">
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">{n}</td>
                   <td className="px-2 py-2">
                     <TypeSwitch
@@ -199,7 +257,11 @@ export function DocumentLinesEditor({
                       aria-label={`Line ${n} description`}
                       value={line.description}
                       onChange={(event) => update(line.key, { description: event.target.value })}
-                      placeholder={line.itemType === 'LABOUR' ? 'e.g. Labour and consumables' : 'e.g. Ignition coil'}
+                      placeholder={
+                        line.itemType === 'LABOUR'
+                          ? 'e.g. Labour and consumables'
+                          : 'e.g. Ignition coil'
+                      }
                     />
                   </td>
                   <td className="px-2 py-2">
@@ -253,12 +315,22 @@ export function DocumentLinesEditor({
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <Button type="button" variant="outline" className="h-12 sm:h-10" onClick={() => add('PART')}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 sm:h-10"
+          onClick={() => add('PART')}
+        >
           <Plus />
           <Package />
           Add part
         </Button>
-        <Button type="button" variant="outline" className="h-12 sm:h-10" onClick={() => add('LABOUR')}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 sm:h-10"
+          onClick={() => add('LABOUR')}
+        >
           <Plus />
           <Wrench />
           Add labour
@@ -296,7 +368,11 @@ function TypeSwitch({
   compact?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5"
+    >
       {(['PART', 'LABOUR'] as const).map((option) => (
         <button
           key={option}
@@ -307,7 +383,9 @@ function TypeSwitch({
           className={cn(
             'rounded-md px-3 text-xs font-semibold tracking-wide uppercase transition-colors',
             compact ? 'h-8' : 'h-10',
-            value === option ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+            value === option
+              ? 'bg-card text-foreground shadow-xs'
+              : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {option === 'PART' ? 'Parts' : 'Labour'}
@@ -318,7 +396,8 @@ function TypeSwitch({
 }
 
 function LineAmount({ line, amounts }: { line: EditableLine; amounts: LineAmounts | null }) {
-  if (amounts) return <span className="font-semibold tabular-nums">{formatMoney(amounts.lineTotal)}</span>;
+  if (amounts)
+    return <span className="font-semibold tabular-nums">{formatMoney(amounts.lineTotal)}</span>;
   if (line.unitPrice.trim() === '') return <span className="text-muted-foreground">—</span>;
   return <span className="text-xs font-medium text-destructive">Check the numbers</span>;
 }

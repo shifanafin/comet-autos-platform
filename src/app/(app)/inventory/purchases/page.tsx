@@ -19,6 +19,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  RecordSelection,
+  RemoveCell,
+  RemoveHead,
+  SelectCell,
+  SelectHead,
+} from '@/components/shared/record-selection';
+import { REMOVAL } from '@/lib/records/removal';
 
 const STATUSES: PurchaseStatus[] = ['DRAFT', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'];
 
@@ -35,6 +43,14 @@ export default async function PurchasesPage({
     supplierId: params.supplier,
   });
   const canCreate = hasPermission(user, 'purchase.create');
+  const canRemove = hasPermission(user, REMOVAL.purchases.permission);
+  // Only a purchase with nothing received yet can be cancelled — the same
+  // rule as cancelPurchase; the server checks it again.
+  const removable = (purchase: (typeof purchases)[number]) =>
+    purchase.status === 'DRAFT' || purchase.status === 'ORDERED';
+  const removableRows = purchases
+    .filter(removable)
+    .map((purchase) => ({ id: purchase.id, label: purchase.purchaseNumber }));
   const filtered = Boolean(params.q || params.status || params.supplier);
 
   return (
@@ -102,56 +118,70 @@ export default async function PurchasesPage({
             }
           />
         ) : (
-          <Panel padding="none" className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-muted/40">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Purchase</TableHead>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead className="hidden sm:table-cell">Date</TableHead>
-                    <TableHead className="hidden text-right md:table-cell">Lines</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {purchases.map((purchase) => (
-                    <TableRow key={purchase.id} className="relative">
-                      <TableCell>
-                        <Link
-                          href={`/inventory/purchases/${purchase.id}`}
-                          className="font-medium after:absolute after:inset-0 hover:underline"
-                        >
-                          {purchase.purchaseNumber}
-                        </Link>
-                        {purchase.supplierInvoiceNumber ? (
-                          <span className="block text-xs text-muted-foreground">
-                            Inv. {purchase.supplierInvoiceNumber}
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{purchase.supplier.name}</TableCell>
-                      <TableCell className="hidden whitespace-nowrap sm:table-cell">
-                        {purchase.supplierInvoiceDate
-                          ? formatCalendarDate(purchase.supplierInvoiceDate)
-                          : formatDate(purchase.createdAt)}
-                      </TableCell>
-                      <TableCell className="hidden text-right tabular-nums md:table-cell">
-                        {purchase._count.items}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {purchase.totalAmount ? formatMoney(purchase.totalAmount) : '—'}
-                      </TableCell>
-                      <TableCell>
-                        <PurchaseStatusPill status={purchase.status} />
-                      </TableCell>
+          <RecordSelection entity="purchases" enabled={canRemove}>
+            <Panel padding="none" className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-muted/40">
+                    <TableRow className="hover:bg-transparent">
+                      <SelectHead rows={removableRows} />
+                      <TableHead>Purchase</TableHead>
+                      <TableHead>Supplier</TableHead>
+                      <TableHead className="hidden sm:table-cell">Date</TableHead>
+                      <TableHead className="hidden text-right md:table-cell">Lines</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Status</TableHead>
+                      <RemoveHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Panel>
+                  </TableHeader>
+                  <TableBody>
+                    {purchases.map((purchase) => (
+                      <TableRow key={purchase.id} className="relative">
+                        <SelectCell
+                          id={purchase.id}
+                          label={purchase.purchaseNumber}
+                          removable={removable(purchase)}
+                        />
+                        <TableCell>
+                          <Link
+                            href={`/inventory/purchases/${purchase.id}`}
+                            className="font-medium after:absolute after:inset-0 hover:underline"
+                          >
+                            {purchase.purchaseNumber}
+                          </Link>
+                          {purchase.supplierInvoiceNumber ? (
+                            <span className="block text-xs text-muted-foreground">
+                              Inv. {purchase.supplierInvoiceNumber}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>{purchase.supplier.name}</TableCell>
+                        <TableCell className="hidden whitespace-nowrap sm:table-cell">
+                          {purchase.supplierInvoiceDate
+                            ? formatCalendarDate(purchase.supplierInvoiceDate)
+                            : formatDate(purchase.createdAt)}
+                        </TableCell>
+                        <TableCell className="hidden text-right tabular-nums md:table-cell">
+                          {purchase._count.items}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {purchase.totalAmount ? formatMoney(purchase.totalAmount) : '—'}
+                        </TableCell>
+                        <TableCell>
+                          <PurchaseStatusPill status={purchase.status} />
+                        </TableCell>
+                        <RemoveCell
+                          id={purchase.id}
+                          label={purchase.purchaseNumber}
+                          removable={removable(purchase)}
+                        />
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Panel>
+          </RecordSelection>
         )}
       </Stack>
     </Stack>

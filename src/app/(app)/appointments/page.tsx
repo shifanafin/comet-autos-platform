@@ -2,13 +2,19 @@ import Link from 'next/link';
 import { CalendarDays, CalendarPlus, LogIn } from 'lucide-react';
 import { requireUser } from '@/lib/auth/authorize';
 import { getAppointmentBoard } from '@/lib/appointments/service';
-import { formatDateTime, formatDayHeading, formatTime, localDateString } from '@/lib/format';
+import {
+  formatDateTime,
+  formatDayHeading,
+  formatTime,
+  localDateString,
+  toLocalDateTimeInput,
+} from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { AppointmentStatusPill } from '@/components/workshop/status-pills';
-import { AppointmentStatusButtons } from './appointment-actions';
+import { AppointmentStatusButtons, RescheduleAppointmentButton } from './appointment-actions';
 
 type Board = Awaited<ReturnType<typeof getAppointmentBoard>>;
 type Appointment = Board['today'][number];
@@ -134,6 +140,12 @@ function AppointmentList({ appointments, showDate }: { appointments: Appointment
                       <LogIn />
                       Check in
                     </LinkButton>
+                    <RescheduleAppointmentButton
+                      appointmentId={appointment.id}
+                      scheduledAt={toLocalDateTimeInput(appointment.scheduledAt)}
+                      durationMinutes={appointment.estimatedDurationMinutes}
+                      notes={appointment.notes}
+                    />
                     <AppointmentStatusButtons appointmentId={appointment.id} canConfirm={appointment.status === 'SCHEDULED'} />
                   </>
                 ) : null}

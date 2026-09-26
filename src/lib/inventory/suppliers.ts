@@ -297,3 +297,74 @@ export async function getSupplierForEdit(user: AuthenticatedUser, supplierId: st
   if (!supplier) throw new NotFoundError('supplier');
   return supplier;
 }
+
+/**
+ * Deletes a supplier.
+ *
+ * One that was never used — no purchase, no part naming it as preferred —
+ * is removed outright; the audit log keeps what it was. One with history is
+ * archived (inactive: out of the pickers, still on every purchase, back with
+ * Edit → Active). It is refused while a purchase is still open or money is
+ * still owed to them — the same balance the Payables screen shows.
+ */
+export async function deleteSupplier(
+  user: AuthenticatedUser,
+  supplierId: string,
+): Promise<{ outcome: 'deleted' | 'archived' }> {
+  requirePermission(user, 'inventory.manage');
+  const supplier = await prisma.supplier.findFirst({
+    where: { id: supplierId, organizationId: user.organizationId },
+    include: { _count: { select: { purchases: true, parts: true } } },
+  });
+  if (!supplier) throw new NotFoundError('supplier');
+  if (!supplier.isActive) throw new DomainError(`${supplier.name} is already deleted.`);
+
+  if (supplier._count.purchases === 0 && supplier._count.parts === 0) {
+    return prisma.$transaction(async (tx) => {
+      await tx.supplier.delete({ where: { id: supplier.id } });
+      await writeAuditLog(tx, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'supplier.deleted',
+        entityType: 'Supplier',
+        entityId: supplier.id,
+        beforeData: { name: supplier.name, phone: supplier.phone, email: supplier.email },
+      });
+      return { outcome: 'deleted' as const };
+    });
+  }
+
+  const open = await prisma.purchase.findFirst({
+    where: {
+      organizationId: user.organizationId,
+      supplierId: supplier.id,
+      status: { in: ['DRAFT', 'ORDERED', 'PARTIALLY_RECEIVED'] },
+    },
+    select: { purchaseNumber: true },
+  });
+  if (open) {
+    throw new DomainError(
+      `${supplier.name} has open purchase ${open.purchaseNumber}. Receive or cancel it first.`,
+    );
+  }
+  const owed = money((await balances(user.organizationId, [supplier.id])).get(supplier.id));
+  if (Number(owed.outstanding) > 0) {
+    throw new DomainError(
+      `${supplier.name} is still owed AED ${owed.outstanding}. Pay or settle it first.`,
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.supplier.update({ where: { id: supplier.id }, data: { isActive: false } });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'supplier.archived',
+      entityType: 'Supplier',
+      entityId: supplier.id,
+      beforeData: { isActive: true },
+      afterData: { isActive: false },
+    });
+    return { outcome: 'archived' as const };
+  });
+}

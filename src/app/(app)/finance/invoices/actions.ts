@@ -9,14 +9,15 @@ import { formDataToObject } from '@/lib/form-data';
 import { prisma } from '@/lib/prisma';
 import { createDirectInvoice } from '@/lib/billing/direct-invoice';
 import { recordInvoicePayment } from '@/lib/billing/invoice';
+import { reverseInvoicePayment, updateInvoice, voidInvoice } from '@/lib/billing/invoice-changes';
 
 /*
  * Invoices as documents in their own right. Both actions call the shared
  * billing services — the same numbering, VAT, balance and payment rules the
- * work-order billing screen uses.
+ * job-card billing screen uses.
  */
 
-/** Refreshes everywhere an invoice shows up, including its work order when it has one. */
+/** Refreshes everywhere an invoice shows up, including its job card when it has one. */
 async function refreshInvoice(invoiceId: string) {
   revalidatePath('/finance/invoices');
   revalidatePath(`/finance/invoices/${invoiceId}`);
@@ -70,5 +71,49 @@ export async function recordInvoicePaymentAction(
     recordInvoicePayment(user, invoiceId, formDataToObject(formData)),
   );
   if (result.ok || result.duplicate) await refreshInvoice(invoiceId);
+  return toClientResult(result);
+}
+
+/** Saves corrected lines on an unpaid invoice, then opens it. */
+export async function updateInvoiceAction(
+  invoiceId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const input = formDataToObject(formData);
+  let items: unknown = [];
+  try {
+    items = input.items ? JSON.parse(input.items) : [];
+  } catch {
+    return { ok: false, error: 'The invoice lines could not be read. Refresh and try again.' };
+  }
+  const result = await runAction(() => updateInvoice(user, invoiceId, { ...input, items }));
+  if (!result.ok && !result.duplicate) return toClientResult(result);
+  await refreshInvoice(invoiceId);
+  redirect(`/finance/invoices/${invoiceId}`);
+}
+
+export async function voidInvoiceAction(
+  invoiceId: string,
+  input: { reason: string; requestKey: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => voidInvoice(user, invoiceId, input));
+  if (result.ok || result.duplicate) await refreshInvoice(invoiceId);
+  return toClientResult(result);
+}
+
+export async function reverseInvoicePaymentAction(
+  invoiceId: string,
+  paymentId: string,
+  input: { reason: string; requestKey: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => reverseInvoicePayment(user, paymentId, input));
+  if (result.ok || result.duplicate) {
+    await refreshInvoice(invoiceId);
+    revalidatePath('/customers', 'layout');
+  }
   return toClientResult(result);
 }

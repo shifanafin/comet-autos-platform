@@ -30,7 +30,7 @@ import { CLOSED_JOB_STATUSES } from '@/lib/workshop/stages';
  * balance rules (lib/billing/invoice) — only the source of the lines differs.
  */
 
-const lineSchema = z.object({
+export const lineSchema = z.object({
   /** Parts or labour — printed in the invoice's TYPE column. */
   itemType: z.enum(['PART', 'LABOUR'], { error: 'Choose parts or labour for every line.' }),
   description: z
@@ -47,7 +47,7 @@ const directInvoiceSchema = z.object({
   customerId: z.uuid({ error: 'Choose the customer this invoice is for.' }),
   /** Optional: not every invoice is about a car the workshop has on file. */
   vehicleId: z.union([z.literal(''), z.uuid()]).optional(),
-  /** Optional: bills an open work order, which then counts as invoiced. */
+  /** Optional: bills an open job card, which then counts as invoiced. */
   jobCardId: z.union([z.literal(''), z.uuid()]).optional(),
   /** Optional: copies the quotation's lines instead of typing them. */
   estimateId: z.union([z.literal(''), z.uuid()]).optional(),
@@ -59,7 +59,7 @@ const directInvoiceSchema = z.object({
 export type DirectInvoiceInput = z.input<typeof directInvoiceSchema>;
 
 /** Prices typed lines through the shared money rules — never a second formula. */
-function priceLines(items: z.infer<typeof lineSchema>[], defaultVatRate: string) {
+export function priceLines(items: z.infer<typeof lineSchema>[], defaultVatRate: string) {
   return items.map((item, index) => {
     try {
       return {
@@ -139,7 +139,7 @@ export interface DirectInvoiceResult {
 
 /**
  * Issues a tax invoice for a customer, optionally for a vehicle, optionally
- * against a work order, with lines either typed or copied from a quotation.
+ * against a job card, with lines either typed or copied from a quotation.
  *
  * Everything an invoice made the long way gets, this one gets too: a
  * branch-scoped sequential number, the seller and customer details
@@ -183,7 +183,7 @@ export async function createDirectInvoice(
       vehicleId = vehicle.id;
     }
 
-    // Work orders are locked before invoices, everywhere.
+    // Job cards are locked before invoices, everywhere.
     let branchId = user.primaryBranchId!;
     let jobCard: { id: string; branchId: string; status: JobCardStatus; vehicleId: string } | null = null;
     if (input.jobCardId) {
@@ -192,13 +192,13 @@ export async function createDirectInvoice(
         where: { id: input.jobCardId, organizationId: user.organizationId },
         select: { id: true, branchId: true, status: true, customerId: true, vehicleId: true },
       });
-      if (!found) throw new DomainError('That work order was not found.', 'jobCardId');
+      if (!found) throw new DomainError('That job card was not found.', 'jobCardId');
       if (found.customerId !== customer.id) {
-        throw new DomainError('That work order belongs to a different customer.', 'jobCardId');
+        throw new DomainError('That job card belongs to a different customer.', 'jobCardId');
       }
       requirePermission(user, 'invoice.create', { branchId: found.branchId });
       if (CLOSED_JOB_STATUSES.includes(found.status)) {
-        throw new DomainError('That work order is already closed.', 'jobCardId');
+        throw new DomainError('That job card is already closed.', 'jobCardId');
       }
       const live = await tx.invoice.findFirst({
         where: {
@@ -209,7 +209,7 @@ export async function createDirectInvoice(
         select: { invoiceNumber: true },
       });
       if (live) {
-        throw new DomainError(`That work order is already invoiced (${live.invoiceNumber}).`, 'jobCardId');
+        throw new DomainError(`That job card is already invoiced (${live.invoiceNumber}).`, 'jobCardId');
       }
       jobCard = { id: found.id, branchId: found.branchId, status: found.status, vehicleId: found.vehicleId };
       branchId = found.branchId;
@@ -220,7 +220,7 @@ export async function createDirectInvoice(
       ? await linesFromEstimate(tx, user.organizationId, input.estimateId, customer.id)
       : null;
     if (source?.estimate.jobCardId && !jobCard) {
-      // Invoicing a quotation that belongs to a work order bills that work
+      // Invoicing a quotation that belongs to a job card bills that work
       // order, rather than leaving it open and unbilled beside the invoice.
       await tx.$executeRaw`SELECT id FROM job_cards WHERE id = ${source.estimate.jobCardId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
       const found = await tx.jobCard.findFirst({
@@ -236,7 +236,7 @@ export async function createDirectInvoice(
           },
           select: { invoiceNumber: true },
         });
-        if (live) throw new DomainError(`That quotation's work order is already invoiced (${live.invoiceNumber}).`);
+        if (live) throw new DomainError(`That quotation's job card is already invoiced (${live.invoiceNumber}).`);
         requirePermission(user, 'invoice.create', { branchId: found.branchId });
         jobCard = found;
         branchId = found.branchId;

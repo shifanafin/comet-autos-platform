@@ -3,6 +3,7 @@ import { AuthError } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { buildExport, EXPORTS, type ExportFilters } from '@/lib/data-transfer/exports';
 import { csvFileName } from '@/lib/data-transfer/csv';
+import { getBrand } from '@/lib/brand/brand';
 
 /*
  * Downloading a list as a spreadsheet.
@@ -40,7 +41,7 @@ export async function GET(
     return new Response(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${csvFileName(label)}"`,
+        'Content-Disposition': `attachment; filename="${csvFileName((await getBrand(user.organizationId)).filePrefix, label)}"`,
         // A spreadsheet of live data should never be cached or stored.
         'Cache-Control': 'no-store, max-age=0',
       },

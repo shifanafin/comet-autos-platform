@@ -5,7 +5,7 @@ import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { getVehicleDetail } from '@/lib/vehicles/service';
 import { OPEN_JOB_STATUSES } from '@/lib/workshop/check-in';
-import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
+import { formatDate, formatDateTime, formatKm, formatMoney } from '@/lib/format';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
 import { JobStatusBadge } from '@/components/shared/job-status-badge';
@@ -13,6 +13,10 @@ import { LinkButton } from '@/components/shared/link-button';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { EstimateStatusPill } from '@/components/workshop/status-pills';
 import { StatusPill } from '@/components/shared/status-pill';
+import {
+  DeleteVehicleButton,
+  RestoreVehicleButton,
+} from '@/components/workshop/record-archive-controls';
 
 export default async function VehicleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -37,7 +41,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
     ['Colour', vehicle.color ?? '—'],
     [
       'Last mileage',
-      vehicle.lastMileage !== null ? `${vehicle.lastMileage.toLocaleString('en-AE')} km` : '—',
+      vehicle.lastMileage !== null ? `${formatKm(vehicle.lastMileage)}` : '—',
     ],
   ];
 
@@ -73,40 +77,56 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
           </>
         }
         actions={
-          <>
-            {canEdit ? (
-              <LinkButton href={`/vehicles/${vehicle.id}/edit`} variant="outline" size="lg">
-                <Pencil />
-                Edit
+          !vehicle.isActive ? (
+            canEdit ? (
+              <RestoreVehicleButton vehicleId={vehicle.id} plate={vehicle.plateNumber} />
+            ) : undefined
+          ) : (
+            <>
+              {canEdit ? (
+                <LinkButton href={`/vehicles/${vehicle.id}/edit`} variant="outline" size="lg">
+                  <Pencil />
+                  Edit
+                </LinkButton>
+              ) : null}
+              {canEdit && !openJob ? (
+                <DeleteVehicleButton vehicleId={vehicle.id} plate={vehicle.plateNumber} />
+              ) : null}
+              {canEdit ? (
+                <LinkButton href={`/vehicles/${vehicle.id}/transfer`} variant="outline" size="lg">
+                  <ArrowLeftRight />
+                  Change owner
+                </LinkButton>
+              ) : null}
+              <LinkButton
+                href={`/appointments/new?vehicle=${vehicle.id}`}
+                variant="outline"
+                size="lg"
+              >
+                <CalendarDays />
+                Book appointment
               </LinkButton>
-            ) : null}
-            {canEdit ? (
-              <LinkButton href={`/vehicles/${vehicle.id}/transfer`} variant="outline" size="lg">
-                <ArrowLeftRight />
-                Change owner
-              </LinkButton>
-            ) : null}
-            <LinkButton
-              href={`/appointments/new?vehicle=${vehicle.id}`}
-              variant="outline"
-              size="lg"
-            >
-              <CalendarDays />
-              Book appointment
-            </LinkButton>
-            {openJob ? (
-              <LinkButton href={`/job-cards/${openJob.id}`} size="lg">
-                Open {openJob.jobNumber}
-              </LinkButton>
-            ) : (
-              <LinkButton href={`/check-in?vehicle=${vehicle.id}`} size="lg">
-                <LogIn />
-                Check in
-              </LinkButton>
-            )}
-          </>
+              {openJob ? (
+                <LinkButton href={`/job-cards/${openJob.id}`} size="lg">
+                  Open {openJob.jobNumber}
+                </LinkButton>
+              ) : (
+                <LinkButton href={`/check-in?vehicle=${vehicle.id}`} size="lg">
+                  <LogIn />
+                  Check in
+                </LinkButton>
+              )}
+            </>
+          )
         }
       />
+
+      {!vehicle.isActive ? (
+        <Panel className="border-destructive/30 bg-destructive/5 text-sm">
+          This vehicle is deleted. It doesn&apos;t appear in lists, search or pickers; its service
+          history below is kept.
+        </Panel>
+      ) : null}
 
       <Grid gap="xl" className="items-start xl:grid-cols-12">
         <Section
@@ -118,7 +138,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             <EmptyState
               icon={History}
               title="No visits yet"
-              description="Each work order is added to this vehicle's history."
+              description="Each job card is added to this vehicle's history."
             />
           ) : (
             <Panel padding="none">
@@ -142,7 +162,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
                         <span className="text-sm text-muted-foreground">
                           {formatDate(job.openedAt)}
                           {job.odometerReading !== null
-                            ? ` · ${job.odometerReading.toLocaleString('en-AE')} km`
+                            ? ` · ${formatKm(job.odometerReading)}`
                             : ''}
                         </span>
                       </div>

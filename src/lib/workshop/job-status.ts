@@ -15,7 +15,13 @@ import {
   type WorkflowStatus,
 } from '@/lib/workshop/stages';
 
-export { WORKFLOW_STAGES, JOB_STATUS_LABEL, CLOSED_JOB_STATUSES, getEffectiveStageStatus, normalizeStatus };
+export {
+  WORKFLOW_STAGES,
+  JOB_STATUS_LABEL,
+  CLOSED_JOB_STATUSES,
+  getEffectiveStageStatus,
+  normalizeStatus,
+};
 export type { WorkflowStage, WorkflowStatus };
 
 /**
@@ -32,8 +38,8 @@ export type { WorkflowStage, WorkflowStatus };
  *
  * The short path, for a one-person workshop that only wants the documents:
  *
- *   ARRIVED → ESTIMATE  (quote a work order without inspecting or diagnosing)
- *   any open stage → INVOICED  (bill a work order without passing through QC)
+ *   ARRIVED → ESTIMATE  (quote a job card without inspecting or diagnosing)
+ *   any open stage → INVOICED  (bill a job card without passing through QC)
  *
  * The short path skips stages; it never invents them. A job that jumps from
  * ARRIVED to INVOICED has no inspection, diagnosis or quality check, and its
@@ -58,7 +64,19 @@ const ALLOWED_TRANSITIONS: Record<WorkflowStatus, WorkflowStatus[]> = {
   INVOICED: ['PAID'],
   PAID: ['DELIVERED'],
   DELIVERED: [],
-  ON_HOLD: ['ARRIVED', 'INSPECTION', 'DIAGNOSIS', 'ESTIMATE', 'WAITING_APPROVAL', 'REJECTED', 'APPROVED', 'REPAIR', 'QUALITY_CHECK', 'READY', 'CANCELLED'],
+  ON_HOLD: [
+    'ARRIVED',
+    'INSPECTION',
+    'DIAGNOSIS',
+    'ESTIMATE',
+    'WAITING_APPROVAL',
+    'REJECTED',
+    'APPROVED',
+    'REPAIR',
+    'QUALITY_CHECK',
+    'READY',
+    'CANCELLED',
+  ],
   CANCELLED: [],
 };
 
@@ -83,6 +101,27 @@ const WORKFLOW_OWNED: Partial<Record<WorkflowStatus, string>> = {
 };
 
 const EXCEPTION_STATUSES: WorkflowStatus[] = ['ON_HOLD', 'CANCELLED'];
+
+/**
+ * The only backward moves: undoing billing. A voided invoice sends the job
+ * back to where it was billed from; a reversed payment sends a paid job back
+ * to invoiced. Only ever taken by voidInvoice / reverseInvoicePayment
+ * (lib/billing/invoice-changes.ts) with `reopen: true` — never by a button.
+ */
+const REOPEN_TRANSITIONS: Partial<Record<WorkflowStatus, WorkflowStatus[]>> = {
+  INVOICED: [
+    'ARRIVED',
+    'INSPECTION',
+    'DIAGNOSIS',
+    'ESTIMATE',
+    'WAITING_APPROVAL',
+    'APPROVED',
+    'REPAIR',
+    'QUALITY_CHECK',
+    'READY',
+  ],
+  PAID: ['INVOICED'],
+};
 
 export class InvalidJobStatusTransitionError extends DomainError {}
 
@@ -128,6 +167,8 @@ export async function applyJobStatusChange(
     actor: StatusActor;
     source: TransitionSource;
     metadata?: Record<string, unknown>;
+    /** Undoing billing — see REOPEN_TRANSITIONS. Workflow source only. */
+    reopen?: boolean;
   },
 ): Promise<{ fromStatus: JobCardStatus }> {
   await tx.$executeRaw`SELECT id FROM job_cards WHERE id = ${params.jobCardId}::uuid AND organization_id = ${params.organizationId}::uuid FOR UPDATE`;
@@ -139,7 +180,11 @@ export async function applyJobStatusChange(
 
   const { toStatus } = params;
   const from = normalizeStatus(jobCard.status);
-  if (!canTransition(from, toStatus)) {
+  const reopening =
+    params.reopen === true &&
+    params.source === 'workflow' &&
+    (REOPEN_TRANSITIONS[from] ?? []).includes(toStatus);
+  if (!reopening && !canTransition(from, toStatus)) {
     throw new InvalidJobStatusTransitionError(
       `A job that is "${JOB_STATUS_LABEL[from]}" can't move to "${JOB_STATUS_LABEL[toStatus]}".`,
     );

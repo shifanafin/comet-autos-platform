@@ -29,6 +29,7 @@ import {
 } from '@/lib/workshop/repair';
 import { recordQualityCheck } from '@/lib/workshop/quality-check';
 import { removeJobPhoto } from '@/lib/media/photos';
+import { updateJobCardDetails } from '@/lib/workshop/job-card-details';
 import { createInvoice, deliverVehicle, recordPayment } from '@/lib/billing/invoice';
 import { customerQuotePath, getRequestOrigin } from '@/lib/request-origin';
 import { quotationWhatsApp } from '@/lib/customer-access/share';
@@ -103,7 +104,7 @@ export async function saveDiagnosisAction(
 }
 
 /**
- * Opens the work order's quotation and goes to it. A quotation raised this
+ * Opens the job card's quotation and goes to it. A quotation raised this
  * way and one raised straight for a customer are the same document on the
  * same screen, so both land on /quotations/<id>.
  */
@@ -306,6 +307,20 @@ export async function deliverVehicleAction(
 export async function removePhotoAction(jobCardId: string, documentId: string): Promise<ActionResult> {
   const user = await requireUser();
   const result = await runAction(() => removeJobPhoto(user, jobCardId, documentId));
+  if (result.ok) refreshJob(jobCardId);
+  return toClientResult(result);
+}
+
+/** Corrects the request and mileage written at check-in. */
+export async function updateJobCardDetailsAction(
+  jobCardId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    updateJobCardDetails(user, jobCardId, formDataToObject(formData)),
+  );
   if (result.ok) refreshJob(jobCardId);
   return toClientResult(result);
 }

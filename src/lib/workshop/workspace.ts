@@ -326,7 +326,7 @@ export async function getWorkQueues(user: AuthenticatedUser) {
         updatedAt: true,
         kind: true,
         approvals: { orderBy: { decidedAt: 'desc' }, take: 1, select: { approvalMethod: true, decidedAt: true } },
-        // The quotation's own parties, so one raised without a work order
+        // The quotation's own parties, so one raised without a job card
         // still shows who and what it is for.
         customer: { select: { name: true, phone: true } },
         vehicle: { select: { plateNumber: true, make: true, model: true } },

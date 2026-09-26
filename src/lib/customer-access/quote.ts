@@ -127,7 +127,7 @@ export async function decideQuoteAsCustomer(
     where: { id: token.resourceId, organizationId: token.organizationId },
     select: { jobCardId: true, jobCard: { select: { branchId: true } } },
   });
-  // The signature file lives with the work order. A quotation raised
+  // The signature file lives with the job card. A quotation raised
   // without one still takes the customer's decision; only the optional
   // signature image has nowhere to be filed.
   const signature =

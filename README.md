@@ -46,23 +46,24 @@ cp .env.example .env
 `.env` is read by both the Next.js server runtime and the Prisma CLI. Never
 commit it.
 
-### Local PostgreSQL
+### Database
 
-If you don't already have PostgreSQL running locally, start the bundled
-development instance (a real native Postgres binary, not a system install):
+The app connects straight to the hosted PostgreSQL (Supabase) named in
+`.env` — there is no local database. `DATABASE_URL` is the pooled
+connection the app uses; `DIRECT_URL` is the direct one the Prisma CLI uses
+for migrations.
+
+Apply any new migrations to the hosted database before deploying code that
+needs them:
 
 ```bash
-npm run db:start
+npm run prisma:deploy
 ```
 
-Leave this running in its own terminal. It listens on `localhost:5433` and
-creates the `comet_autos_dev` database automatically. Data persists under
-`.local-postgres-data/` (gitignored) between restarts. Stop it with
-`npm run db:stop` (or Ctrl+C in its terminal). This is local-development-only
-tooling — production environments use a real managed PostgreSQL instance.
-
-If you have your own PostgreSQL (local install, Docker, or cloud), just point
-`DATABASE_URL` in `.env` at it instead and skip this step.
+This only applies migrations that haven't run yet, in order, and never
+resets data. Don't point `npm run prisma:migrate` (`prisma migrate dev`)
+at a database with real data: when it finds drift it offers to reset the
+database.
 
 Generate the Prisma Client:
 
@@ -76,9 +77,13 @@ npm run prisma:generate
 npm run dev
 ```
 
-Runs on `http://localhost:3000`. This starts the local Postgres instance (if
-nothing is already listening on port 5433) and the Next.js dev server
-together; use `npm run dev:web` to start only the Next.js dev server.
+Runs on `http://localhost:3000`, against the hosted database in `.env`.
+
+### Tests
+
+`npm run test:integration` runs against the database in `.env`, creating
+its own test organizations there. Run it against a separate test database
+(for example a second Supabase project), never the live one.
 
 ## Other scripts
 
@@ -89,9 +94,9 @@ together; use `npm run dev:web` to start only the Next.js dev server.
 | `npm run lint`              | Lint the app                                  |
 | `npm run format` / `format:check` | Prettier across the whole repo         |
 | `npm run prisma:validate`  | Validate `prisma/schema.prisma`               |
-| `npm run prisma:migrate`   | Run Prisma migrations in dev                  |
+| `npm run prisma:deploy`    | Apply pending migrations (safe on live data)  |
+| `npm run prisma:migrate`   | Create a new migration (development only)     |
 | `npm run db:seed`          | Seed the database (`prisma/seed.ts`)          |
-| `npm run db:start` / `db:stop` | Local embedded PostgreSQL (dev only)      |
 
 ## Environment variables
 

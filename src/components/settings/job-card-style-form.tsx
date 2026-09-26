@@ -24,7 +24,7 @@ const STYLES: { detailed: boolean; icon: LucideIcon; title: string; description:
   },
 ];
 
-/** Picks which job card every work order opens as. Saves on tap. */
+/** Picks which job card every job card opens as. Saves on tap. */
 export function JobCardStyleForm({ detailed, canEdit }: { detailed: boolean; canEdit: boolean }) {
   const router = useRouter();
   const [current, setCurrent] = useState(detailed);

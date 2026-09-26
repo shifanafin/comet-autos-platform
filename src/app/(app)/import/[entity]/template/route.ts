@@ -2,6 +2,7 @@ import { requireUser } from '@/lib/auth/authorize';
 import { hasPermission } from '@/lib/auth/authorize';
 import { IMPORTS, importTemplate } from '@/lib/data-transfer/imports';
 import { csvFileName } from '@/lib/data-transfer/csv';
+import { getBrand } from '@/lib/brand/brand';
 
 /** The blank spreadsheet to fill in: the headings, and one example row. */
 export async function GET(
@@ -18,7 +19,7 @@ export async function GET(
   return new Response(csv, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${csvFileName(`${label}-template`)}"`,
+      'Content-Disposition': `attachment; filename="${csvFileName((await getBrand(user.organizationId)).filePrefix, `${label}-template`)}"`,
       'Cache-Control': 'no-store, max-age=0',
     },
   });

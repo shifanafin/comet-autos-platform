@@ -11,6 +11,7 @@ import { StatusPill } from '@/components/shared/status-pill';
 import { InlineForm } from '@/components/shared/inline-form';
 import { ExpenseForm } from '@/components/finance/expense-form';
 import { VoidExpenseButton } from '@/components/finance/void-expense';
+import { EditExpenseButton } from '@/components/finance/edit-expense';
 
 const METHOD_LABEL: Record<string, string> = {
   CASH: 'Cash',
@@ -45,7 +46,18 @@ export default async function ExpensesPage({
   const { expenses, totals } = await listExpenses(user, filters);
   const canRecord = hasPermission(user, 'accounting.create');
   const canVoid = hasPermission(user, 'accounting.edit');
-  const formOptions = canRecord ? await getExpenseFormOptions(user) : null;
+  const formOptions = canRecord || canVoid ? await getExpenseFormOptions(user) : null;
+  const draft = (expense: (typeof expenses)[number]) => ({
+    id: expense.id,
+    description: expense.description,
+    amount: expense.amount.toString(),
+    // "5.00" → "5"; a whole number like "10" is left alone.
+    taxRate: expense.taxRate ? trimDecimal(expense.taxRate.toString()) : '',
+    expenseDate: expense.expenseDate.toISOString().slice(0, 10),
+    vendorName: expense.vendorName ?? '',
+    paymentMethod: expense.paymentMethod ?? '',
+    categoryId: expense.chartOfAccount?.id ?? '',
+  });
   const filtered = Boolean(filters.query || filters.categoryId || filters.from || filters.to);
 
   return (
@@ -147,7 +159,19 @@ export default async function ExpensesPage({
                     footer={`${expense.vendorName ? `${expense.vendorName} · ` : ''}Recorded by ${expense.recordedBy.fullName}`}
                   >
                     {canVoid && expense.status === 'RECORDED' ? (
-                      <VoidExpenseButton expenseId={expense.id} description={expense.description} />
+                      <span className="flex flex-wrap gap-2">
+                        {formOptions ? (
+                          <EditExpenseButton
+                            expense={draft(expense)}
+                            categories={formOptions.categories}
+                            defaultVatRate={formOptions.defaultVatRate}
+                          />
+                        ) : null}
+                        <VoidExpenseButton
+                          expenseId={expense.id}
+                          description={expense.description}
+                        />
+                      </span>
                     ) : null}
                   </RecordCard>
                 ))}
@@ -207,10 +231,19 @@ export default async function ExpensesPage({
                         {canVoid ? (
                           <td className="px-2 py-4 text-right">
                             {expense.status === 'RECORDED' ? (
-                              <VoidExpenseButton
-                                expenseId={expense.id}
-                                description={expense.description}
-                              />
+                              <span className="inline-flex gap-1">
+                                {formOptions ? (
+                                  <EditExpenseButton
+                                    expense={draft(expense)}
+                                    categories={formOptions.categories}
+                                    defaultVatRate={formOptions.defaultVatRate}
+                                  />
+                                ) : null}
+                                <VoidExpenseButton
+                                  expenseId={expense.id}
+                                  description={expense.description}
+                                />
+                              </span>
                             ) : null}
                           </td>
                         ) : null}
@@ -225,4 +258,8 @@ export default async function ExpensesPage({
       </Section>
     </Stack>
   );
+}
+
+function trimDecimal(value: string) {
+  return value.includes('.') ? value.replace(/\.?0+$/, '') : value;
 }

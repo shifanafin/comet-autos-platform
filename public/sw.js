@@ -1,5 +1,5 @@
 /*
- * Comet Autos service worker — deliberately small.
+ * The app's service worker — deliberately small.
  *
  * It caches nothing from the app itself: every screen holds live workshop
  * and customer data behind a sign-in, and a stale copy of a job or an

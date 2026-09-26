@@ -175,7 +175,7 @@ export async function getRecentJobCards(organizationId: string, take = 6) {
 }
 
 /**
- * The three numbers the owner opens the app for: work orders still open,
+ * The three numbers the owner opens the app for: job cards still open,
  * quotations the customer has not answered, and invoices not yet paid.
  * Quotations count only the current version of each chain, and only while
  * they are still in date — an expired quotation is not waiting for anyone.
@@ -217,7 +217,7 @@ export interface ActivityItem {
 }
 
 /**
- * Everything created today, newest first — work orders opened, quotations
+ * Everything created today, newest first — job cards opened, quotations
  * started, invoices issued and payments taken. Money rows are left out for
  * someone who may not see invoices.
  */

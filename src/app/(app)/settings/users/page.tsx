@@ -11,6 +11,7 @@ import { StatusPill } from '@/components/shared/status-pill';
 import { TableWrap } from '@/components/shared/record-card';
 import { UserFilters } from '@/components/access/user-filters';
 import { AccessTabs } from '@/components/access/access-tabs';
+import { getBrand } from '@/lib/brand/brand';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,9 @@ function RoleChips({ roles }: { roles: UserRow['roles'] }) {
 }
 
 function Status({ active }: { active: boolean }) {
-  return <StatusPill tone={active ? 'success' : 'neutral'}>{active ? 'Active' : 'Inactive'}</StatusPill>;
+  return (
+    <StatusPill tone={active ? 'success' : 'neutral'}>{active ? 'Active' : 'Inactive'}</StatusPill>
+  );
 }
 
 const lastSeen = (at: Date | null) => (at ? formatDateTime(at) : 'Never signed in');
@@ -42,11 +45,18 @@ const lastSeen = (at: Date | null) => (at ? formatDateTime(at) : 'Never signed i
 export default async function UsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; roleId?: string; branchId?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    roleId?: string;
+    branchId?: string;
+    page?: string;
+  }>;
 }) {
   const user = await requireUser();
+  const { shortName } = await getBrand(user.organizationId);
   if (!hasPermission(user, 'user.view')) {
-    return <AccessDenied what="who can use Comet Autos" />;
+    return <AccessDenied what={`who can use ${shortName}`} />;
   }
   const params = await searchParams;
   const status = (['active', 'inactive', 'all'] as const).includes(params.status as 'active')
@@ -66,7 +76,7 @@ export default async function UsersPage({
       <PageHeader
         eyebrow="Settings"
         title="Users & roles"
-        description="Who can sign in to Comet Autos, and what each of them is allowed to do."
+        description={`Who can sign in to ${shortName}, and what each of them is allowed to do.`}
         actions={
           canManage ? (
             <LinkButton href="/settings/users/new" size="lg" className="h-11">
@@ -82,7 +92,12 @@ export default async function UsersPage({
       <UserFilters
         roles={options.roles}
         branches={options.branches}
-        current={{ q: params.q ?? '', status, roleId: params.roleId ?? '', branchId: params.branchId ?? '' }}
+        current={{
+          q: params.q ?? '',
+          status,
+          roleId: params.roleId ?? '',
+          branchId: params.branchId ?? '',
+        }}
       />
 
       {page.users.length === 0 ? (
@@ -92,7 +107,7 @@ export default async function UsersPage({
           description={
             filtered
               ? 'Try a different search, or clear the filters to see everyone.'
-              : 'Add a login for anyone who needs to use Comet Autos.'
+              : `Add a login for anyone who needs to use ${shortName}.`
           }
           action={
             canManage && !filtered ? (
@@ -160,7 +175,9 @@ export default async function UsersPage({
                         {row.employeeName ? (
                           <>
                             {row.employeeName}
-                            <span className="block font-mono text-xs">{row.employee?.employeeCode}</span>
+                            <span className="block font-mono text-xs">
+                              {row.employee?.employeeCode}
+                            </span>
                           </>
                         ) : (
                           <span className="text-xs">Not linked</span>
@@ -176,7 +193,9 @@ export default async function UsersPage({
                       <td className="px-2 py-4 text-muted-foreground">
                         {row.primaryBranch?.name ?? 'All branches'}
                       </td>
-                      <td className="px-2 py-4 text-muted-foreground">{lastSeen(row.lastLoginAt)}</td>
+                      <td className="px-2 py-4 text-muted-foreground">
+                        {lastSeen(row.lastLoginAt)}
+                      </td>
                       <td className="px-6 py-4">
                         <Status active={row.isActive} />
                       </td>

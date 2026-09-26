@@ -78,7 +78,7 @@ function defaultValidUntil(): Date {
 }
 
 /**
- * Stages a work order may be quoted from. The full workflow reaches ESTIMATE
+ * Stages a job card may be quoted from. The full workflow reaches ESTIMATE
  * through DIAGNOSIS; a workshop that is not inspecting and diagnosing every
  * car quotes straight off the customer's description, so ARRIVED and
  * INSPECTION are allowed too. The inspection and diagnosis screens stay
@@ -87,7 +87,7 @@ function defaultValidUntil(): Date {
 const QUOTABLE_STATUSES = ['ARRIVED', 'INSPECTION', 'DIAGNOSIS'] as const;
 
 /**
- * Opens version 1 of the work order's quotation as a draft and moves the job
+ * Opens version 1 of the job card's quotation as a draft and moves the job
  * to Estimate. Returns the existing draft if one is already open.
  */
 export async function createEstimate(user: AuthenticatedUser, jobCardId: string) {
@@ -106,10 +106,10 @@ export async function createEstimate(user: AuthenticatedUser, jobCardId: string)
     });
     if (existing?.status === 'DRAFT') return existing;
     if (existing)
-      throw new DomainError('This work order already has a quotation. Revise it instead.');
+      throw new DomainError('This job card already has a quotation. Revise it instead.');
     const status = normalizeStatus(jobCard.status);
     if (!QUOTABLE_STATUSES.includes(status as (typeof QUOTABLE_STATUSES)[number])) {
-      throw new DomainError('This work order has moved past the quotation stage.');
+      throw new DomainError('This job card has moved past the quotation stage.');
     }
     // Already at ESTIMATE only if a previous draft was cancelled; otherwise skip ahead.
     if (status !== 'ESTIMATE') {
@@ -163,7 +163,7 @@ const quotationSchema = z.object({
   customerId: z.uuid({ error: 'Choose the customer this quotation is for.' }),
   /** Optional: a customer may ask for a price before bringing the car in. */
   vehicleId: z.union([z.literal(''), z.uuid()]).optional(),
-  /** Optional: a quotation may be raised against an open work order instead. */
+  /** Optional: a quotation may be raised against an open job card instead. */
   jobCardId: z.union([z.literal(''), z.uuid()]).optional(),
   requestKey: z.string().optional(),
 });
@@ -171,8 +171,8 @@ const quotationSchema = z.object({
 export type QuotationInput = z.infer<typeof quotationSchema>;
 
 /**
- * Opens a quotation straight for a customer — no work order needed. The
- * vehicle is optional, and a work order can be named to file the quotation
+ * Opens a quotation straight for a customer — no job card needed. The
+ * vehicle is optional, and a job card can be named to file the quotation
  * against one, which is the same thing createEstimate does from the other
  * direction.
  *
@@ -218,9 +218,9 @@ export async function createQuotation(user: AuthenticatedUser, rawInput: unknown
         where: { id: input.jobCardId, organizationId: user.organizationId },
         select: { id: true, branchId: true, status: true, customerId: true, vehicleId: true },
       });
-      if (!jobCard) throw new DomainError('That work order was not found.', 'jobCardId');
+      if (!jobCard) throw new DomainError('That job card was not found.', 'jobCardId');
       if (jobCard.customerId !== customer.id) {
-        throw new DomainError('That work order belongs to a different customer.', 'jobCardId');
+        throw new DomainError('That job card belongs to a different customer.', 'jobCardId');
       }
       requirePermission(user, 'job_card.edit', { branchId: jobCard.branchId });
       const open = await tx.estimate.findFirst({
@@ -229,13 +229,13 @@ export async function createQuotation(user: AuthenticatedUser, rawInput: unknown
       });
       if (open) {
         throw new DomainError(
-          `That work order already has quotation ${open.estimateNumber}. Revise it instead.`,
+          `That job card already has quotation ${open.estimateNumber}. Revise it instead.`,
           'jobCardId',
         );
       }
       const status = normalizeStatus(jobCard.status);
       if (!QUOTABLE_STATUSES.includes(status as (typeof QUOTABLE_STATUSES)[number])) {
-        throw new DomainError('That work order has moved past the quotation stage.', 'jobCardId');
+        throw new DomainError('That job card has moved past the quotation stage.', 'jobCardId');
       }
       await applyJobStatusChange(tx, {
         organizationId: user.organizationId,
@@ -424,7 +424,7 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
       } else {
         if (normalizeStatus(jobStatus) !== 'ESTIMATE') {
           throw new DomainError(
-            'The work order is not at the quotation stage, so this quotation cannot be sent.',
+            'The job card is not at the quotation stage, so this quotation cannot be sent.',
           );
         }
         await applyJobStatusChange(tx, {
@@ -651,7 +651,7 @@ export async function reviseEstimate(user: AuthenticatedUser, estimateId: string
       });
       const jobStatus = normalizeStatus(job.status);
       if (jobStatus !== 'WAITING_APPROVAL' && jobStatus !== 'REJECTED') {
-        throw new DomainError('The work order is no longer at the quotation stage.');
+        throw new DomainError('The job card is no longer at the quotation stage.');
       }
       await applyJobStatusChange(tx, {
         organizationId: user.organizationId,
@@ -813,7 +813,7 @@ export async function applyEstimateDecision(
     } else {
       if (normalizeStatus(job.status) !== 'WAITING_APPROVAL') {
         throw new DomainError(
-          'The work order is not waiting for approval (it may be on hold). Ask the workshop to resume it.',
+          'The job card is not waiting for approval (it may be on hold). Ask the workshop to resume it.',
         );
       }
       await applyJobStatusChange(tx, {
@@ -882,7 +882,7 @@ export async function recordCustomerDecision(
     where: { id: estimateId, organizationId: user.organizationId },
     select: { jobCardId: true },
   });
-  // A signature is filed against the work order it belongs to. A quotation
+  // A signature is filed against the job card it belongs to. A quotation
   // raised without one takes the decision on its own — the approval, its
   // items and the audit trail are unchanged; only the optional signature
   // image has nowhere to live.
@@ -950,4 +950,60 @@ export async function getAdditionalEstimate(
   if (!estimate) throw new NotFoundError('additional work request');
   requirePermission(user, 'job_card.view', { branchId: estimate.branchId });
   return estimate;
+}
+
+/**
+ * Deletes a quotation that never left the workshop: a first draft, not sent,
+ * not revised, not raised from a job card. Nothing outside it points at it,
+ * so it is removed outright (its lines with it); the audit log keeps what it
+ * was. Anything sent or on a job card is part of the record and stays.
+ */
+export async function deleteDraftQuotation(user: AuthenticatedUser, estimateId: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimateId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
+    const estimate = await tx.estimate.findFirst({
+      where: { id: estimateId, organizationId: user.organizationId },
+      include: {
+        _count: { select: { items: true, approvals: true, nextVersions: true } },
+      },
+    });
+    if (!estimate) throw new NotFoundError('quotation');
+    requirePermission(user, 'job_card.edit', { branchId: estimate.branchId });
+    const blocker = draftDeleteBlocker({ ...estimate, nextVersions: estimate._count.nextVersions });
+    if (blocker) throw new DomainError(blocker);
+    if (estimate._count.approvals > 0) throw new DomainError('This quotation has a customer decision on it.');
+
+    await tx.estimate.delete({ where: { id: estimate.id } });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: estimate.branchId,
+      actorUserId: user.id,
+      action: 'estimate.draft_deleted',
+      entityType: 'Estimate',
+      entityId: estimate.id,
+      beforeData: {
+        estimateNumber: estimate.estimateNumber,
+        customerId: estimate.customerId,
+        vehicleId: estimate.vehicleId,
+        lines: estimate._count.items,
+        totalAmount: estimate.totalAmount.toString(),
+      },
+    });
+    return { estimateId: estimate.id };
+  });
+}
+
+/** Why a quotation can't be deleted, or null when it can. Shared with the screen. */
+export function draftDeleteBlocker(estimate: {
+  status: string;
+  jobCardId: string | null;
+  previousVersionId: string | null;
+  nextVersions: number;
+}): string | null {
+  if (estimate.status !== 'DRAFT') return 'Only a draft that was never sent can be deleted.';
+  if (estimate.jobCardId) return "A job card's quotation stays with the job card.";
+  if (estimate.previousVersionId || estimate.nextVersions > 0) {
+    return 'A revision is part of the quotation history and stays.';
+  }
+  return null;
 }

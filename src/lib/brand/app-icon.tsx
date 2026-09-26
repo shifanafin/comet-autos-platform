@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 /*
- * The Comet Autos app icon: the sidebar's violet "C" tile, drawn at any size
+ * The app icon: the sidebar's violet initial tile, drawn at any size
  * for the browser tab, the iPhone home screen and the installed app. Drawn
  * in code so there is one mark to change, not a folder of exported PNGs.
  */
@@ -14,7 +14,10 @@ export const APP_BACKGROUND = '#f4f5f8';
  * 80%, so Android can crop it to a circle or squircle without clipping it.
  * The standard icon is a rounded tile on a transparent ground.
  */
-export function appIcon(size: number, { maskable = false } = {}) {
+export function appIcon(
+  size: number,
+  { initial, maskable = false }: { initial: string; maskable?: boolean },
+) {
   const letter = Math.round(size * (maskable ? 0.46 : 0.6));
   return new ImageResponse(
     <div
@@ -33,7 +36,7 @@ export function appIcon(size: number, { maskable = false } = {}) {
         letterSpacing: '-0.04em',
       }}
     >
-      C
+      {initial}
     </div>,
     { width: size, height: size },
   );

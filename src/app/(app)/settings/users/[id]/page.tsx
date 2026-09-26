@@ -120,7 +120,11 @@ export default async function UserDetailPage({
                       : 'Not linked to an employee'
                   }
                 />
-                <Line icon={Clock} label="Account created" value={formatDateTime(detail.createdAt)} />
+                <Line
+                  icon={Clock}
+                  label="Account created"
+                  value={formatDateTime(detail.createdAt)}
+                />
               </div>
             </Panel>
           </Section>

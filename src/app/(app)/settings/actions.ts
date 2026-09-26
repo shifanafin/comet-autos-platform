@@ -10,6 +10,7 @@ import {
   setHiddenMenus,
   updateOrganizationSettings,
 } from '@/lib/organization/settings';
+import { updateBranch } from '@/lib/organization/branches';
 
 export async function saveOrganizationSettingsAction(
   _prev: ActionResult,
@@ -20,9 +21,9 @@ export async function saveOrganizationSettingsAction(
     updateOrganizationSettings(user, formDataToObject(formData)),
   );
   if (result.ok || result.duplicate) {
-    // The workshop's details head every document and decide the default VAT.
-    revalidatePath('/settings');
-    revalidatePath('/finance', 'layout');
+    // The workshop's details head every document and decide the default VAT,
+    // and its name is the app's name — in the sidebar and every tab title.
+    revalidatePath('/', 'layout');
   }
   return toClientResult(result);
 }
@@ -31,7 +32,7 @@ export async function setJobCardStyleAction(detailed: boolean): Promise<ActionRe
   const user = await requireUser();
   const result = await runAction(() => setDetailedJobCards(user, detailed));
   if (result.ok) {
-    // Decides which job card every work order opens as, and whether the
+    // Decides which job card every job card opens as, and whether the
     // standard job card's menus show — both around every page.
     revalidatePath('/', 'layout');
   }
@@ -42,6 +43,18 @@ export async function setHiddenMenusAction(hrefs: string[]): Promise<ActionResul
   const user = await requireUser();
   const result = await runAction(() => setHiddenMenus(user, hrefs));
   // The menus sit in the layout around every page.
+  if (result.ok) revalidatePath('/', 'layout');
+  return toClientResult(result);
+}
+
+export async function updateBranchAction(
+  branchId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => updateBranch(user, branchId, formDataToObject(formData)));
+  // The branch name sits in the top bar on every page.
   if (result.ok) revalidatePath('/', 'layout');
   return toClientResult(result);
 }

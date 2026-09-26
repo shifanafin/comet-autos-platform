@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
-import { requirePermission } from '@/lib/auth/authorize';
+import { hasPermission, requirePermission } from '@/lib/auth/authorize';
 import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
@@ -124,6 +124,62 @@ export async function recordExpense(user: AuthenticatedUser, rawInput: unknown) 
       },
     });
     await settleRequestKey(tx, user, rawInput, expense.id);
+    return expense;
+  });
+}
+
+/**
+ * Corrects a recorded expense — a mistyped amount, date, category or payee.
+ * Same rules and VAT split as recording one; the audit log keeps what it was.
+ * A voided expense stays as it was.
+ */
+export async function updateExpense(user: AuthenticatedUser, expenseId: string, rawInput: unknown) {
+  const input = parseInput(expenseSchema, rawInput);
+  requirePermission(user, 'accounting.edit');
+  if (toFils(input.amount) <= 0)
+    throw new DomainError('The amount must be more than zero.', 'amount');
+  const taxRate = emptyToNull(input.taxRate);
+  const categoryId = emptyToNull(input.categoryId);
+  await assertCategory(user.organizationId, categoryId);
+  const money = split(input.amount, taxRate);
+
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.expense.findFirst({
+      where: { id: expenseId, organizationId: user.organizationId },
+    });
+    if (!before) throw new NotFoundError('expense');
+    if (before.status === 'VOID') throw new DomainError('A voided expense cannot be changed.');
+
+    const data = {
+      chartOfAccountId: categoryId,
+      description: input.description.replace(/\s+/g, ' '),
+      amount: money.net,
+      taxRate,
+      taxAmount: taxRate ? money.tax : null,
+      expenseDate: new Date(`${input.expenseDate}T00:00:00Z`),
+      vendorName: emptyToNull(input.vendorName),
+      paymentMethod: emptyToNull(input.paymentMethod) as (typeof PAYMENT_METHODS)[number] | null,
+    };
+    const expense = await tx.expense.update({ where: { id: before.id }, data });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: before.branchId,
+      actorUserId: user.id,
+      action: 'expense.updated',
+      entityType: 'Expense',
+      entityId: before.id,
+      beforeData: {
+        description: before.description,
+        amount: before.amount.toString(),
+        taxRate: before.taxRate?.toString() ?? null,
+        taxAmount: before.taxAmount?.toString() ?? null,
+        expenseDate: before.expenseDate.toISOString().slice(0, 10),
+        vendorName: before.vendorName,
+        paymentMethod: before.paymentMethod,
+        chartOfAccountId: before.chartOfAccountId,
+      },
+      afterData: { ...data, expenseDate: input.expenseDate, total: money.total },
+    });
     return expense;
   });
 }
@@ -262,7 +318,8 @@ export async function listExpenseCategories(user: AuthenticatedUser) {
 
 /** What the expense form needs: categories, and the default VAT rate to suggest. */
 export async function getExpenseFormOptions(user: AuthenticatedUser) {
-  requirePermission(user, 'accounting.create');
+  // Recording and correcting an expense use the same form.
+  if (!hasPermission(user, 'accounting.create')) requirePermission(user, 'accounting.edit');
   const categories = await listExpenseCategories(user);
   return { categories, defaultVatRate: await resolveDefaultVatRate(user.organizationId) };
 }

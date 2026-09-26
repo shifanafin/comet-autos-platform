@@ -71,8 +71,11 @@ async function loadSeller(organizationId: string): Promise<DocumentSeller> {
 
 const vehicleLabel = (v: { make: string; model: string; year: number | null }) =>
   [v.make, v.model, v.year].filter(Boolean).join(' ');
-const fileName = (title: string, number: string) =>
-  `Comet-Autos-${title.replace(/\s+/g, '-')}-${number}`;
+/** "Mohammed-Mowla-Auto-Garage-LLC-Tax-invoice-INV-000003": the workshop's own name, not the app's. */
+const fileName = (seller: { name: string }, title: string, number: string) => {
+  const workshop = seller.name.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${workshop ? `${workshop}-` : ''}${title.replace(/\s+/g, '-')}-${number}`;
+};
 
 /** The TYPE column: parts or labour, as the workshop's own sheet prints it. */
 function lineType(itemType: EstimateItemType | null): DocumentLineType | null {
@@ -106,7 +109,7 @@ async function fetchQuotation(organizationId: string, estimateId: string) {
         take: 1,
         select: { status: true, decidedAt: true, approvalMethod: true },
       },
-      // The quotation's own parties: backfilled from the work order for
+      // The quotation's own parties: backfilled from the job card for
       // every quotation that has one, and the only source for one that
       // doesn't.
       customer: { select: customerSelect },
@@ -169,7 +172,7 @@ function quotationModel(
       ...(estimate.validUntil
         ? [{ label: 'Valid until', value: formatCalendarDate(estimate.validUntil) }]
         : []),
-      ...(jobCard ? [{ label: 'Work order', value: jobCard.jobNumber }] : []),
+      ...(jobCard ? [{ label: 'Job card', value: jobCard.jobNumber }] : []),
       ...(decision
         ? [
             {
@@ -221,7 +224,7 @@ function quotationModel(
       'Work starts only after you approve this quotation. Any further work found during the repair is quoted separately.',
       ...(estimate.kind === 'ORIGINAL' && estimate.notes ? [estimate.notes] : []),
     ],
-    fileName: fileName(title, estimate.estimateNumber),
+    fileName: fileName(seller, title, estimate.estimateNumber),
   };
 }
 
@@ -264,7 +267,7 @@ async function fetchInvoice(organizationId: string, where: { id: string } | { pa
       },
       payments: { orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }] },
       // The invoice names its own customer and vehicle; the snapshot fields
-      // hold the rest. The work order, when there is one, adds its number
+      // hold the rest. The job card, when there is one, adds its number
       // and the mileage the car came in on.
       customer: { select: { name: true, phone: true } },
       vehicle: { select: vehicleSelect },
@@ -280,8 +283,15 @@ type InvoiceRecord = NonNullable<Awaited<ReturnType<typeof fetchInvoice>>>;
 /** Seller as it was when the invoice was issued (legal snapshot), with current contact details. */
 async function invoiceSeller(invoice: InvoiceRecord): Promise<DocumentSeller> {
   const current = await loadSeller(invoice.organizationId);
+  // A business renamed after this invoice was issued: the invoice still
+  // names the one that issued it, at the top as well as in the legal line —
+  // never the new name above the old legal name, which reads as two companies.
+  const renamed =
+    invoice.sellerLegalName !== null &&
+    invoice.sellerLegalName !== (current.legalName ?? current.name);
   return {
     ...current,
+    name: renamed && invoice.sellerLegalName ? invoice.sellerLegalName : current.name,
     legalName: invoice.sellerLegalName ?? current.legalName,
     address: invoice.sellerAddress ?? current.address,
     taxNumber: invoice.sellerTaxNumber ?? current.taxNumber,
@@ -359,14 +369,16 @@ function invoiceModel(invoice: InvoiceRecord, seller: DocumentSeller): CustomerD
     kind: 'INVOICE',
     title,
     number: invoice.invoiceNumber,
-    status: PAYMENT_STATE[balance.state],
+    // No paid/unpaid badge on the customer's invoice: the totals already
+    // show what was paid and what is due.
+    status: null,
     seller,
     meta: [
       { label: 'Invoice date', value: formatCalendarDate(invoice.issueDate) },
       ...(invoice.supplyDate
         ? [{ label: 'Date of supply', value: formatCalendarDate(invoice.supplyDate) }]
         : []),
-      ...(invoice.jobCard ? [{ label: 'Work order', value: invoice.jobCard.jobNumber }] : []),
+      ...(invoice.jobCard ? [{ label: 'Job card', value: invoice.jobCard.jobNumber }] : []),
     ],
     ...invoiceParties(invoice),
     narrative: [],
@@ -391,7 +403,7 @@ function invoiceModel(invoice: InvoiceRecord, seller: DocumentSeller): CustomerD
       'Amounts are in UAE dirhams (AED) and include VAT where shown.',
       ...(invoice.notes ? [invoice.notes] : []),
     ],
-    fileName: fileName(title, invoice.invoiceNumber),
+    fileName: fileName(seller, title, invoice.invoiceNumber),
   };
 }
 
@@ -417,7 +429,7 @@ function receiptModel(
     meta: [
       { label: 'Payment date', value: formatDate(payment.receivedAt) },
       { label: 'Invoice', value: invoice.invoiceNumber },
-      ...(invoice.jobCard ? [{ label: 'Work order', value: invoice.jobCard.jobNumber }] : []),
+      ...(invoice.jobCard ? [{ label: 'Job card', value: invoice.jobCard.jobNumber }] : []),
     ],
     ...invoiceParties(invoice),
     narrative: [],
@@ -444,7 +456,7 @@ function receiptModel(
       { label: 'Payment status', value: settled ? 'Invoice paid in full' : 'Balance outstanding' },
     ],
     notes: ['Thank you for your payment. Please keep this receipt for your records.'],
-    fileName: fileName('Receipt', number),
+    fileName: fileName(seller, 'Receipt', number),
   };
 }
 

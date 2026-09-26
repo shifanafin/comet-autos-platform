@@ -10,7 +10,7 @@ export type QueueEstimate = Awaited<ReturnType<typeof getWorkQueues>>['estimates
 
 /**
  * Where a quotation opens. Additional-work requests live on their work
- * order's own screen; every other quotation — with a work order or without —
+ * order's own screen; every other quotation — with a job card or without —
  * opens on the one quotation page.
  */
 export function quotationHref(estimate: {
@@ -61,7 +61,7 @@ export function EstimateTable({ estimates, dateLabel }: { estimates: QueueEstima
               <TableCell>
                 <span className="font-medium">{estimate.estimateNumber}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {estimate.jobCard?.jobNumber ?? 'No work order'}
+                  {estimate.jobCard?.jobNumber ?? 'No job card'}
                   {estimate.version > 1 ? ` · v${estimate.version}` : ''}
                   {estimate.kind === 'ADDITIONAL' ? ' · additional work' : ''}
                 </span>

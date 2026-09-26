@@ -14,7 +14,7 @@ import { recordInvoicePaymentAction } from '@/app/(app)/finance/invoices/actions
 
 /*
  * Taking money against an invoice. One form for both doors into billing —
- * the work-order screen and the invoice's own page — so the payment rules,
+ * the job-card screen and the invoice's own page — so the payment rules,
  * the wording and the duplicate protection are the same wherever the owner
  * happens to be standing.
  */

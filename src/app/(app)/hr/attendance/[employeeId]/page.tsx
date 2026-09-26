@@ -5,7 +5,7 @@ import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { AuthError } from '@/lib/auth/authorize';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { ATTENDANCE_STATUSES, formatWorked, getEmployeeAttendance } from '@/lib/hr/attendance';
-import { formatCalendarDate, formatTime, localDateString } from '@/lib/format';
+import { formatCalendarDate, formatTime, localDateString, WORKSHOP_LOCALE } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -58,7 +58,7 @@ export default async function EmployeeAttendancePage({
   const { employee, days, totals } = data;
   const thisMonth = localDateString().slice(0, 7);
   const canEdit = hasPermission(user, 'payroll.create');
-  const monthLabel = new Date(`${data.month}-01T12:00:00Z`).toLocaleDateString('en-AE', {
+  const monthLabel = new Date(`${data.month}-01T12:00:00Z`).toLocaleDateString(WORKSHOP_LOCALE, {
     month: 'long',
     year: 'numeric',
     timeZone: 'UTC',

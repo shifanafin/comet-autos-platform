@@ -71,7 +71,7 @@ export function OrganizationForm({ settings }: { settings: OrganizationSettings 
           name="address"
           defaultValue={settings.address ?? ''}
           error={errors.address}
-          placeholder="e.g. Al Qusais Industrial 3, Dubai, UAE"
+          placeholder="Street, area, city"
           className="[&_textarea]:min-h-20 [&_textarea]:text-base md:[&_textarea]:text-sm"
         />
         <div className="grid gap-6 sm:grid-cols-2">

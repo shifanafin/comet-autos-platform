@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { draftDeleteBlocker } from '@/lib/workshop/estimates';
+import { DeleteDraftQuotationButton } from '@/components/workshop/delete-draft-quotation';
 import { notFound } from 'next/navigation';
 import { ArrowRight, Car, ClipboardList, Receipt, User } from 'lucide-react';
 import type { ApprovalMethod } from '@/generated/prisma/enums';
@@ -23,7 +25,7 @@ import { cn } from '@/lib/utils';
 
 /*
  * The quotation screen — one page for every quotation, whether it was raised
- * straight for a customer or opened from a work order. The work order, when
+ * straight for a customer or opened from a job card. The job card, when
  * there is one, appears as a link beside the customer and the vehicle rather
  * than as the thing the page is about.
  */
@@ -97,6 +99,15 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
         }
         actions={
           <>
+            {canEdit &&
+            !draftDeleteBlocker({
+              status: quotation.status,
+              jobCardId: quotation.jobCardId,
+              previousVersionId: quotation.previousVersionId,
+              nextVersions: isLatest ? 0 : 1,
+            }) ? (
+              <DeleteDraftQuotationButton estimateId={quotation.id} />
+            ) : null}
             {!isDraft ? (
               <StaffDocumentActions
                 pdfUrl={`/documents/quotation/${quotation.id}`}
@@ -220,7 +231,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                         <ClipboardList className="size-4 shrink-0 text-muted-foreground" />
                         <span className="flex min-w-0 flex-col">
                           <span className="truncate font-medium">{jobCard.jobNumber}</span>
-                          <span className="truncate text-xs text-muted-foreground">Work order</span>
+                          <span className="truncate text-xs text-muted-foreground">Job card</span>
                         </span>
                       </span>
                       <ArrowRight className="size-4 shrink-0 text-muted-foreground" />

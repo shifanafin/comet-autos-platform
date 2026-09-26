@@ -108,7 +108,7 @@ export function PhotoViewer({
                     </Button>
                   }
                   title="Remove this photo from the job?"
-                  description="It will no longer show on the work order. The removal is recorded with your name."
+                  description="It will no longer show on the job card. The removal is recorded with your name."
                   confirmLabel="Remove photo"
                   onConfirm={async () =>
                     startRemoving(async () => {

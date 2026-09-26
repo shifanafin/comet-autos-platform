@@ -32,7 +32,7 @@ import {
   getWorkshopFlow as fetchWorkshopFlow,
   type ActivityKind,
 } from '@/lib/data/dashboard';
-import { formatMoney, formatTime, WORKSHOP_TIME_ZONE } from '@/lib/format';
+import { formatMoney, formatTime, WORKSHOP_LOCALE, WORKSHOP_TIME_ZONE } from '@/lib/format';
 import { formatMilli } from '@/lib/money';
 import { Grid, Panel, Section, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -73,7 +73,7 @@ function greeting(): string {
 export default async function DashboardPage() {
   const user = await requireUser();
   const firstName = user.fullName.split(' ')[0];
-  const today = new Date().toLocaleDateString('en-AE', {
+  const today = new Date().toLocaleDateString(WORKSHOP_LOCALE, {
     timeZone: WORKSHOP_TIME_ZONE,
     weekday: 'long',
     day: 'numeric',
@@ -128,7 +128,7 @@ export default async function DashboardPage() {
 
       <Section
         title="Today"
-        description="Work orders opened, quotations started, invoices issued and payments taken today."
+        description="Job cards opened, quotations started, invoices issued and payments taken today."
       >
         <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
           <TodaysActivity
@@ -153,7 +153,7 @@ export default async function DashboardPage() {
       {standardJobCards ? (
         <Section
           title="Detailed workflow"
-          description="Work orders that are going through inspection, repair and quality check."
+          description="Job cards that are going through inspection, repair and quality check."
           action={
             <span className="flex flex-wrap gap-2">
               {canCheckIn && show.appointments ? (
@@ -171,13 +171,13 @@ export default async function DashboardPage() {
       <Grid gap="xl" className="items-start xl:grid-cols-12">
         <Section
           title="Workshop"
-          description="Every work order by stage, and the latest ones opened."
+          description="Every job card by stage, and the latest ones opened."
           action={
             <Link
               href="/job-cards"
               className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary-hover"
             >
-              All work orders
+              All job cards
               <ArrowRight className="size-4" />
             </Link>
           }
@@ -253,7 +253,7 @@ function StartActions({
       ? {
           href: '/check-in',
           icon: ClipboardList,
-          label: 'Work order',
+          label: 'Job card',
           hint: 'Customer, vehicle and what needs doing',
         }
       : null,
@@ -262,7 +262,7 @@ function StartActions({
           href: '/quotations/new',
           icon: FileText,
           label: 'Quotation',
-          hint: 'Price the work — no work order needed',
+          hint: 'Price the work — no job card needed',
         }
       : null,
     canInvoice
@@ -323,7 +323,7 @@ async function DocumentCounts({
   ]);
   const tiles = [
     {
-      label: 'Open work orders',
+      label: 'Open job cards',
       value: String(counts.openWorkOrders),
       hint: 'Still in the workshop',
       href: '/job-cards',
@@ -392,7 +392,7 @@ async function DocumentCounts({
 }
 
 const ACTIVITY: Record<ActivityKind, { label: string; icon: LucideIcon }> = {
-  work_order: { label: 'Work order', icon: ClipboardList },
+  work_order: { label: 'Job card', icon: ClipboardList },
   quotation: { label: 'Quotation', icon: FileText },
   invoice: { label: 'Invoice', icon: Receipt },
   payment: { label: 'Payment', icon: Wallet },
@@ -419,7 +419,7 @@ async function TodaysActivity({
           variant="inline"
           icon={CalendarDays}
           title="Nothing yet today"
-          description="Work orders, quotations, invoices and payments you create today appear here."
+          description="Job cards, quotations, invoices and payments you create today appear here."
         />
       </Panel>
     );
@@ -668,16 +668,16 @@ async function WorkshopActivity({
       </div>
       <div className="border-t border-border">
         <p className="px-4 pt-5 pb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase sm:px-6">
-          Latest work orders
+          Latest job cards
         </p>
         {recent.length === 0 ? (
           <div className="px-4 pb-6 sm:px-6">
             <EmptyState
               variant="inline"
               icon={ClipboardList}
-              title="No open work orders"
-              description="A work order appears here as soon as it is created."
-              action={<QuickAction href="/check-in" icon={LogIn} label="New work order" />}
+              title="No open job cards"
+              description="A job card appears here as soon as it is created."
+              action={<QuickAction href="/check-in" icon={LogIn} label="New job card" />}
             />
           </div>
         ) : (
@@ -727,7 +727,7 @@ async function TodaysAppointments({
           variant="inline"
           icon={CalendarDays}
           title="No appointments today"
-          description="Walk-ins can have a work order opened any time."
+          description="Walk-ins can have a job card opened any time."
           action={
             canCheckIn ? (
               <QuickAction href="/appointments/new" icon={CalendarPlus} label="Book one" />

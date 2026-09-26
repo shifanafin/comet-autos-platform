@@ -1382,6 +1382,9 @@ model Invoice {
   taxAmount         Decimal       @default(0) @map("tax_amount") @db.Decimal(14, 2)
   totalAmount       Decimal       @map("total_amount") @db.Decimal(14, 2)
   notes             String?
+  /// Set when the invoice is voided (status VOID). The number is never reused.
+  voidedAt          DateTime?     @map("voided_at") @db.Timestamptz
+  voidReason        String?       @map("void_reason")
   // Historical snapshot fields — copied from Organization/Customer at
   // issuance time, and never re-derived afterward, so a legally-issued tax
   // invoice keeps showing exactly what was represented at the time even if

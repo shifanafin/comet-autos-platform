@@ -24,7 +24,13 @@ export function RecordCard({
   footer,
   className,
   children,
+  select,
+  action,
 }: {
+  /** A tick box before the title, for choosing rows (see RecordSelection). */
+  select?: ReactNode;
+  /** A small action after the amount, e.g. the row's delete button. */
+  action?: ReactNode;
   title: ReactNode;
   subtitle?: ReactNode;
   amount?: ReactNode;
@@ -41,7 +47,8 @@ export function RecordCard({
   return (
     <li className={cn('flex flex-col gap-3 px-4 py-4', className)}>
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
+        {select ? <span className="flex h-5 items-center">{select}</span> : null}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-sm font-medium">{title}</span>
           {subtitle ? <span className="text-xs text-muted-foreground">{subtitle}</span> : null}
         </div>
@@ -49,6 +56,7 @@ export function RecordCard({
           {amount ? <span className="text-sm font-semibold tabular-nums">{amount}</span> : null}
           {status}
         </div>
+        {action ? <span className="-mt-2 -mr-2 flex">{action}</span> : null}
       </div>
       {shown.length > 0 ? (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">

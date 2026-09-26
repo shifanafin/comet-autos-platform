@@ -11,6 +11,7 @@ import { customerQuotePath, getRequestOrigin } from '@/lib/request-origin';
 import { quotationWhatsApp } from '@/lib/customer-access/share';
 import {
   createQuotation,
+  deleteDraftQuotation,
   recordCustomerDecision,
   reissueEstimateLink,
   reviseEstimate,
@@ -21,12 +22,12 @@ import { prisma } from '@/lib/prisma';
 
 /*
  * The quotation screen's actions. Every one of them calls the same estimate
- * services the work-order flow calls — a quotation raised on its own and a
- * quotation raised from a work order are the same document, priced, sent and
+ * services the job-card flow calls — a quotation raised on its own and a
+ * quotation raised from a job card are the same document, priced, sent and
  * decided by the same code.
  */
 
-/** Refreshes everywhere a quotation shows up, including its work order when it has one. */
+/** Refreshes everywhere a quotation shows up, including its job card when it has one. */
 async function refreshQuotation(estimateId: string) {
   revalidatePath('/quotations');
   revalidatePath(`/quotations/${estimateId}`);
@@ -117,4 +118,13 @@ export async function recordQuotationDecisionAction(
   );
   if (result.ok) await refreshQuotation(estimateId);
   return toClientResult(result);
+}
+
+/** Deletes an unsent first draft, then goes back to the quotation list. */
+export async function deleteDraftQuotationAction(estimateId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => deleteDraftQuotation(user, estimateId));
+  if (!result.ok) return toClientResult(result);
+  revalidatePath('/quotations');
+  redirect('/quotations');
 }

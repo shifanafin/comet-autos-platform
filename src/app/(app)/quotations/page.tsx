@@ -6,16 +6,33 @@ import { formatCalendarDate, formatDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { ListDataActions } from '@/components/shared/list-data-actions';
 import { RecordCard, RecordList, TableWrap } from '@/components/shared/record-card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { EstimateStatusPill } from '@/components/workshop/status-pills';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { EmptyState } from '@/components/shared/empty-state';
 import { LinkButton } from '@/components/shared/link-button';
 import { SearchField } from '@/components/shared/search-field';
 import { cn } from '@/lib/utils';
+import {
+  RecordSelection,
+  RemoveCell,
+  RemoveHead,
+  RowCheckbox,
+  RowRemoveButton,
+  SelectCell,
+  SelectHead,
+} from '@/components/shared/record-selection';
+import { REMOVAL } from '@/lib/records/removal';
 
 /*
- * Every quotation in one place — raised on their own or from a work order.
+ * Every quotation in one place — raised on their own or from a job card.
  * Cards on a phone, a table once there is room to compare columns.
  */
 
@@ -37,6 +54,15 @@ export default async function QuotationsPage({
   const canCreate = hasPermission(user, 'job_card.edit', {
     branchId: user.primaryBranchId ?? undefined,
   });
+  const canRemove = hasPermission(user, REMOVAL.quotations.permission, {
+    branchId: user.primaryBranchId ?? undefined,
+  });
+  // Only a first draft that never left the workshop can be deleted — the
+  // same rule as draftDeleteBlocker; the server checks it again.
+  const removable = (q: QuotationListItem) => q.status === 'DRAFT' && !q.jobCard && q.version === 1;
+  const removableRows = quotations
+    .filter(removable)
+    .map((q) => ({ id: q.id, label: q.estimateNumber }));
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -99,7 +125,7 @@ export default async function QuotationsPage({
           description={
             params.q
               ? 'Try the customer’s name, mobile number or the registration.'
-              : 'Quote a customer for the work they asked about — a work order is not needed first.'
+              : 'Quote a customer for the work they asked about — a job card is not needed first.'
           }
           action={
             canCreate ? (
@@ -111,105 +137,132 @@ export default async function QuotationsPage({
           }
         />
       ) : (
-        <Panel padding="none" className="overflow-hidden">
-          <RecordList>
-            {quotations.map((quotation) => (
-              <RecordCard
-                key={quotation.id}
-                title={
-                  <Link href={`/quotations/${quotation.id}`} className="after:absolute after:inset-0">
-                    {quotation.estimateNumber}
-                  </Link>
-                }
-                subtitle={quotation.customer.name}
-                amount={formatMoney(quotation.totalAmount)}
-                status={
-                  <EstimateStatusPill status={quotation.status} expired={quotation.expired} />
-                }
-                className="relative"
-                details={[
-                  {
-                    label: 'Vehicle',
-                    value: quotation.vehicle
-                      ? `${quotation.vehicle.plateNumber} · ${quotation.vehicle.make} ${quotation.vehicle.model}`
-                      : 'No vehicle',
-                  },
-                  {
-                    label: 'Work order',
-                    value: quotation.jobCard?.jobNumber ?? 'Not linked',
-                  },
-                  { label: 'Date', value: dateFor(quotation) },
-                ]}
-              />
-            ))}
-          </RecordList>
+        <RecordSelection entity="quotations" enabled={canRemove}>
+          <Panel padding="none" className="overflow-hidden">
+            <RecordList>
+              {quotations.map((quotation) => (
+                <RecordCard
+                  key={quotation.id}
+                  select={
+                    removable(quotation) ? (
+                      <RowCheckbox id={quotation.id} label={quotation.estimateNumber} />
+                    ) : null
+                  }
+                  action={
+                    removable(quotation) ? (
+                      <RowRemoveButton id={quotation.id} label={quotation.estimateNumber} />
+                    ) : null
+                  }
+                  title={
+                    <Link
+                      href={`/quotations/${quotation.id}`}
+                      className="after:absolute after:inset-0"
+                    >
+                      {quotation.estimateNumber}
+                    </Link>
+                  }
+                  subtitle={quotation.customer.name}
+                  amount={formatMoney(quotation.totalAmount)}
+                  status={
+                    <EstimateStatusPill status={quotation.status} expired={quotation.expired} />
+                  }
+                  className="relative"
+                  details={[
+                    {
+                      label: 'Vehicle',
+                      value: quotation.vehicle
+                        ? `${quotation.vehicle.plateNumber} · ${quotation.vehicle.make} ${quotation.vehicle.model}`
+                        : 'No vehicle',
+                    },
+                    {
+                      label: 'Job card',
+                      value: quotation.jobCard?.jobNumber ?? 'Not linked',
+                    },
+                    { label: 'Date', value: dateFor(quotation) },
+                  ]}
+                />
+              ))}
+            </RecordList>
 
-          <TableWrap>
-            <Table>
-              <TableHeader className="bg-muted/40">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Quotation</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Vehicle</TableHead>
-                  <TableHead>Work order</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {quotations.map((quotation) => (
-                  <TableRow key={quotation.id} className="relative">
-                    <TableCell>
-                      <Link
-                        href={`/quotations/${quotation.id}`}
-                        className="font-medium after:absolute after:inset-0"
-                      >
-                        {quotation.estimateNumber}
-                      </Link>
-                      {quotation.version > 1 ? (
-                        <span className="block text-xs text-muted-foreground">
-                          version {quotation.version}
-                        </span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {quotation.customer.name}
-                      <span className="block text-xs text-muted-foreground">
-                        {quotation.customer.phone}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {quotation.vehicle ? (
-                        <span className="flex items-center gap-2">
-                          <VehiclePlate
-                            plateNumber={quotation.vehicle.plateNumber}
-                            className="px-2 py-0.5 text-xs"
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            {quotation.vehicle.make} {quotation.vehicle.model}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {quotation.jobCard?.jobNumber ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <EstimateStatusPill status={quotation.status} expired={quotation.expired} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{dateFor(quotation)}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {formatMoney(quotation.totalAmount)}
-                    </TableCell>
+            <TableWrap>
+              <Table>
+                <TableHeader className="bg-muted/40">
+                  <TableRow className="hover:bg-transparent">
+                    <SelectHead rows={removableRows} />
+                    <TableHead>Quotation</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Vehicle</TableHead>
+                    <TableHead>Job card</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <RemoveHead />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableWrap>
-        </Panel>
+                </TableHeader>
+                <TableBody>
+                  {quotations.map((quotation) => (
+                    <TableRow key={quotation.id} className="relative">
+                      <SelectCell
+                        id={quotation.id}
+                        label={quotation.estimateNumber}
+                        removable={removable(quotation)}
+                      />
+                      <TableCell>
+                        <Link
+                          href={`/quotations/${quotation.id}`}
+                          className="font-medium after:absolute after:inset-0"
+                        >
+                          {quotation.estimateNumber}
+                        </Link>
+                        {quotation.version > 1 ? (
+                          <span className="block text-xs text-muted-foreground">
+                            version {quotation.version}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        {quotation.customer.name}
+                        <span className="block text-xs text-muted-foreground">
+                          {quotation.customer.phone}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {quotation.vehicle ? (
+                          <span className="flex items-center gap-2">
+                            <VehiclePlate
+                              plateNumber={quotation.vehicle.plateNumber}
+                              className="px-2 py-0.5 text-xs"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {quotation.vehicle.make} {quotation.vehicle.model}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {quotation.jobCard?.jobNumber ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <EstimateStatusPill status={quotation.status} expired={quotation.expired} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{dateFor(quotation)}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {formatMoney(quotation.totalAmount)}
+                      </TableCell>
+                      <RemoveCell
+                        id={quotation.id}
+                        label={quotation.estimateNumber}
+                        removable={removable(quotation)}
+                      />
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableWrap>
+          </Panel>
+        </RecordSelection>
       )}
     </Stack>
   );

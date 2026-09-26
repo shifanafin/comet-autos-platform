@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { hasPermission } from '@/lib/auth/authorize';
-import { formatDateTime, formatMoney, toLocalDateTimeInput } from '@/lib/format';
+import { formatDateTime, formatKm, formatMoney, toLocalDateTimeInput } from '@/lib/format';
 import type { JobWorkspace } from '@/lib/workshop/workspace';
 import { getSecondaryNextStatuses } from '@/lib/workshop/job-status';
 import type { WorkflowStatus } from '@/lib/workshop/stages';
@@ -22,6 +22,7 @@ import { getJobDocuments } from '@/lib/documents/build';
 import { listJobPhotos } from '@/lib/media/photos';
 import { defaultMediaStage } from '@/lib/media/stages';
 import { cn } from '@/lib/utils';
+import { JobDetailsEditor } from '@/components/workshop/job-details-editor';
 import { Grid, Panel, Section, Stack } from '@/components/layout/primitives';
 import { JobHero } from '@/components/workshop/job-hero';
 import { JobQuickActions } from '@/components/workshop/job-quick-actions';
@@ -46,7 +47,7 @@ import { DeliveryForm } from './billing/billing-forms';
  * so switching the workshop to the standard job card later loses nothing.
  */
 
-/** Stages a work order can be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
+/** Stages a job card can be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
 const QUOTABLE: WorkflowStatus[] = ['ARRIVED', 'INSPECTION', 'DIAGNOSIS'];
 
 const BUTTON =
@@ -104,7 +105,7 @@ export async function MinimalJobCard({
       tone: 'closed',
       icon: XCircle,
       title: 'Cancelled',
-      description: 'This work order was cancelled. Nothing was billed on it.',
+      description: 'This job card was cancelled. Nothing was billed on it.',
     };
   } else if (status === 'DELIVERED') {
     step = {
@@ -138,7 +139,7 @@ export async function MinimalJobCard({
       tone: 'action',
       icon: KeyRound,
       title: 'Hand the vehicle back',
-      description: `Paid in full — ${formatMoney(invoice.totalAmount)}. Record the handover to close the work order.`,
+      description: `Paid in full — ${formatMoney(invoice.totalAmount)}. Record the handover to close the job card.`,
       body: canDeliver ? (
         <DeliveryForm jobCardId={jobCard.id} customerName={jobCard.customer.name} />
       ) : undefined,
@@ -149,7 +150,7 @@ export async function MinimalJobCard({
       icon: TriangleAlert,
       title: 'Quotation turned down',
       description:
-        'The customer did not accept the quotation. Revise it and send it again, or cancel the work order.',
+        'The customer did not accept the quotation. Revise it and send it again, or cancel the job card.',
       body: estimate ? (
         <Link href={`/quotations/${estimate.id}`} className={PRIMARY}>
           Open quotation
@@ -240,17 +241,24 @@ export async function MinimalJobCard({
         <Stack gap="2xl" className="xl:col-span-8">
           <Section title="The job">
             <Panel>
-              <dl className="flex flex-col gap-4 text-sm">
-                <DetailRow label="What the customer asked for">
-                  <span className="whitespace-pre-wrap">{jobCard.customerComplaint ?? '—'}</span>
-                </DetailRow>
-                <DetailRow label="Taken in">
-                  {formatDateTime(jobCard.openedAt)} by {jobCard.createdBy.fullName}
-                  {jobCard.odometerReading !== null
-                    ? ` · ${jobCard.odometerReading.toLocaleString('en-AE')} km`
-                    : ''}
-                </DetailRow>
-              </dl>
+              <JobDetailsEditor
+                jobCardId={jobCard.id}
+                complaint={jobCard.customerComplaint}
+                mileage={jobCard.odometerReading}
+                canEdit={canEdit && !isFinished}
+              >
+                <dl className="flex flex-col gap-4 text-sm">
+                  <DetailRow label="What the customer asked for">
+                    <span className="whitespace-pre-wrap">{jobCard.customerComplaint ?? '—'}</span>
+                  </DetailRow>
+                  <DetailRow label="Taken in">
+                    {formatDateTime(jobCard.openedAt)} by {jobCard.createdBy.fullName}
+                    {jobCard.odometerReading !== null
+                      ? ` · ${formatKm(jobCard.odometerReading)}`
+                      : ''}
+                  </DetailRow>
+                </dl>
+              </JobDetailsEditor>
             </Panel>
           </Section>
 

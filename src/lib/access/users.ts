@@ -11,7 +11,7 @@ import { emptyToNull, normalizePhone } from '@/lib/normalize';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 
 /*
- * Who can sign in to Comet Autos, and what they are allowed to do.
+ * Who can sign in to the app, and what they are allowed to do.
  *
  * Nothing here is a new authorization system. A user's reach is still the
  * union of the permissions on their non-revoked role grants, resolved by

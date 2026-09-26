@@ -48,7 +48,7 @@ export function NewInvoiceForm({
   defaultVatRate,
 }: {
   initialCustomer: CustomerOption | null;
-  /** Set when arriving from a work order: it is billed, and moves to Invoiced. */
+  /** Set when arriving from a job card: it is billed, and moves to Invoiced. */
   initialWorkOrder?: { id: string; vehicleId: string } | null;
   /** Set when arriving from an approved quotation: its lines are billed as quoted. */
   quotation: QuotationChoice | null;

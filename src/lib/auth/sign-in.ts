@@ -26,7 +26,7 @@ const ADDRESS_LIMIT = { maxFailures: 30, windowMinutes: 15, lockoutMinutes: 15 }
 
 /**
  * Finds the active user by email, or by mobile number (compared on its
- * national digits, so "050 123 4567" and "+971501234567" match). Comet Autos
+ * national digits, so "050 123 4567" and "+971501234567" match). The workshop
  * is a single-business deployment, so there is exactly one organization.
  */
 async function findUser(identifier: string) {

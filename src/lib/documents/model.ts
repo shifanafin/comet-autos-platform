@@ -72,7 +72,8 @@ export interface CustomerDocumentModel {
   /** "Quotation", "Tax invoice", "Payment receipt". */
   title: string;
   number: string;
-  status: { label: string; tone: DocumentTone };
+  /** The pill beside the number. Null prints none — an invoice shows no paid/unpaid badge. */
+  status: { label: string; tone: DocumentTone } | null;
   seller: DocumentSeller;
   /** Dates and references shown beside the title. */
   meta: DocumentField[];

@@ -8,6 +8,8 @@ import { ListDataActions } from '@/components/shared/list-data-actions';
 import { EmptyState } from '@/components/shared/empty-state';
 import { ListFilters } from '@/components/inventory/list-filters';
 import { MovementTable } from '@/components/inventory/movement-table';
+import { RecordSelection } from '@/components/shared/record-selection';
+import { REMOVAL } from '@/lib/records/removal';
 
 const TYPES = [
   'OPENING_STOCK',
@@ -26,7 +28,7 @@ export default async function MovementsPage({
   const user = await requireUser();
   const params = await searchParams;
   const { branch, movements } = await listMovements(user, { q: params.q, type: params.type });
-  const canReverse = hasPermission(user, 'inventory.adjust', { branchId: branch.id });
+  const canReverse = hasPermission(user, REMOVAL.movements.permission, { branchId: branch.id });
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -68,16 +70,19 @@ export default async function MovementsPage({
         {movements.length === 0 ? (
           <EmptyState icon={History} title="No stock movements match" />
         ) : (
-          <Panel padding="none" className="overflow-hidden">
-            <MovementTable
-              movements={movements.map((m) => ({
-                ...m,
-                reversible: REVERSIBLE_TYPES.includes(m.transactionType) && !m.reversedBy,
-              }))}
-              showPart
-              canReverse={canReverse}
-            />
-          </Panel>
+          <RecordSelection entity="movements" enabled={canReverse}>
+            <Panel padding="none" className="overflow-hidden">
+              <MovementTable
+                movements={movements.map((m) => ({
+                  ...m,
+                  reversible: REVERSIBLE_TYPES.includes(m.transactionType) && !m.reversedBy,
+                }))}
+                showPart
+                canReverse={canReverse}
+                selectable={canReverse}
+              />
+            </Panel>
+          </RecordSelection>
         )}
       </Stack>
     </Stack>

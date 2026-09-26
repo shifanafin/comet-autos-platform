@@ -10,14 +10,14 @@ import { LinkButton } from '@/components/shared/link-button';
 import { CreateEstimateButton } from '@/components/workshop/quotation-controls';
 
 /*
- * The work order's quotation. A quotation is the same document wherever it
+ * The job card's quotation. A quotation is the same document wherever it
  * was raised, so once one exists this hands over to /quotations/<id> rather
  * than keeping a second copy of that screen. What stays here is the one
- * thing that only makes sense from a work order: opening its first
+ * thing that only makes sense from a job card: opening its first
  * quotation.
  */
 
-/** Stages a work order can still be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
+/** Stages a job card can still be quoted from — mirrors QUOTABLE_STATUSES in lib/workshop/estimates.ts. */
 const QUOTABLE = ['ARRIVED', 'INSPECTION', 'DIAGNOSIS'];
 
 export default async function JobQuotationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +41,7 @@ export default async function JobQuotationPage({ params }: { params: Promise<{ i
       <JobContextHeader jobCard={jobCard} section="Quotation" />
       {QUOTABLE.includes(status) && canEdit ? (
         <Section
-          title="Quote this work order"
+          title="Quote this job card"
           description="Price the work with labour and parts. VAT is calculated per line from your organization's settings."
         >
           <Panel className="flex flex-col gap-6 sm:p-8">
@@ -66,11 +66,11 @@ export default async function JobQuotationPage({ params }: { params: Promise<{ i
       ) : (
         <EmptyState
           icon={FileText}
-          title="No quotation on this work order"
-          description="This work order has moved past the quotation stage."
+          title="No quotation on this job card"
+          description="This job card has moved past the quotation stage."
           action={
             <LinkButton href={`/job-cards/${jobCard.id}`} variant="outline">
-              Back to work order
+              Back to job card
             </LinkButton>
           }
         />

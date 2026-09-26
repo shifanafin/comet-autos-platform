@@ -38,9 +38,10 @@ export function toCsv<Row>(rows: Row[], columns: CsvColumn<Row>[]): string {
 }
 
 /** A file name that is safe on every platform, with today's date in it. */
-export function csvFileName(label: string, today = new Date()): string {
+/** `prefix` is the workshop, e.g. the brand's filePrefix. */
+export function csvFileName(prefix: string, label: string, today = new Date()): string {
   const date = today.toISOString().slice(0, 10);
-  return `comet-autos-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${date}.csv`;
+  return `${prefix}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${date}.csv`;
 }
 
 /** Splits CSV text into rows of raw cells. Quoted cells may contain commas and newlines. */

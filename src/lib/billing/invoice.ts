@@ -347,11 +347,12 @@ export async function getJobInvoice(user: AuthenticatedUser, jobCardId: string) 
 
 /**
  * One invoice by its own id, with lines, payments and balance — the invoice
- * screen's read, for an invoice with a work order behind it or without one.
+ * screen's read, for an invoice with a job card behind it or without one.
  */
 export async function getInvoiceDetail(user: AuthenticatedUser, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
-    where: { id: invoiceId, organizationId: user.organizationId, status: { notIn: ['VOID', 'CANCELLED'] } },
+    // A void invoice still opens — as a record, marked void.
+    where: { id: invoiceId, organizationId: user.organizationId, status: { not: 'CANCELLED' } },
     include: {
       ...invoiceDetail,
       customer: { select: { id: true, name: true, phone: true, email: true } },
@@ -383,10 +384,10 @@ const paymentSchema = z.object({
  * Records money received against an invoice — the one place a payment is
  * ever created. Never more than the outstanding balance (overpayments are
  * not part of the financial design). Moves the invoice to PARTIALLY_PAID /
- * PAID and, when the invoice belongs to a work order and is fully settled,
- * that work order from INVOICED to PAID.
+ * PAID and, when the invoice belongs to a job card and is fully settled,
+ * that job card from INVOICED to PAID.
  *
- * An invoice raised without a work order settles exactly the same way; there
+ * An invoice raised without a job card settles exactly the same way; there
  * is simply no job to move.
  */
 export async function recordInvoicePayment(
@@ -401,7 +402,7 @@ export async function recordInvoicePayment(
 
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'payment.record');
-    // Which job to lock, read before any lock is taken: work orders are
+    // Which job to lock, read before any lock is taken: job cards are
     // always locked before invoices, everywhere, so two paths can never take
     // the pair in opposite orders.
     const target = await tx.invoice.findFirst({
@@ -485,7 +486,7 @@ export async function recordInvoicePayment(
 }
 
 /**
- * Records a payment against the work order's live invoice — the workflow
+ * Records a payment against the job card's live invoice — the workflow
  * billing screen's entry point. Finds the invoice, then hands over to
  * recordInvoicePayment, so there is one set of payment rules, not two.
  */

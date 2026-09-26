@@ -17,11 +17,19 @@ export function LoginForm({ next }: { next: string }) {
   const invalid = Boolean(state.error);
 
   return (
-    <form action={formAction} className="flex flex-col gap-6" aria-describedby={invalid ? 'login-error' : undefined}>
+    <form
+      action={formAction}
+      className="flex flex-col gap-6"
+      aria-describedby={invalid ? 'login-error' : undefined}
+    >
       <input type="hidden" name="next" value={next} />
 
       {invalid ? (
-        <div id="login-error" role="alert" className="flex gap-3 rounded-md border border-destructive/25 bg-destructive/[0.06] px-3.5 py-3 text-sm text-destructive">
+        <div
+          id="login-error"
+          role="alert"
+          className="flex gap-3 rounded-md border border-destructive/25 bg-destructive/[0.06] px-3.5 py-3 text-sm text-destructive"
+        >
           <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-destructive" />
           {state.error}
         </div>
@@ -42,7 +50,7 @@ export function LoginForm({ next }: { next: string }) {
           spellCheck={false}
           required
           autoFocus
-          placeholder="name@cometautos.ae or 050 123 4567"
+          placeholder="Email or mobile, e.g. 050 123 4567"
           defaultValue={state.identifier}
           key={state.identifier ?? 'empty'}
           readOnly={isPending}

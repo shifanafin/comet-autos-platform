@@ -17,7 +17,7 @@ export default async function NewInvoicePage({
   requirePermission(user, 'invoice.create', { branchId: user.primaryBranchId ?? undefined });
   const params = await searchParams;
 
-  // Billing a work order: its customer and vehicle are already known.
+  // Billing a job card: its customer and vehicle are already known.
   let workOrder: { id: string; customerId: string; vehicleId: string } | null = null;
   if (params.workOrder && UUID.test(params.workOrder)) {
     const job = await prisma.jobCard.findFirst({
@@ -29,7 +29,7 @@ export default async function NewInvoicePage({
     workOrder = { id: job.id, customerId: job.customerId, vehicleId: job.vehicleId };
   }
 
-  // Billing a quotation: its customer, vehicle and work order come with it.
+  // Billing a quotation: its customer, vehicle and job card come with it.
   let quotation: QuotationChoice | null = null;
   if (params.quotation && UUID.test(params.quotation)) {
     const estimate = await prisma.estimate.findFirst({
@@ -78,7 +78,7 @@ export default async function NewInvoicePage({
         description={
           quotation
             ? 'Billing an approved quotation — the lines and VAT are carried across as the customer saw them.'
-            : 'Bill a customer for work done. A work order is not needed — link one only if you want to.'
+            : 'Bill a customer for work done. A job card is not needed — link one only if you want to.'
         }
       />
       <Panel className="w-full max-w-4xl sm:p-8">

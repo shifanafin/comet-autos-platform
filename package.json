@@ -4,8 +4,7 @@
   "private": true,
   "description": "Comet Autos Workshop Management System (internal, single Next.js application)",
   "scripts": {
-    "dev": "node scripts/dev-all.mjs",
-    "dev:web": "next dev --webpack",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
     "postinstall": "prisma generate --schema=./prisma/schema.prisma",
@@ -14,13 +13,12 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md}\" --ignore-path .gitignore",
     "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
     "prisma:validate": "prisma validate --schema=./prisma/schema.prisma",
+    "prisma:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
     "prisma:studio": "prisma studio --schema=./prisma/schema.prisma",
-    "db:start": "node scripts/dev-db.mjs start",
-    "db:stop": "node scripts/dev-db.mjs stop",
     "db:seed": "tsx prisma/seed.ts",
     "db:permissions": "tsx prisma/ensure-permissions.ts",
-    "test:integration": "tsx --test tests/workshop-flow.test.ts tests/repair-flow.test.ts tests/billing-flow.test.ts tests/inventory-flow.test.ts tests/documents-flow.test.ts tests/media-flow.test.ts tests/operations-flow.test.ts tests/ownership-finance.test.ts tests/finance-dashboard.test.ts tests/organization-settings.test.ts tests/access-management.test.ts tests/supplier-payments.test.ts tests/attendance.test.ts tests/reliability.test.ts tests/account.test.ts tests/simple-documents.test.ts tests/data-transfer.test.ts tests/security.test.ts"
+    "test:integration": "tsx --test tests/workshop-flow.test.ts tests/repair-flow.test.ts tests/billing-flow.test.ts tests/inventory-flow.test.ts tests/documents-flow.test.ts tests/media-flow.test.ts tests/operations-flow.test.ts tests/ownership-finance.test.ts tests/finance-dashboard.test.ts tests/organization-settings.test.ts tests/access-management.test.ts tests/supplier-payments.test.ts tests/attendance.test.ts tests/reliability.test.ts tests/account.test.ts tests/simple-documents.test.ts tests/data-transfer.test.ts tests/security.test.ts tests/corrections.test.ts tests/records-removal.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -48,9 +46,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^10.0.5",
     "dotenv": "^17.4.2",
-    "embedded-postgres": "^18.4.0-beta.17",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "eslint-config-prettier": "^10.1.8",
@@ -66,7 +62,6 @@
     "prisma@7.10.0": true,
     "@prisma/engines@7.10.0": true,
     "unrs-resolver@1.12.2": true,
-    "@embedded-postgres/windows-x64@18.4.0-beta.17": true,
     "esbuild@0.28.2": true
   }
 }

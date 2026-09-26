@@ -220,7 +220,7 @@ export class PdfDocument {
     objects[pagesObj - 1] =
       `<< /Type /Pages /Kids [${pageRefs.map((ref) => `${ref} 0 R`).join(' ')}] /Count ${pageRefs.length} >>`;
     const infoObj = add(
-      `<< /Title (${encode(this.info.title)}) /Author (${encode(this.info.author)}) /Producer (Comet Autos) >>`,
+      `<< /Title (${encode(this.info.title)}) /Author (${encode(this.info.author)}) /Producer (${encode(this.info.author)}) >>`,
     );
 
     let body = '%PDF-1.4\n%\xe2\xe3\xcf\xd3\n';

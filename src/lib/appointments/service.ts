@@ -174,3 +174,56 @@ export async function getOpenAppointment(user: AuthenticatedUser, appointmentId:
     include: appointmentInclude,
   });
 }
+
+const rescheduleSchema = appointmentSchema.omit({ vehicleId: true });
+
+/**
+ * Moves a booking that is still open to a new time, and lets the desk
+ * correct its duration and notes. A checked-in, cancelled or missed
+ * appointment is history and stays as it was.
+ */
+export async function rescheduleAppointment(
+  user: AuthenticatedUser,
+  appointmentId: string,
+  rawInput: unknown,
+) {
+  const input = parseInput(rescheduleSchema, rawInput);
+  const scheduledAt = parseLocalDateTime(input.scheduledAt);
+  if (!scheduledAt) throw new DomainError('Choose a valid date and time.', 'scheduledAt');
+  if (scheduledAt.getTime() < Date.now() - 15 * 60 * 1000) {
+    throw new DomainError('The appointment time is in the past.', 'scheduledAt');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const appointment = await tx.appointment.findFirst({
+      where: { id: appointmentId, organizationId: user.organizationId },
+    });
+    if (!appointment) throw new NotFoundError('appointment');
+    requirePermission(user, PERMISSION, { branchId: appointment.branchId });
+    if (!OPEN_APPOINTMENT_STATUSES.includes(appointment.status)) {
+      throw new DomainError(
+        `A ${APPOINTMENT_STATUS_LABEL[appointment.status].toLowerCase()} appointment can't be moved.`,
+      );
+    }
+    const data = {
+      scheduledAt,
+      estimatedDurationMinutes: input.estimatedDurationMinutes,
+      notes: emptyToNull(input.notes),
+    };
+    await tx.appointment.update({ where: { id: appointment.id }, data });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: appointment.branchId,
+      actorUserId: user.id,
+      action: 'appointment.rescheduled',
+      entityType: 'Appointment',
+      entityId: appointment.id,
+      beforeData: {
+        scheduledAt: appointment.scheduledAt.toISOString(),
+        estimatedDurationMinutes: appointment.estimatedDurationMinutes,
+        notes: appointment.notes,
+      },
+      afterData: { ...data, scheduledAt: scheduledAt.toISOString() },
+    });
+  });
+}

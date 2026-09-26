@@ -3,7 +3,7 @@ import { ChevronRight, Gauge, Phone, UserRound, Wrench } from 'lucide-react';
 import type { JobCardStatus } from '@/generated/prisma/enums';
 import { JobStatusBadge } from '@/components/shared/job-status-badge';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatKm } from '@/lib/format';
 
 /**
  * The top of the job card: which vehicle, whose, which job and where it
@@ -46,7 +46,7 @@ export function JobHero({
           href="/job-cards"
           className="inline-flex min-h-9 items-center hover:text-foreground md:min-h-0"
         >
-          Work Orders
+          Job Cards
         </Link>
         <ChevronRight className="size-3.5" />
         <span className="font-medium text-foreground">{jobCard.jobNumber}</span>
@@ -106,7 +106,7 @@ export function JobHero({
           <div className="flex items-center gap-1.5">
             <Gauge className="size-4" />
             <dt className="sr-only">Mileage at check-in</dt>
-            <dd className="tabular-nums">{jobCard.odometerReading.toLocaleString('en-AE')} km</dd>
+            <dd className="tabular-nums">{formatKm(jobCard.odometerReading)}</dd>
           </div>
         ) : null}
         <div className="flex items-center gap-1.5">

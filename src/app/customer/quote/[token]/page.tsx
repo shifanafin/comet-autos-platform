@@ -3,7 +3,7 @@ import { CheckCircle2, Clock, Link2Off, XCircle } from 'lucide-react';
 import { getQuoteAccess, loadCustomerQuote } from '@/lib/customer-access/quote';
 import { getQuotationDocumentForLink } from '@/lib/documents/build';
 import { formatAed } from '@/lib/documents/model';
-import { formatCalendarDate, formatDateTime } from '@/lib/format';
+import { formatCalendarDate, formatDateTime, formatKm } from '@/lib/format';
 import { customerLinkMetadata, quotePreview } from '@/lib/customer-access/preview';
 import {
   CUSTOMER_BAR_COLOR,
@@ -74,7 +74,7 @@ export default async function CustomerQuotePage({
     );
   }
 
-  // The quotation names its own customer and vehicle. The work order, when
+  // The quotation names its own customer and vehicle. The job card, when
   // there is one behind it, adds the job number, the mileage and what the
   // technician found.
   const { jobCard, customer, vehicle } = quote;
@@ -157,7 +157,7 @@ export default async function CustomerQuotePage({
                 <p className="text-sm text-muted-foreground">
                   Job {jobCard.jobNumber}
                   {jobCard.odometerReading !== null
-                    ? ` · ${jobCard.odometerReading.toLocaleString('en-AE')} km`
+                    ? ` · ${formatKm(jobCard.odometerReading)}`
                     : ''}
                 </p>
               ) : null}
