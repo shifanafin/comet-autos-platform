@@ -26,6 +26,7 @@ import {
   BarChart3,
   Settings,
   ShieldCheck,
+  ScrollText,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -194,6 +195,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'More',
     items: [
+      { label: 'Letterhead', href: '/letterhead', icon: ScrollText },
       { label: 'Reports', href: '/reports', icon: BarChart3, soon: true },
       { label: 'Settings', href: '/settings', icon: Settings, permission: 'accounting.view' },
       {

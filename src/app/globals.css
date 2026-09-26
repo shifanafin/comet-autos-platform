@@ -264,3 +264,36 @@
     @apply font-sans;
   }
 }
+/*
+ * Printing a letter on the letterhead (/letterhead): only the A4 page is
+ * printed. Everything that isn't the page or one of its ancestors is
+ * removed, so the app's sidebar, bars and controls leave no blank pages.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  body:has(.letterhead-page) {
+    background: #fff !important;
+  }
+  body:has(.letterhead-page) *:not(:has(.letterhead-page)):not(.letterhead-page):not(.letterhead-page *) {
+    display: none !important;
+  }
+  *:has(.letterhead-page) {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+  }
+  .letterhead-page {
+    margin: 0 !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
