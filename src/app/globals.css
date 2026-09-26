@@ -1,6 +1,6 @@
 @import 'tailwindcss';
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -93,9 +93,11 @@
    * tinted with the brand violet so it glows rather than greys.
    */
   --shadow-control: 0 1px 2px var(--shadow-tint), inset 0 1px 0 rgb(255 255 255 / 0.6);
-  --shadow-primary: 0 1px 2px rgb(76 29 149 / 0.3), 0 4px 12px -4px rgb(124 58 237 / 0.45),
+  --shadow-primary:
+    0 1px 2px rgb(76 29 149 / 0.3), 0 4px 12px -4px rgb(124 58 237 / 0.45),
     inset 0 1px 0 rgb(255 255 255 / 0.22);
-  --shadow-primary-hover: 0 2px 4px rgb(76 29 149 / 0.32), 0 10px 22px -6px rgb(124 58 237 / 0.5),
+  --shadow-primary-hover:
+    0 2px 4px rgb(76 29 149 / 0.32), 0 10px 22px -6px rgb(124 58 237 / 0.5),
     inset 0 1px 0 rgb(255 255 255 / 0.26);
   --shadow-inset-field: inset 0 1px 2px rgb(20 20 40 / 0.06);
   /* The violet halo used for brand marks and the signed-in avatar. */
@@ -268,16 +270,23 @@
  * Printing a letter on the letterhead (/letterhead): only the A4 page is
  * printed. Everything that isn't the page or one of its ancestors is
  * removed, so the app's sidebar, bars and controls leave no blank pages.
+ *
+ * The letter has its own named page with no margin — its header and footer
+ * sit where the margins would be — so other printouts keep the browser's.
+ * Its ancestors lose any transform or animation: those would pin the
+ * letterhead's fixed header and footer to the first page instead of
+ * repeating them on every page.
  */
+@page letterhead {
+  size: A4;
+  margin: 0;
+}
 @media print {
-  @page {
-    size: A4;
-    margin: 0;
-  }
   body:has(.letterhead-page) {
     background: #fff !important;
   }
-  body:has(.letterhead-page) *:not(:has(.letterhead-page)):not(.letterhead-page):not(.letterhead-page *) {
+  body:has(.letterhead-page)
+    *:not(:has(.letterhead-page)):not(.letterhead-page):not(.letterhead-page *) {
     display: none !important;
   }
   *:has(.letterhead-page) {
@@ -288,8 +297,12 @@
     padding: 0 !important;
     background: none !important;
     box-shadow: none !important;
+    transform: none !important;
+    filter: none !important;
+    animation: none !important;
   }
   .letterhead-page {
+    page: letterhead;
     margin: 0 !important;
     box-shadow: none !important;
     --tw-ring-shadow: 0 0 #0000 !important;
