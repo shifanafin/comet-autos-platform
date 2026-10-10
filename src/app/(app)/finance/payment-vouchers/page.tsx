@@ -48,7 +48,7 @@ export default async function PaymentVouchersPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Purchases & payables"
+        eyebrow="Suppliers & Bills"
         title="Payment vouchers"
         description="Money paid out to someone, on a voucher they sign: card payments taken on our machine for someone else (paid over less the bank's fee), and outside work such as a mechanic called in."
         actions={

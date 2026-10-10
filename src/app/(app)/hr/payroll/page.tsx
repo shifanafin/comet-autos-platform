@@ -29,7 +29,7 @@ export default async function PayrollPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Team"
+        eyebrow="HR & Payroll"
         title="Payroll"
         description="One run per month: calculated from each person's salary and approved unpaid leave, approved, then recorded as paid."
       />

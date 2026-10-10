@@ -54,7 +54,7 @@ export default async function CustomersPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Customers"
+        eyebrow="Customers & Sales"
         title="Customers"
         description="Find a customer by name, mobile number, vehicle registration or VIN."
         actions={

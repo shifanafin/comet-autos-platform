@@ -81,7 +81,7 @@ export default async function PaymentsPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Sales"
+        eyebrow="Customers & Sales"
         title="Receipts"
         description="Money received from customers, newest first. Payments are taken against an invoice — from the invoice itself or its job card. A payment entered wrongly is reversed, not deleted: it moves to Reversed, and the correct one is entered again."
         actions={

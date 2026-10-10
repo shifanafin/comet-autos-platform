@@ -73,7 +73,7 @@ export default async function CreditNotesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Finance"
+        eyebrow="Customers & Sales"
         title="Credit notes"
         description="Tax credit notes, newest first. A credit note reduces an invoice after it was issued — a part returned, a price agreed afterwards, a job billed twice — without changing the invoice. Issue one from the invoice itself."
       />

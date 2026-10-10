@@ -72,30 +72,40 @@ export interface NavItem {
 export interface NavGroup {
   label: string | null;
   /**
-   * A section this group sits inside in the sidebar — Finance holds Sales &
-   * receivables, VAT, Reports… Everything else reads groups flat, so a group
-   * with a parent is still just a group of links to them.
+   * A section this group sits inside in the sidebar, for a module big enough
+   * to need sub-sections (none today). Everything else reads groups flat, so
+   * a group with a parent is still just a group of links to them.
    */
   parent?: string;
   items: NavItem[];
 }
 
 /*
- * The sidebar, grouped by how the workshop works. Items a user has no
- * permission for are not shown (hiding is convenience only — every page and
- * action enforces permissions on the server). Modules not built yet stay
- * listed, marked "Soon", so nothing silently disappears.
+ * The sidebar, one level of sections in the order the day runs: the
+ * workshop, selling, buying, stock, money, tax, reports, the books, staff,
+ * settings. Each section opens and closes; the one holding the current page
+ * opens by itself. Items a user has no permission for are not shown (hiding
+ * is convenience only — every page and action enforces permissions on the
+ * server).
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: null,
     // Everyone's home page: each panel on it checks its own permission.
-    items: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }],
+    items: [
+      { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+      { label: 'My work', href: '/my-work', icon: ListTodo, forEmployees: true },
+    ],
   },
   {
     label: 'Workshop',
     items: [
-      { label: 'Overview', href: '/workshop', icon: LayoutGrid, permission: 'job_card.view' },
+      {
+        label: 'Workshop overview',
+        href: '/workshop',
+        icon: LayoutGrid,
+        permission: 'job_card.view',
+      },
       { label: 'Workshop today', href: '/live', icon: Gauge, permission: 'job_card.view' },
       {
         label: 'Appointments',
@@ -103,10 +113,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: CalendarDays,
         permission: 'appointment.view',
       },
-
-      { label: 'Job Cards', href: '/job-cards', icon: ClipboardList, permission: 'job_card.view' },
-
-
+      { label: 'Job cards', href: '/job-cards', icon: ClipboardList, permission: 'job_card.view' },
       {
         label: 'Inspections',
         href: '/inspections',
@@ -114,13 +121,13 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'job_card.view',
       },
       { label: 'Approvals', href: '/approvals', icon: BadgeCheck, permission: 'quotation.view' },
+      { label: 'Team tasks', href: '/team', icon: ListChecks, permission: 'task.view' },
     ],
   },
-
   {
-    label: 'Sales and Customers',
+    label: 'Customers & Sales',
     items: [
-      { label: 'Overview', href: '/sales', icon: LayoutGrid, permission: 'invoice.view' },
+      { label: 'Sales overview', href: '/sales', icon: LayoutGrid, permission: 'invoice.view' },
       { label: 'Customers', href: '/customers', icon: Users, permission: 'customer.view' },
       { label: 'Vehicles', href: '/vehicles', icon: Car, permission: 'vehicle.view' },
       { label: 'Quotations', href: '/quotations', icon: FileText, permission: 'quotation.view' },
@@ -137,70 +144,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FileMinus,
         permission: 'credit_note.view',
       },
-    ],
-  },
-  {
-    label: 'Bills and Suppliers',
-    items: [
-      {
-        label: 'Suppliers',
-        href: '/inventory/suppliers',
-        icon: Truck,
-        permission: 'inventory.view',
-      },
-    ],
-  },
-
-  {
-    label: 'Inventory',
-    items: [
-      { label: 'Overview', href: '/inventory', icon: LayoutGrid, permission: 'inventory.view' },
-      { label: 'Parts', href: '/inventory/parts', icon: Cog, permission: 'inventory.view' },
-      {
-        label: 'Purchases',
-        href: '/inventory/purchases',
-        icon: ShoppingCart,
-        permission: 'purchase.view',
-      },
-
-      {
-        label: 'Stock movements',
-        href: '/inventory/movements',
-        icon: History,
-        permission: 'inventory.view',
-      },
-    ],
-  },
-  {
-    label: 'Overview',
-    parent: 'Finance',
-    items: [
-      { label: 'Financial overview', href: '/finance', icon: ChartPie, permission: 'invoice.view' },
-      {
-        label: 'Tax & accounting calendar',
-        href: '/finance/calendar',
-        icon: CalendarClock,
-        permission: 'accounting.view',
-      },
-    ],
-  },
-  {
-    label: 'Money',
-    parent: 'Finance',
-    items: [
-      { label: 'Money', href: '/finance/money', icon: PiggyBank, permission: 'money.view' },
-      {
-        label: 'Money transfers',
-        href: '/finance/money/transfers',
-        icon: ArrowRightLeft,
-        permission: 'money.view',
-      },
-    ],
-  },
-  {
-    label: 'Sales & receivables',
-    parent: 'Finance',
-    items: [
       {
         label: 'Customers owing',
         href: '/finance/outstanding',
@@ -216,9 +159,14 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Purchases & payables',
-    parent: 'Finance',
+    label: 'Suppliers & Bills',
     items: [
+      {
+        label: 'Suppliers',
+        href: '/inventory/suppliers',
+        icon: Truck,
+        permission: 'inventory.view',
+      },
       {
         label: 'Expenses & bills',
         href: '/finance/expenses',
@@ -237,6 +185,48 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Banknote,
         permission: 'supplier_payment.view',
       },
+    ],
+  },
+  {
+    label: 'Parts & Stock',
+    items: [
+      {
+        label: 'Stock overview',
+        href: '/inventory',
+        icon: LayoutGrid,
+        permission: 'inventory.view',
+      },
+      { label: 'Parts', href: '/inventory/parts', icon: Cog, permission: 'inventory.view' },
+      {
+        label: 'Purchases',
+        href: '/inventory/purchases',
+        icon: ShoppingCart,
+        permission: 'purchase.view',
+      },
+      {
+        label: 'Stock movements',
+        href: '/inventory/movements',
+        icon: History,
+        permission: 'inventory.view',
+      },
+    ],
+  },
+  {
+    label: 'Cash & Bank',
+    items: [
+      { label: 'Cash & bank', href: '/finance/money', icon: PiggyBank, permission: 'money.view' },
+      {
+        label: 'Money transfers',
+        href: '/finance/money/transfers',
+        icon: ArrowRightLeft,
+        permission: 'money.view',
+      },
+      {
+        label: 'Bank reconciliation',
+        href: '/finance/bank-reconciliation',
+        icon: Landmark,
+        permission: 'accounting.view',
+      },
       {
         label: 'Owed to owner',
         href: '/finance/owner-advances',
@@ -245,11 +235,22 @@ export const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
-
+  {
+    label: 'VAT & Tax',
+    items: [
+      {
+        label: 'Tax & accounting calendar',
+        href: '/finance/calendar',
+        icon: CalendarClock,
+        permission: 'accounting.view',
+      },
+      { label: 'VAT returns', href: '/finance/vat', icon: Percent, permission: 'vat.view' },
+    ],
+  },
   {
     label: 'Reports',
-    parent: 'Finance',
     items: [
+      { label: 'Financial overview', href: '/finance', icon: ChartPie, permission: 'invoice.view' },
       {
         label: 'Profit & loss',
         href: '/finance/accounting?view=profit',
@@ -274,19 +275,12 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Sheet,
         permission: 'reports.view',
       },
-      { label: 'Reports', href: '/reports', icon: BarChart3, permission: 'reports.view' },
+      { label: 'All reports', href: '/reports', icon: BarChart3, permission: 'reports.view' },
     ],
   },
   {
     label: 'Accounting',
-    parent: 'Finance',
     items: [
-      {
-        label: 'Chart of accounts',
-        href: '/finance/accounting?view=accounts',
-        icon: BookOpen,
-        permission: 'accounting.view',
-      },
       {
         label: 'Journal entries',
         href: '/finance/accounting?view=journal',
@@ -297,6 +291,18 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'General ledger',
         href: '/finance/accounting?view=ledger',
         icon: BookText,
+        permission: 'accounting.view',
+      },
+      {
+        label: 'Chart of accounts',
+        href: '/finance/accounting?view=accounts',
+        icon: BookOpen,
+        permission: 'accounting.view',
+      },
+      {
+        label: 'Fixed assets',
+        href: '/finance/fixed-assets',
+        icon: Building2,
         permission: 'accounting.view',
       },
       {
@@ -312,22 +318,44 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'accounting.view',
       },
       {
-        label: 'Bank reconciliation',
-        href: '/finance/bank-reconciliation',
-        icon: Landmark,
-        permission: 'accounting.view',
-      },
-      {
-        label: 'Fixed assets',
-        href: '/finance/fixed-assets',
-        icon: Building2,
-        permission: 'accounting.view',
-      },
-      {
         label: 'Year-end closing',
         href: '/finance/accounting/year-end',
         icon: CalendarCheck2,
         permission: 'accounting.view',
+      },
+    ],
+  },
+  {
+    label: 'HR & Payroll',
+    items: [
+      { label: 'HR overview', href: '/hr', icon: LayoutGrid, permission: 'employee.view' },
+      { label: 'Employees', href: '/hr/employees', icon: IdCard, permission: 'employee.view' },
+      {
+        label: 'Attendance',
+        href: '/hr/attendance',
+        icon: CalendarCheck,
+        permission: 'attendance.view',
+      },
+      { label: 'Leave', href: '/hr/leave', icon: CalendarOff, permission: 'leave.view' },
+      { label: 'Overtime', href: '/hr/overtime', icon: Clock3, permission: 'payroll.view' },
+      { label: 'Payroll', href: '/hr/payroll', icon: Banknote, permission: 'payroll.view' },
+      {
+        label: 'Designations',
+        href: '/hr/designations',
+        icon: BriefcaseBusiness,
+        permission: 'employee.view',
+      },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { label: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' },
+      {
+        label: 'Users & roles',
+        href: '/settings/users',
+        icon: ShieldCheck,
+        permission: 'user.view',
       },
       {
         label: 'Tax codes',
@@ -341,55 +369,8 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: CreditCard,
         permission: 'settings.view',
       },
-    ],
-  },
-
-  {
-    label: 'My Team',
-    items: [
-      { label: 'My work', href: '/my-work', icon: ListTodo, forEmployees: true },
-      { label: 'Team tasks', href: '/team', icon: ListChecks, permission: 'task.view' },
-    ],
-  },
-
-  {
-    label: 'VAT',
-    items: [{ label: 'VAT returns', href: '/finance/vat', icon: Percent, permission: 'vat.view' }],
-  },
-  {
-    label: 'HR',
-    items: [
-      { label: 'Overview', href: '/hr', icon: LayoutGrid, permission: 'employee.view' },
-      { label: 'Employees', href: '/hr/employees', icon: IdCard, permission: 'employee.view' },
-      {
-        label: 'Designations',
-        href: '/hr/designations',
-        icon: BriefcaseBusiness,
-        permission: 'employee.view',
-      },
-      {
-        label: 'Attendance',
-        href: '/hr/attendance',
-        icon: CalendarCheck,
-        permission: 'attendance.view',
-      },
-      { label: 'Leave', href: '/hr/leave', icon: CalendarOff, permission: 'leave.view' },
-      { label: 'Payroll', href: '/hr/payroll', icon: Banknote, permission: 'payroll.view' },
-      { label: 'Overtime', href: '/hr/overtime', icon: Clock3, permission: 'payroll.view' },
-    ],
-  },
-  {
-    label: 'Settings',
-    items: [
-      { label: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' },
-      {
-        label: 'Users & roles',
-        href: '/settings/users',
-        icon: ShieldCheck,
-        permission: 'user.view',
-      },
-      { label: 'Audit log', href: '/settings/audit', icon: History, permission: 'audit.view' },
       { label: 'Letterhead', href: '/letterhead', icon: ScrollText, permission: 'settings.view' },
+      { label: 'Audit log', href: '/settings/audit', icon: History, permission: 'audit.view' },
     ],
   },
 ];

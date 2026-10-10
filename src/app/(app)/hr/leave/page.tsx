@@ -77,7 +77,7 @@ export default async function LeavePage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Team"
+        eyebrow="HR & Payroll"
         title="Leave"
         description="Who is off, and when. Requests wait for approval; unpaid leave is deducted in the payroll run."
       />

@@ -87,7 +87,7 @@ export default async function PayablesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Receivables & payables"
+        eyebrow="Suppliers & Bills"
         title="Payables"
         description="What the workshop owes its suppliers on stock it has already received, and what has been paid."
       />

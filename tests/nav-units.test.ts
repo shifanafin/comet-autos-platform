@@ -113,25 +113,30 @@ describe('the sidebar sections', () => {
     assert.deepEqual(open, ['/', '/my-work (employees)']);
   });
 
-  test('pages sit in the section of their module; only Finance has sub-sections', () => {
+  test('pages sit in the section of their module, one level deep', () => {
     assert.equal(sectionOf('/job-cards'), 'Workshop');
-    assert.equal(sectionOf('/finance/invoices'), 'Sales and Customers');
-    assert.equal(sectionOf('/vehicles'), 'Sales and Customers');
-    assert.equal(sectionOf('/inventory/suppliers'), 'Bills and Suppliers');
-    assert.equal(sectionOf('/my-work'), 'My Team');
-    assert.equal(sectionOf('/inventory/purchases'), 'Inventory');
-    // VAT returns have their own section, beside Finance.
-    assert.equal(sectionOf('/finance/vat'), 'VAT');
-    assert.equal(sectionOf('/finance/calendar'), 'Finance');
-    assert.equal(sectionOf('/finance/accounting/prior-periods'), 'Finance');
-    assert.equal(sectionOf('/finance/accounting?view=journal'), 'Finance');
-    assert.equal(sectionOf('/hr/payroll'), 'HR');
+    assert.equal(sectionOf('/team'), 'Workshop');
+    assert.equal(sectionOf('/my-work'), null);
+    assert.equal(sectionOf('/finance/invoices'), 'Customers & Sales');
+    assert.equal(sectionOf('/finance/outstanding'), 'Customers & Sales');
+    assert.equal(sectionOf('/inventory/suppliers'), 'Suppliers & Bills');
+    assert.equal(sectionOf('/finance/expenses'), 'Suppliers & Bills');
+    assert.equal(sectionOf('/inventory/purchases'), 'Parts & Stock');
+    assert.equal(sectionOf('/finance/money'), 'Cash & Bank');
+    assert.equal(sectionOf('/finance/owner-advances'), 'Cash & Bank');
+    assert.equal(sectionOf('/finance/vat'), 'VAT & Tax');
+    assert.equal(sectionOf('/finance/calendar'), 'VAT & Tax');
+    assert.equal(sectionOf('/finance/accounting?view=trial'), 'Reports');
+    assert.equal(sectionOf('/finance/accounting?view=journal'), 'Accounting');
+    assert.equal(sectionOf('/finance/accounting/prior-periods'), 'Accounting');
+    assert.equal(sectionOf('/hr/payroll'), 'HR & Payroll');
+    assert.equal(sectionOf('/finance/accounting/tax-codes'), 'Settings');
     assert.equal(sectionOf('/settings/users'), 'Settings');
-    const parents = new Set(NAV_GROUPS.map((group) => group.parent).filter(Boolean));
-    assert.deepEqual([...parents], ['Finance']);
     assert.ok(
-      NAV_GROUPS.every((group) => !group.parent || group.label),
-      'a sub-section has a name',
+      NAV_GROUPS.every((group) => !group.parent),
+      'no section is folded inside another',
     );
+    const labels = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.label);
+    assert.equal(new Set(labels).size, labels.length, 'no two items share a name');
   });
 });

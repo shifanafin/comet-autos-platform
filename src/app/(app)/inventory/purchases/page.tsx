@@ -71,7 +71,7 @@ export default async function PurchasesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Inventory"
+        eyebrow="Parts & Stock"
         title="Purchases"
         description="Supplier invoices and deliveries. Stock goes up only when a purchase is received."
         actions={

@@ -8,10 +8,10 @@ import { cn } from '@/lib/utils';
 import { activeNavHref, NAV_GROUPS, type NavGroup, type NavItem } from '@/lib/nav';
 
 /*
- * The sidebar's links, in folding sections: Workshop, Sales, Customers,
- * Inventory, Finance, HR, Settings. A section's heading opens and closes it;
- * Finance holds its own folding sub-sections (Sales & receivables, VAT,
- * Reports, Accounting…).
+ * The sidebar's links, in folding sections (Workshop, Customers & Sales,
+ * Suppliers & Bills… — see NAV_GROUPS). A section's heading opens and closes
+ * it; a group given a `parent` would fold inside that section as a
+ * sub-section (none today).
  *
  * Only what the user may see is listed — the server decides that from their
  * permissions (`allowedHrefs`); a section with nothing allowed in it is not

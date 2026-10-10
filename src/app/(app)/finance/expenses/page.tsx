@@ -87,7 +87,7 @@ export default async function ExpensesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Receivables & payables"
+        eyebrow="Suppliers & Bills"
         title="Expenses & bills"
         description="What the workshop spends to keep running — rent, utilities, supplies. Parts bought for a job are purchases, not expenses."
         actions={

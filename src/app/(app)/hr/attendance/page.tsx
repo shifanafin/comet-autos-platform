@@ -57,7 +57,7 @@ export default async function AttendancePage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Team"
+        eyebrow="HR & Payroll"
         title="Attendance"
         description="Who is in today. Staff check themselves in on their phones (My work); you can still clock someone in or out here."
       />

@@ -111,7 +111,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Inventory"
+        eyebrow="Parts & Stock"
         title="Parts"
         description={`Stock on hand at ${branch.name}. Every change is recorded in the stock history.`}
         actions={

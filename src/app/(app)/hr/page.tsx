@@ -38,7 +38,7 @@ export default async function HrOverviewPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="HR"
+        eyebrow="HR & Payroll"
         title="HR overview"
         description="The team, who is in today, who is off, attendance this month and the salary bill."
         actions={

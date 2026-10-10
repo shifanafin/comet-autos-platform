@@ -87,7 +87,7 @@ export default async function QuotationsPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Documents"
+        eyebrow="Customers & Sales"
         title="Quotations"
         description="What you have quoted, what the customer has not answered yet, and what they approved."
         actions={

@@ -28,7 +28,7 @@ export default async function FixedAssetsPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Finance"
+        eyebrow="Accounting"
         title="Fixed assets"
         description="The register of equipment, vehicles, furniture and computers the workshop owns: what each cost, the depreciation charged so far and its book value. Depreciation is straight-line, monthly, and booked automatically when you run it."
         actions={

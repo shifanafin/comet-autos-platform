@@ -48,7 +48,7 @@ export default async function InventoryOverviewPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Inventory"
+        eyebrow="Parts & Stock"
         title="Inventory overview"
         description="What the stock is worth, what is running low, what was bought and what went into jobs."
         actions={

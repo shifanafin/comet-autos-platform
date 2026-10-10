@@ -49,7 +49,7 @@ export default async function ReportsPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="More"
+        eyebrow="Reports"
         title="Reports"
         description={`How the workshop did from ${formatDate(period.from)} to ${formatDate(period.to)}: sales, jobs, the team's hours and the parts fitted.`}
         actions={

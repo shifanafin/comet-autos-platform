@@ -56,7 +56,7 @@ export default async function SuppliersPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Inventory"
+        eyebrow="Suppliers & Bills"
         title="Suppliers"
         description="Who you buy parts from, what has been received from them and what is still owed."
         actions={

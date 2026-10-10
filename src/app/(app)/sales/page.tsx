@@ -52,7 +52,7 @@ export default async function SalesOverviewPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Sales"
+        eyebrow="Customers & Sales"
         title="Sales overview"
         description="What was invoiced and collected, what customers owe, and how quotations turn into work."
         actions={

@@ -72,7 +72,7 @@ export default async function InvoicesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Sales"
+        eyebrow="Customers & Sales"
         title="Sales invoices"
         description="Every tax invoice issued — billed from a job card, from a quotation, or on its own."
         actions={

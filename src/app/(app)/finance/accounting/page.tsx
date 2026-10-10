@@ -309,7 +309,7 @@ export default async function AccountingPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Finance"
+        eyebrow="Accounting"
         title="Accounting"
         description={
           period

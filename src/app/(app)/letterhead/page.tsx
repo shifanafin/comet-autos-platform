@@ -21,7 +21,7 @@ export default async function LetterheadPage() {
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <div className="letterhead-controls">
         <PageHeader
-          eyebrow="Documents"
+          eyebrow="Settings"
           title="Letterhead"
           description="Write a letter on the company letterhead, then print it or save it as a PDF from the print window."
         />

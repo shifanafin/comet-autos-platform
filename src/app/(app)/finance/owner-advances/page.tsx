@@ -46,7 +46,7 @@ export default async function OwedToOwnerPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Receivables & payables"
+        eyebrow="Cash & Bank"
         title="Owed to owner"
         description={`Bills the owner paid personally, and what has been paid back. ${formatMoney(data.total)} owed now.`}
       />

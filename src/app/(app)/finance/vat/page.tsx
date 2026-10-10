@@ -348,7 +348,7 @@ export default async function VatPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Accounting"
+        eyebrow="VAT & Tax"
         title="VAT returns"
         description={`The figures for your VAT return, from ${formatDate(period.from)} to ${formatDate(period.to)}. Check them before filing — this prepares the return, it does not submit it.`}
       />

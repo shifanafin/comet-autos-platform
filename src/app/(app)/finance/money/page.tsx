@@ -38,7 +38,7 @@ export default async function MoneyPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Finance"
+        eyebrow="Cash & Bank"
         title="Money"
         description="How much money the workshop has, and where it is: the cash drawer, the petty-cash box, the bank. Every figure comes from the books, so it always agrees with the balance sheet."
         actions={

@@ -44,7 +44,7 @@ export default async function EmployeesPage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Team"
+        eyebrow="HR & Payroll"
         title="Employees"
         description="Everyone who works on vehicles here. Their work stays attributed to them even after they leave."
         actions={

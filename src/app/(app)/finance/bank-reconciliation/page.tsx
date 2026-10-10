@@ -29,7 +29,7 @@ export default async function BankReconciliationPage() {
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow="Finance"
+        eyebrow="Cash & Bank"
         title="Bank reconciliation"
         description="Prove each bank, cash and card account against its statement: tick every line that appears on the statement until the cleared balance agrees with it. What is left unticked is timing — cheques not yet presented, deposits not yet credited."
       />
