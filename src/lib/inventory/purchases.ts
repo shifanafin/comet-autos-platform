@@ -314,10 +314,19 @@ export async function assertSupplierInvoiceFree(
   exceptPurchaseId?: string,
 ) {
   if (!invoiceNumber) return;
+  const supplier = await tx.supplier.findFirst({
+    where: { id: supplierId, organizationId },
+    select: { name: true, taxNumber: true },
+  });
+  // A TRN is one company: a second supplier record with the same TRN (a
+  // name typed differently) is the same supplier, and so the same bill.
   const clash = await tx.purchase.findFirst({
     where: {
       organizationId,
-      supplierId,
+      OR: [
+        { supplierId },
+        ...(supplier?.taxNumber ? [{ supplier: { taxNumber: supplier.taxNumber } }] : []),
+      ],
       supplierInvoiceNumber: { equals: invoiceNumber, mode: 'insensitive' },
       status: { not: 'CANCELLED' },
       ...(exceptPurchaseId ? { id: { not: exceptPurchaseId } } : {}),
@@ -331,10 +340,6 @@ export async function assertSupplierInvoiceFree(
     );
   }
   // The same bill may have been entered as an expense against this supplier's name.
-  const supplier = await tx.supplier.findFirst({
-    where: { id: supplierId, organizationId },
-    select: { name: true },
-  });
   if (!supplier) return;
   const expense = await tx.expense.findFirst({
     where: {

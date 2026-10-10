@@ -80,6 +80,26 @@ async function assertNameFree(
   if (clash) throw new DomainError('A supplier with this name already exists.', 'name');
 }
 
+/** A TRN is one company: it belongs to one supplier record. */
+async function assertTaxNumberFree(
+  organizationId: string,
+  taxNumber: string | null,
+  exceptId?: string,
+  client: Prisma.TransactionClient = prisma,
+) {
+  if (!taxNumber) return;
+  const clash = await client.supplier.findFirst({
+    where: { organizationId, taxNumber, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    select: { name: true },
+  });
+  if (clash) {
+    throw new DomainError(
+      `This TRN is already on supplier "${clash.name}" — the same company. Use that supplier, or merge the two from its page.`,
+      'taxNumber',
+    );
+  }
+}
+
 export async function createSupplier(
   user: AuthenticatedUser,
   rawInput: unknown,
@@ -91,6 +111,7 @@ export async function createSupplier(
   const run = async (tx: Prisma.TransactionClient) => {
     await claimRequestKey(tx, user, rawInput, 'supplier.create');
     await assertNameFree(user.organizationId, input.name, undefined, tx);
+    await assertTaxNumberFree(user.organizationId, supplierData(input).taxNumber, undefined, tx);
     const supplier = await tx.supplier.create({
       data: { organizationId: user.organizationId, ...supplierData(input) },
     });
@@ -120,6 +141,12 @@ export async function updateSupplier(
   });
   if (!before) throw new NotFoundError('supplier');
   await assertNameFree(user.organizationId, input.name, supplierId);
+  // Only a changed TRN is checked, so a pair already sharing one can still be
+  // edited until it is merged.
+  const taxNumber = supplierData(input).taxNumber;
+  if (taxNumber !== before.taxNumber) {
+    await assertTaxNumberFree(user.organizationId, taxNumber, supplierId);
+  }
   return prisma.$transaction(async (tx) => {
     const supplier = await tx.supplier.update({
       where: { id: supplierId },

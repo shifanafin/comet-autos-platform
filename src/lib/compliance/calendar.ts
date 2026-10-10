@@ -479,14 +479,17 @@ export async function buildCompliance(
             status: `Running now — file after ${period.to}.${partBefore}`,
           } satisfies VatPeriodRow;
         }
+        // Before these books began (the previous owner's time, often): the
+        // app can't know whether it was filed, so it asks for a check
+        // instead of raising the alarm.
         return {
           ...period,
           href,
           netVat: null,
           beforeBooks,
-          state: today > period.due ? 'late' : 'todo',
+          state: beforeBooks ? 'todo' : today > period.due ? 'late' : 'todo',
           status: beforeBooks
-            ? `Before these books began, so the app can't tell whether it was filed. Check EmaraTax (VAT → VAT Returns): if it shows Submitted, record it here; if not, file it now — it was due ${inDays(today, period.due)}.`
+            ? 'Before these books began, so the app can’t tell whether it was filed. Check EmaraTax (VAT → VAT Returns): if it shows Submitted, record it here with the figures shown there.'
             : (today > period.due
                 ? `Not filed — was due ${inDays(today, period.due)}.`
                 : `Return due ${inDays(today, period.due)}.`) + partBefore,
@@ -695,6 +698,19 @@ export async function buildCompliance(
       action: 'Enter the months',
     });
   }
+  // Returns from before the books: the company (same TRN) still answers for
+  // them, whoever ran it then, so they stay on the list to check once.
+  const unrecordedBefore = vat.filter((period) => period.beforeBooks && period.netVat === null);
+  if (unrecordedBefore.length) {
+    setup.push({
+      key: 'vat-before-books',
+      title: 'VAT returns from before these books',
+      detail: `${unrecordedBefore.map((period) => `${period.from} – ${period.to}`).join(', ')}: before these books began, so the app does not know if ${unrecordedBefore.length === 1 ? 'it was' : 'they were'} filed. The company still answers to the FTA for them, whoever ran it then. Log in to EmaraTax (VAT → VAT Returns): if a return shows Submitted, record it in the VAT returns list below with its figures. If one was never filed, ask the previous owner or a tax agent before filing — the FTA fines late returns.`,
+      state: 'todo',
+      href: '/finance/calendar',
+      action: 'See the VAT returns',
+    });
+  }
   if (activeEmployees > 0) {
     setup.push({
       key: 'salaries',
@@ -753,6 +769,9 @@ export async function buildCompliance(
   // ── Deadlines, soonest first ──
   const deadlines: CalendarItem[] = [];
   for (const period of vat) {
+    // An unrecorded return from before the books is a check in the set-up,
+    // not a deadline: no bar, no alert, no reminders.
+    if (period.beforeBooks && period.netVat === null) continue;
     if (period.state === 'todo' || period.state === 'late') {
       deadlines.push({
         key: `vat-${period.to}`,
