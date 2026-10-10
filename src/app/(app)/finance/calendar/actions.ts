@@ -6,6 +6,7 @@ import { runAction, toClientResult } from '@/lib/action';
 import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
 import { saveCompanyDates } from '@/lib/compliance/calendar';
+import { forgetUrgentDeadlines } from '@/lib/compliance/reminders';
 
 export async function saveCompanyDatesAction(
   _prev: ActionResult,
@@ -13,6 +14,9 @@ export async function saveCompanyDatesAction(
 ): Promise<ActionResult> {
   const user = await requireUser();
   const result = await runAction(() => saveCompanyDates(user, formDataToObject(formData)));
-  if (result.ok) revalidatePath('/finance', 'layout');
+  if (result.ok) {
+    forgetUrgentDeadlines(user.organizationId);
+    revalidatePath('/', 'layout');
+  }
   return toClientResult(result);
 }

@@ -15,6 +15,7 @@ import { getVatSettings } from '@/lib/tax';
 import { isDiscountedLine, movementValue, receivedBefore } from '@/lib/inventory/purchase-value';
 import { resolvePeriod, type ResolvedPeriod } from '@/lib/finance/dashboard';
 import { VAT_DUE_DAYS } from '@/lib/compliance/rules';
+import { priorPeriodsWithin } from '@/lib/accounting/prior-periods';
 
 /*
  * The VAT return for a period — the figures a UAE VAT201 asks for, taken
@@ -448,7 +449,19 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       return { ...row, net: filsToString(row.net), vat: filsToString(row.vat) };
     });
 
-  const output = registered ? outputFils : 0;
+  // ── Months before these books: their totals, entered as one row a month ─
+  const priorRows = await priorPeriodsWithin(organizationId, period.from, period.to);
+  const prior = priorRows.reduce(
+    (sum, row) => ({
+      sales: sum.sales + row.salesFils,
+      output: sum.output + row.salesVatFils,
+      expenses: sum.expenses + row.expensesFils,
+      input: sum.input + row.purchasesVatFils,
+    }),
+    { sales: 0, output: 0, expenses: 0, input: 0 },
+  );
+
+  const output = registered ? outputFils + prior.output : 0;
   // ── Bank charges: the card machine's fee, less what was recovered ───────
   let bankNetFils = 0;
   let bankVatFils = 0;
@@ -483,7 +496,7 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       return { ...row, net: signed(row.net), vat: signed(row.vat) };
     });
 
-  const inputFils = registered ? expenseVatFils + purchaseVatFils + bankVatFils : 0;
+  const inputFils = registered ? expenseVatFils + purchaseVatFils + bankVatFils + prior.input : 0;
 
   return {
     period,
@@ -499,7 +512,7 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
     emirate: { value: organization.emirate, ...EMIRATE_BOX[organization.emirate] },
     boxes: {
       /** Box 1 — standard-rated supplies, less credit notes. */
-      standardSupplies: filsToString(registered ? standardFils : 0),
+      standardSupplies: filsToString(registered ? standardFils + prior.sales : 0),
       outputVat: filsToString(output),
       /** Box 4 — zero-rated supplies. */
       zeroRatedSupplies: filsToString(registered ? zeroFils : 0),
@@ -508,10 +521,10 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       /** Not reported: out of scope of VAT. */
       outOfScopeSupplies: filsToString(registered ? supplies.OUT_OF_SCOPE : 0),
       /** Box 8 — total supplies. */
-      totalSupplies: filsToString(registered ? standardFils + zeroFils + exemptFils : 0),
+      totalSupplies: filsToString(registered ? standardFils + prior.sales + zeroFils + exemptFils : 0),
       /** Box 9 — standard-rated expenses (expenses + parts received). */
       standardExpenses: filsToString(
-        registered ? expenseNetFils + purchaseNetFils + bankNetFils : 0,
+        registered ? expenseNetFils + purchaseNetFils + bankNetFils + prior.expenses : 0,
       ),
       inputVat: filsToString(inputFils),
       expenseVat: filsToString(registered ? expenseVatFils : 0),
@@ -530,6 +543,18 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
     expenses: expenseRows,
     purchases: purchaseRows,
     bankCharges: bankChargeRows,
+    /** Months before these books, entered as totals: in Box 1 and Box 9. */
+    priorPeriods: priorRows.map((row) => ({
+      id: row.id,
+      from: row.from,
+      to: row.to,
+      sales: filsToString(row.salesFils),
+      salesVat: filsToString(row.salesVatFils),
+      expenses: filsToString(row.expensesFils),
+      purchasesVat: filsToString(row.purchasesVatFils),
+    })),
+    /** Prior-month input VAT, part of inputVat. */
+    priorVat: filsToString(registered ? prior.input : 0),
     /** Parts received whose tax invoice hasn't come yet: their VAT isn't claimable until it does. */
     awaitingTaxInvoice: {
       purchases: awaiting._count._all,

@@ -281,7 +281,22 @@ export default async function VatPage({
         net: `-${row[part]}`,
         vat: withVat ? `-${row.vat}` : '0.00',
       }));
-  const standardDocuments = [...standardSales, ...credited('standard', true)];
+  // Months before these books, entered as totals.
+  const priorHref = '/finance/accounting/prior-periods';
+  const priorLabel = (row: VatReturn['priorPeriods'][number]) =>
+    `${formatCalendarDate(row.from)} – ${formatCalendarDate(row.to)}`;
+  const priorSales: BoxDocument[] = data.priorPeriods
+    .filter((row) => row.sales !== '0.00')
+    .map((row) => ({
+      key: `prior-sales-${row.id}`,
+      href: priorHref,
+      number: 'Month totals',
+      date: priorLabel(row),
+      party: 'Before these books',
+      net: row.sales,
+      vat: row.salesVat,
+    }));
+  const standardDocuments = [...standardSales, ...credited('standard', true), ...priorSales];
   const salesIn = (part: 'zeroRated' | 'exempt'): BoxDocument[] => [
     ...data.sales
       .filter((row) => row[part] !== '0.00')
@@ -317,6 +332,17 @@ export default async function VatPage({
       net: row.net,
       vat: row.vat,
     })),
+    ...data.priorPeriods
+      .filter((row) => row.expenses !== '0.00')
+      .map((row) => ({
+        key: `prior-costs-${row.id}`,
+        href: priorHref,
+        number: 'Month totals',
+        date: priorLabel(row),
+        party: 'Before these books',
+        net: row.expenses,
+        vat: row.purchasesVat,
+      })),
   ];
 
   return (

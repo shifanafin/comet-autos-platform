@@ -6,7 +6,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { parseInput } from '@/lib/form-data';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
-import { toFils } from '@/lib/money';
+import { filsToString, toFils } from '@/lib/money';
 import { formatCalendarDate, localDateString, parseCalendarDate } from '@/lib/format';
 import { emptyToNull } from '@/lib/normalize';
 import { getVatReturn, VAT_DUE_DAYS } from '@/lib/finance/vat';
@@ -140,6 +140,137 @@ export async function fileVatReturn(user: AuthenticatedUser, rawInput: unknown) 
         inputVat: boxes.inputVat,
         netVat: boxes.net,
         booksClosedThrough: closing ? input.to : (closed?.toISOString().slice(0, 10) ?? null),
+      },
+    });
+    await settleRequestKey(tx, user, rawInput, filing.id);
+    return filing;
+  });
+}
+
+const MONEY = /^\d{1,10}(\.\d{1,2})?$/;
+const amount = (label: string) =>
+  z
+    .string({ error: `Enter ${label}.` })
+    .trim()
+    .regex(MONEY, `Enter ${label} like 1250.00 — 0 if none.`);
+
+const outsideSchema = z.object({
+  from: z.string({ error: 'Choose the period.' }).min(1, 'Choose the period.'),
+  to: z.string({ error: 'Choose the period.' }).min(1, 'Choose the period.'),
+  filedOn: z
+    .string({ error: 'Enter the date it was filed.' })
+    .min(1, 'Enter the date it was filed.'),
+  ftaReference: z.string().trim().max(60, 'Keep the reference under 60 characters.').optional(),
+  /** Box 1: standard-rated sales and their VAT, as submitted. */
+  standardSupplies: amount('the standard-rated sales'),
+  outputVat: amount('the VAT on sales'),
+  /** Box 9: standard-rated expenses and their VAT, as submitted. */
+  standardExpenses: amount('the standard-rated expenses'),
+  inputVat: amount('the VAT on expenses'),
+  /** When the VAT was paid (or the refund received), if it has been. */
+  settledOn: z.string().trim().optional(),
+  requestKey: z.string().optional(),
+});
+
+/**
+ * Records a return for a period before these books began, filed with the FTA
+ * before the workshop used the app — the figures as submitted, read off
+ * EmaraTax. It tells the calendar the return was filed. Nothing is booked:
+ * the VAT of those months is part of the opening balances (VAT still due to
+ * the FTA on the first day of the books goes in as "VAT due to FTA").
+ */
+export async function recordVatReturnFiledElsewhere(user: AuthenticatedUser, rawInput: unknown) {
+  requirePermission(user, 'vat.create');
+  const input = parseInput(outsideSchema, rawInput);
+  const from = parseCalendarDate(input.from);
+  const to = parseCalendarDate(input.to);
+  const filedOn = parseCalendarDate(input.filedOn);
+  const settledOn = input.settledOn ? parseCalendarDate(input.settledOn) : null;
+  if (!from || !to || from > to) throw new DomainError('Choose a valid period.', 'from');
+  if (!filedOn) throw new DomainError('Enter a valid date.', 'filedOn');
+  if (input.settledOn && !settledOn) throw new DomainError('Enter a valid date.', 'settledOn');
+  const today = localDateString();
+  if (input.filedOn > today) {
+    throw new DomainError('The filing date can’t be in the future.', 'filedOn');
+  }
+  if (input.filedOn <= input.to) {
+    throw new DomainError('A return is filed after its period ends.', 'filedOn');
+  }
+  if (input.settledOn && input.settledOn > today) {
+    throw new DomainError('The payment date can’t be in the future.', 'settledOn');
+  }
+  const outputFils = toFils(input.outputVat);
+  const inputFils = toFils(input.inputVat);
+  const netFils = outputFils - inputFils;
+
+  return prisma.$transaction(async (tx) => {
+    await claimRequestKey(tx, user, rawInput, 'vat.file_outside');
+    const organization = await tx.organization.findUniqueOrThrow({
+      where: { id: user.organizationId },
+      select: { openingBalanceDate: true },
+    });
+    const booksStart = organization.openingBalanceDate;
+    if (!booksStart || to >= booksStart) {
+      throw new DomainError(
+        booksStart
+          ? `Only a period that ended before these books began (${formatCalendarDate(booksStart)}) can be recorded this way. File later periods from the VAT return screen.`
+          : 'Set the opening balances first: only periods before the books began can be recorded this way.',
+        'to',
+      );
+    }
+    if (settledOn && settledOn >= booksStart) {
+      throw new DomainError(
+        'Paid after these books began: leave the payment date empty here, then record the payment on the VAT page with the account it was paid from — the money left the bank in these books.',
+        'settledOn',
+      );
+    }
+    const overlapping = await tx.vatFiling.findFirst({
+      where: {
+        organizationId: user.organizationId,
+        periodFrom: { lte: to },
+        periodTo: { gte: from },
+      },
+      select: { periodFrom: true, periodTo: true },
+    });
+    if (overlapping) {
+      throw new DomainError(
+        `A return for ${formatCalendarDate(overlapping.periodFrom)} to ${formatCalendarDate(overlapping.periodTo)} is already recorded, and overlaps this period.`,
+        'from',
+      );
+    }
+    const filing = await tx.vatFiling.create({
+      data: {
+        organizationId: user.organizationId,
+        periodFrom: from,
+        periodTo: to,
+        standardSupplies: filsToString(toFils(input.standardSupplies)),
+        outputVat: filsToString(outputFils),
+        zeroRatedSupplies: '0.00',
+        standardExpenses: filsToString(toFils(input.standardExpenses)),
+        inputVat: filsToString(inputFils),
+        netVat: netFils < 0 ? `-${filsToString(-netFils)}` : filsToString(netFils),
+        ftaReference: emptyToNull(input.ftaReference),
+        filedOn,
+        filedByUserId: user.id,
+        settledOn,
+        outsideBooks: true,
+      },
+    });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'vat.recorded_outside_books',
+      entityType: 'VatFiling',
+      entityId: filing.id,
+      afterData: {
+        periodFrom: input.from,
+        periodTo: input.to,
+        filedOn: input.filedOn,
+        ftaReference: filing.ftaReference,
+        outputVat: filing.outputVat.toString(),
+        inputVat: filing.inputVat.toString(),
+        netVat: filing.netVat.toString(),
+        settledOn: input.settledOn || null,
       },
     });
     await settleRequestKey(tx, user, rawInput, filing.id);

@@ -95,7 +95,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Workshop',
     items: [
       { label: 'Overview', href: '/workshop', icon: LayoutGrid, permission: 'job_card.view' },
-      { label: 'Job Cards', href: '/job-cards', icon: ClipboardList, permission: 'job_card.view' },
       { label: 'Workshop today', href: '/live', icon: Gauge, permission: 'job_card.view' },
       {
         label: 'Appointments',
@@ -103,6 +102,10 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: CalendarDays,
         permission: 'appointment.view',
       },
+
+      { label: 'Job Cards', href: '/job-cards', icon: ClipboardList, permission: 'job_card.view' },
+
+
       {
         label: 'Inspections',
         href: '/inspections',
@@ -112,18 +115,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Approvals', href: '/approvals', icon: BadgeCheck, permission: 'quotation.view' },
     ],
   },
+
   {
-    label: 'Team',
-    items: [
-      // Everyone with an employee record: their attendance and to-do list.
-      { label: 'My work', href: '/my-work', icon: ListTodo, forEmployees: true },
-      { label: 'Team tasks', href: '/team', icon: ListChecks, permission: 'task.view' },
-    ],
-  },
-  {
-    label: 'Sales',
+    label: 'Sales and Customers',
     items: [
       { label: 'Overview', href: '/sales', icon: LayoutGrid, permission: 'invoice.view' },
+      { label: 'Customers', href: '/customers', icon: Users, permission: 'customer.view' },
+      { label: 'Vehicles', href: '/vehicles', icon: Car, permission: 'vehicle.view' },
       { label: 'Quotations', href: '/quotations', icon: FileText, permission: 'quotation.view' },
       {
         label: 'Sales invoices',
@@ -141,12 +139,17 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Customers',
+    label: 'Bills and Suppliers',
     items: [
-      { label: 'Customers', href: '/customers', icon: Users, permission: 'customer.view' },
-      { label: 'Vehicles', href: '/vehicles', icon: Car, permission: 'vehicle.view' },
+      {
+        label: 'Suppliers',
+        href: '/inventory/suppliers',
+        icon: Truck,
+        permission: 'inventory.view',
+      },
     ],
   },
+
   {
     label: 'Inventory',
     items: [
@@ -158,12 +161,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ShoppingCart,
         permission: 'purchase.view',
       },
-      {
-        label: 'Suppliers',
-        href: '/inventory/suppliers',
-        icon: Truck,
-        permission: 'inventory.view',
-      },
+
       {
         label: 'Stock movements',
         href: '/inventory/movements',
@@ -246,11 +244,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
-  {
-    label: 'VAT',
-    parent: 'Finance',
-    items: [{ label: 'VAT returns', href: '/finance/vat', icon: Percent, permission: 'vat.view' }],
-  },
+
   {
     label: 'Reports',
     parent: 'Finance',
@@ -311,6 +305,12 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'accounting.view',
       },
       {
+        label: 'Months before the books',
+        href: '/finance/accounting/prior-periods',
+        icon: History,
+        permission: 'accounting.view',
+      },
+      {
         label: 'Bank reconciliation',
         href: '/finance/bank-reconciliation',
         icon: Landmark,
@@ -341,6 +341,19 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: 'settings.view',
       },
     ],
+  },
+
+  {
+    label: 'My Team',
+    items: [
+      { label: 'My work', href: '/my-work', icon: ListTodo, forEmployees: true },
+      { label: 'Team tasks', href: '/team', icon: ListChecks, permission: 'task.view' },
+    ],
+  },
+
+  {
+    label: 'VAT',
+    items: [{ label: 'VAT returns', href: '/finance/vat', icon: Percent, permission: 'vat.view' }],
   },
   {
     label: 'HR',

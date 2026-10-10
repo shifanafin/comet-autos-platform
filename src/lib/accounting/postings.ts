@@ -8,6 +8,7 @@ import { purchaseBillDifferenceFils } from '@/lib/finance/supplier-balance';
 import { getVatSettings, resolveDefaultVatRate } from '@/lib/tax';
 import { OWNER_MONEY_LABEL } from '@/lib/finance/owner-money-labels';
 import { METHOD_ACCOUNT_ROLE, type RoleAccounts } from '@/lib/accounting/chart';
+import { priorPostingAmounts, stockCarried } from '@/lib/accounting/prior-period-rules';
 
 /*
  * What each record should have in the books — the posting rules, in one
@@ -1064,6 +1065,7 @@ async function vatFiling(tx: Tx, organizationId: string, filingId: string) {
       ftaReference: true,
       settledOn: true,
       settledAccountId: true,
+      outsideBooks: true,
     },
   });
 }
@@ -1073,7 +1075,8 @@ const vatPeriod = (filing: { periodFrom: Date; periodTo: Date }) =>
 
 const postVatFiling: Poster = async (tx, organizationId, filingId, accounts) => {
   const filing = await vatFiling(tx, organizationId, filingId);
-  if (!filing) return null;
+  // Filed before these books began: its VAT is in the opening balances.
+  if (!filing || filing.outsideBooks) return null;
   return {
     date: filing.periodTo,
     branchId: null,
@@ -1089,8 +1092,22 @@ const postVatFiling: Poster = async (tx, organizationId, filingId, accounts) => 
 const postVatPayment: Poster = async (tx, organizationId, filingId, accounts) => {
   const filing = await vatFiling(tx, organizationId, filingId);
   if (!filing?.settledOn) return null;
+  if (filing.outsideBooks) {
+    // A return from before the books: paid before they began, it is in the
+    // opening balances; paid since, the money left the bank in these books.
+    const organization = await tx.organization.findUnique({
+      where: { id: organizationId },
+      select: { openingBalanceDate: true },
+    });
+    const booksStart = organization?.openingBalanceDate;
+    if (!booksStart || filing.settledOn < booksStart) return null;
+  }
   const net = fils(filing.netVat);
   const account = filing.settledAccountId ?? accounts.BANK;
+  // VAT owed from before the books began: not in "VAT due to FTA" (only
+  // returns filed here go there), so the payment settles it against the
+  // opening balance equity that held it.
+  const owedFrom = filing.outsideBooks ? accounts.OPENING_BALANCE : accounts.VAT_SETTLEMENT;
   return {
     date: filing.settledOn,
     branchId: null,
@@ -1099,7 +1116,81 @@ const postVatPayment: Poster = async (tx, organizationId, filingId, accounts) =>
         ? `VAT paid to the FTA for ${vatPeriod(filing)}`
         : `VAT refund received from the FTA for ${vatPeriod(filing)}`,
     // A positive net is paid out of the account; a negative one comes in.
-    lines: new Lines().debit(accounts.VAT_SETTLEMENT, net).credit(account, net).build(),
+    lines: new Lines().debit(owedFrom, net).credit(account, net).build(),
+  };
+};
+
+// ─── Months before the books ────────────────────────────────────────────────
+
+/**
+ * One month's totals from before the books (lib/accounting/prior-period-rules.ts
+ * has the entry). The latest month also carries the parts still in stock
+ * when the books began off the cost of parts.
+ */
+const postPriorPeriod: Poster = async (tx, organizationId, summaryId, accounts) => {
+  const row = await tx.priorPeriodSummary.findFirst({
+    where: { id: summaryId, organizationId },
+  });
+  if (!row) return null;
+  const latest = await tx.priorPeriodSummary.findFirst({
+    where: { organizationId },
+    orderBy: { periodTo: 'desc' },
+    select: { id: true },
+  });
+  let stock = 0;
+  if (latest?.id === row.id) {
+    const organization = await tx.organization.findUnique({
+      where: { id: organizationId },
+      select: { openingBalanceDate: true },
+    });
+    if (organization?.openingBalanceDate) {
+      const [onHand, bought] = await Promise.all([
+        tx.journalEntryLine.aggregate({
+          where: {
+            organizationId,
+            chartOfAccountId: accounts.INVENTORY,
+            journalEntry: {
+              entryDate: { lte: organization.openingBalanceDate },
+              sourceType: { not: 'PRIOR_PERIOD' },
+            },
+          },
+          _sum: { debitAmount: true, creditAmount: true },
+        }),
+        tx.priorPeriodSummary.aggregate({
+          where: { organizationId },
+          _sum: { partsBought: true },
+        }),
+      ]);
+      stock = stockCarried(
+        fils(onHand._sum.debitAmount) - fils(onHand._sum.creditAmount),
+        fils(bought._sum.partsBought),
+      );
+    }
+  }
+  const amounts = priorPostingAmounts(
+    {
+      salesFils: fils(row.sales),
+      partsFils: fils(row.partsBought),
+      costsWithVatFils: fils(row.costsWithVat),
+      costsWithoutVatFils: fils(row.costsWithoutVat),
+      salariesFils: fils(row.salaries),
+    },
+    stock,
+  );
+  const lines = new Lines()
+    .credit(accounts.SALES_OTHER, amounts.sales)
+    .debit(accounts.COST_OF_PARTS, amounts.costOfParts)
+    .debit(accounts.OTHER_EXPENSES, amounts.otherExpenses)
+    .debit(accounts.SALARIES_EXPENSE, amounts.salaries)
+    .debit(accounts.OPENING_BALANCE, amounts.openingEquity);
+  if (stock) lines.memo(accounts.COST_OF_PARTS, 'Less parts still in stock when the books began');
+  const from = row.periodFrom.toISOString().slice(0, 10);
+  const to = row.periodTo.toISOString().slice(0, 10);
+  return {
+    date: row.periodTo,
+    branchId: null,
+    description: `Totals before these books: ${from} to ${to}`,
+    lines: lines.build(),
   };
 };
 
@@ -1414,4 +1505,5 @@ export const POSTING_RULES: Record<
   PURCHASE_BILL: postPurchaseBill,
   CARD_COLLECTION: postCardCollection,
   PAYMENT_VOUCHER: postPaymentVoucher,
+  PRIOR_PERIOD: postPriorPeriod,
 };

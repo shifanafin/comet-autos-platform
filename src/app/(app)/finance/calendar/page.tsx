@@ -12,6 +12,7 @@ import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusPill, type PillTone } from '@/components/shared/status-pill';
 import { CompanyDatesForm } from '@/components/compliance/company-dates-form';
+import { RecordFiledElsewhereButton } from '@/components/compliance/record-filed-elsewhere';
 import { cn } from '@/lib/utils';
 
 export const metadata = { title: 'Tax & accounting calendar' };
@@ -137,6 +138,7 @@ export default async function ComplianceCalendarPage() {
   }
   const calendar = await getComplianceCalendar(user);
   const canEdit = hasPermission(user, 'settings.edit');
+  const canRecordVat = hasPermission(user, 'vat.create');
   const missing = calendar.setup.filter((item) => item.state !== 'done').length;
   const ct = calendar.corporateTax;
   const vatRows = [...calendar.vat.periods].reverse();
@@ -185,11 +187,13 @@ export default async function ComplianceCalendarPage() {
         {calendar.vat.configured ? (
           <Panel padding="none" className="@container overflow-hidden">
             <ul className="divide-y divide-border">
-              {vatRows.map((period) => (
-                <li key={period.to}>
-                  <Link
-                    href={period.href}
-                    className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/40 @md:flex-row @md:items-center @md:justify-between sm:px-6"
+              {vatRows.map((period) =>
+                // Before these books: the app has no figures for it, so the
+                // row offers to record the return as filed instead of a link.
+                period.beforeBooks ? (
+                  <li
+                    key={period.to}
+                    className="flex flex-col gap-3 px-4 py-3 @md:flex-row @md:items-center @md:justify-between sm:px-6"
                   >
                     <span className="flex flex-col gap-0.5">
                       <span className="font-medium tabular-nums">
@@ -197,17 +201,42 @@ export default async function ComplianceCalendarPage() {
                       </span>
                       <span className="text-sm text-muted-foreground">{period.status}</span>
                     </span>
-                    <span className="flex items-center gap-3">
+                    <span className="flex flex-wrap items-center gap-3">
                       <span className="text-sm tabular-nums text-muted-foreground">
                         Due {date(period.due)}
                       </span>
                       <StatusPill tone={STATE[period.state].tone}>
                         {STATE[period.state].label}
                       </StatusPill>
+                      {period.netVat === null && canRecordVat ? (
+                        <RecordFiledElsewhereButton from={period.from} to={period.to} />
+                      ) : null}
                     </span>
-                  </Link>
-                </li>
-              ))}
+                  </li>
+                ) : (
+                  <li key={period.to}>
+                    <Link
+                      href={period.href}
+                      className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/40 @md:flex-row @md:items-center @md:justify-between sm:px-6"
+                    >
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium tabular-nums">
+                          {date(period.from)} – {date(period.to)}
+                        </span>
+                        <span className="text-sm text-muted-foreground">{period.status}</span>
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className="text-sm tabular-nums text-muted-foreground">
+                          Due {date(period.due)}
+                        </span>
+                        <StatusPill tone={STATE[period.state].tone}>
+                          {STATE[period.state].label}
+                        </StatusPill>
+                      </span>
+                    </Link>
+                  </li>
+                ),
+              )}
             </ul>
           </Panel>
         ) : null}

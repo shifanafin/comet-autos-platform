@@ -315,6 +315,7 @@ const LATER_SOURCES = [
   'PURCHASE_BILL',
   'CARD_COLLECTION',
   'PAYMENT_VOUCHER',
+  'PRIOR_PERIOD',
 ] as const;
 
 /** What is waiting to be booked, oldest first, by kind of record. */
@@ -344,6 +345,7 @@ async function unbooked(organizationId: string) {
     ownerMoney,
     billedLater,
     cardCollections,
+    priorPeriods,
   ] = await Promise.all([
     prisma.invoice.findMany({
       where: {
@@ -393,7 +395,9 @@ async function unbooked(organizationId: string) {
       select: { sourceId: true },
     }),
     prisma.vatFiling.findMany({
-      where: { organizationId },
+      // Returns filed before these books began are never booked (their VAT
+      // is in the opening balances); a later payment is booked when recorded.
+      where: { organizationId, outsideBooks: false },
       orderBy: [{ periodTo: 'asc' }],
       select: { id: true, settledOn: true },
     }),
@@ -496,6 +500,12 @@ async function unbooked(organizationId: string) {
       orderBy: [{ collectedOn: 'asc' }, { createdAt: 'asc' }],
       select: { id: true, status: true },
     }),
+    // Months' totals from before the books.
+    prisma.priorPeriodSummary.findMany({
+      where: { organizationId },
+      orderBy: [{ periodFrom: 'asc' }],
+      select: { id: true },
+    }),
   ]);
   const booked = new Set(bookedMovements.map((entry) => entry.sourceId));
   const paidBooked = new Set(bookedPayrollPayments.map((entry) => entry.sourceId));
@@ -548,6 +558,7 @@ async function unbooked(organizationId: string) {
       cardCollections.filter((voucher) => voucher.status === 'PAID'),
       'PAYMENT_VOUCHER',
     ),
+    PRIOR_PERIOD: notBooked(priorPeriods, 'PRIOR_PERIOD'),
   } satisfies Record<PostedSource, string[]>;
 }
 
@@ -593,6 +604,7 @@ export async function bookExistingRecords(user: AuthenticatedUser) {
     'PURCHASE_BILL',
     'CARD_COLLECTION',
     'PAYMENT_VOUCHER',
+    'PRIOR_PERIOD',
   ];
   let booked = 0;
   const failed: string[] = [];

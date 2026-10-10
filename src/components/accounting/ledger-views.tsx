@@ -30,6 +30,7 @@ const SOURCE_LABEL: Record<string, string> = {
   PAYROLL_PAYMENT: 'Payroll',
   CARD_COLLECTION: 'Payment voucher',
   PAYMENT_VOUCHER: 'Payment voucher',
+  PRIOR_PERIOD: 'Before these books',
   MANUAL: 'Manual',
 };
 

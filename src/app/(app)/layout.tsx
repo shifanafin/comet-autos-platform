@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { after } from 'next/server';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { prisma } from '@/lib/prisma';
 import { NAV_GROUPS, isMenuShown } from '@/lib/nav';
@@ -13,10 +14,17 @@ import { Topbar } from '@/components/shell/topbar';
 import { SessionGuard } from '@/components/shell/session-guard';
 import { RowLinks } from '@/components/shell/row-links';
 import { PageContainer } from '@/components/layout/primitives';
+import { DeadlineBar } from '@/components/compliance/deadline-bar';
+import { DeadlineAlert } from '@/components/compliance/deadline-alert';
+import { maybeRunComplianceReminders, urgentDeadlines } from '@/lib/compliance/reminders';
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
-  const [branch, preferences, brand, myDay, unread] = await Promise.all([
+  // Tax and accounting reminders go out once the page is sent — at most every
+  // few hours per workshop — so they arrive even with no scheduler set up.
+  after(() => maybeRunComplianceReminders(user.organizationId));
+  const keepsBooks = hasPermission(user, 'accounting.view');
+  const [branch, preferences, brand, myDay, unread, urgent] = await Promise.all([
     user.primaryBranchId
       ? prisma.branch.findUnique({
           where: { id: user.primaryBranchId },
@@ -28,6 +36,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     // The employee's day: drives the check-in pill and its reminders in the top bar.
     getMyDay(user),
     countUnread(user),
+    // Late or soon-due deadlines, for the bar above every page.
+    keepsBooks ? urgentDeadlines(user.organizationId).catch(() => []) : [],
   ]);
   const employee = myDay?.employee ?? null;
   const attendance = SELF_CHECK_IN && myDay
@@ -71,6 +81,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           attendance={attendance}
           notifications={{ unread, vapidKey: vapidPublicKey() }}
         />
+        <DeadlineBar items={urgent} />
+        <DeadlineAlert items={urgent} />
         <main className="flex-1 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
           <PageContainer>{children}</PageContainer>
         </main>

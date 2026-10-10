@@ -304,19 +304,21 @@ export async function sourceLinks(
                         ? '/finance/fixed-assets'
                         : source === 'VAT_FILING' || source === 'VAT_PAYMENT'
                           ? '/finance/vat'
-                          : source === 'CARD_COLLECTION' || source === 'PAYMENT_VOUCHER'
-                            ? `/finance/payment-vouchers/${id}`
-                            : source === 'MONEY_TRANSFER'
-                              ? '/finance/money/transfers'
-                              : source === 'OWNER_MONEY'
-                                ? '/finance/money/owner'
-                                : source === 'CUSTOMER_ADVANCE'
-                                  ? `/finance/advances/${id}`
-                                  : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
-                                        source === 'CUSTOMER_ADVANCE_REFUND') &&
-                                      advanceOf.get(id)
-                                    ? `/finance/advances/${advanceOf.get(id)}`
-                                    : null;
+                          : source === 'PRIOR_PERIOD'
+                            ? '/finance/accounting/prior-periods'
+                            : source === 'CARD_COLLECTION' || source === 'PAYMENT_VOUCHER'
+                              ? `/finance/payment-vouchers/${id}`
+                              : source === 'MONEY_TRANSFER'
+                                ? '/finance/money/transfers'
+                                : source === 'OWNER_MONEY'
+                                  ? '/finance/money/owner'
+                                  : source === 'CUSTOMER_ADVANCE'
+                                    ? `/finance/advances/${id}`
+                                    : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
+                                          source === 'CUSTOMER_ADVANCE_REFUND') &&
+                                        advanceOf.get(id)
+                                      ? `/finance/advances/${advanceOf.get(id)}`
+                                      : null;
     return { type: source, id, href };
   };
 }

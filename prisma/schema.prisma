@@ -278,6 +278,8 @@ enum JournalSource {
   CARD_COLLECTION
   /// A payment voucher paying that money over, less the bank's fee.
   PAYMENT_VOUCHER
+  /// One month's totals from before these books began (PriorPeriodSummary).
+  PRIOR_PERIOD
 }
 
 enum ApprovalStatus {
@@ -632,6 +634,7 @@ model Organization {
   taxCodes                TaxCode[]
   paymentModes            PaymentMode[]
   vatFilings              VatFiling[]
+  priorPeriodSummaries    PriorPeriodSummary[]
 
   creditNotes         CreditNote[]
   creditNoteItems     CreditNoteItem[]
@@ -772,6 +775,7 @@ model User {
   issuedCustomerAccessTokens CustomerAccessToken[]
 
   vatFilingsFiled          VatFiling[]                 @relation("VatFilingFiledBy")
+  priorPeriodsRecorded     PriorPeriodSummary[]        @relation("PriorPeriodRecordedBy")
   creditNotesCreated       CreditNote[]                @relation("CreditNoteCreatedBy")
   reconciliationsCreated   BankReconciliation[]        @relation("ReconciliationCreatedBy")
   moneyTransfersCreated    MoneyTransfer[]             @relation("MoneyTransferCreatedBy")
@@ -2283,6 +2287,41 @@ model JournalEntryLine {
 /// filed, the FTA's reference, and — once settled — the payment or refund.
 /// Filing books the period's VAT into what is due to the FTA and usually
 /// closes the books through the period's last day (lib/accounting/vat-filing.ts).
+/// One month's totals from before these books began — read off the invoice
+/// book, the supplier bills and the bank — so the first tax year's profit
+/// and loss, and the VAT returns for those months, are complete. Booked as a
+/// summary entry (lib/accounting/prior-periods.ts); never more than a month.
+model PriorPeriodSummary {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  periodFrom       DateTime @map("period_from") @db.Date
+  periodTo         DateTime @map("period_to") @db.Date
+  /// Sales before VAT, and the VAT charged on them (0 before VAT registration).
+  sales            Decimal  @default(0) @db.Decimal(14, 2)
+  salesVat         Decimal  @default(0) @map("sales_vat") @db.Decimal(14, 2)
+  /// Spare parts bought, before VAT.
+  partsBought      Decimal  @default(0) @map("parts_bought") @db.Decimal(14, 2)
+  /// Other costs with VAT (rent, utilities, tools…), before VAT.
+  costsWithVat     Decimal  @default(0) @map("costs_with_vat") @db.Decimal(14, 2)
+  /// The VAT paid on the parts and those costs, claimed back.
+  purchasesVat     Decimal  @default(0) @map("purchases_vat") @db.Decimal(14, 2)
+  /// Costs with no VAT (government fees, visas, bank charges…).
+  costsWithoutVat  Decimal  @default(0) @map("costs_without_vat") @db.Decimal(14, 2)
+  salaries         Decimal  @default(0) @db.Decimal(14, 2)
+  note             String?
+  recordedByUserId String   @map("recorded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  recordedBy   User         @relation("PriorPeriodRecordedBy", fields: [organizationId, recordedByUserId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, periodFrom])
+  @@index([organizationId, periodTo])
+  @@map("prior_period_summaries")
+}
+
 model VatFiling {
   id                  String    @id @default(uuid(7)) @db.Uuid
   organizationId      String    @map("organization_id") @db.Uuid
@@ -2306,6 +2345,10 @@ model VatFiling {
   settledOn           DateTime? @map("settled_on") @db.Date
   settledAccountId    String?   @map("settled_account_id") @db.Uuid
   settlementReference String?   @map("settlement_reference")
+  /// A return for a period before these books began, filed with the FTA
+  /// before the workshop used the app: kept so the calendar knows it was
+  /// filed, never booked — its VAT is in the opening balances.
+  outsideBooks        Boolean   @default(false) @map("outside_books")
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -3575,6 +3618,9 @@ enum NotificationKind {
   CHECK_IN_REMINDER
   /// The working day has ended and they are still checked in.
   CHECK_OUT_REMINDER
+  /// A VAT return, corporate tax, licence or monthly-routine deadline is
+  /// coming or has passed (lib/compliance/reminders.ts).
+  COMPLIANCE_REMINDER
 }
 
 /// Something for one person to see: in the bell in the top bar, and pushed

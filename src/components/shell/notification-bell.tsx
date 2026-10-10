@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlarmClock, Bell, BellOff, BellRing, CheckCheck, ListTodo, Loader2, LogIn, Trash2, Volume2, VolumeX, X } from 'lucide-react';
+import { AlarmClock, Bell, BellOff, BellRing, CalendarClock, CheckCheck, ListTodo, Loader2, LogIn, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   dismissAllAction,
@@ -43,6 +43,7 @@ const ICON: Record<string, typeof Bell> = {
   TASK_ASSIGNED: ListTodo,
   CHECK_IN_REMINDER: LogIn,
   CHECK_OUT_REMINDER: AlarmClock,
+  COMPLIANCE_REMINDER: CalendarClock,
 };
 
 function ago(iso: string) {

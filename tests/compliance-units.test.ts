@@ -14,6 +14,7 @@ import {
   smallBusinessReliefPossible,
   vatPeriods,
 } from '@/lib/compliance/rules';
+import { reminderStage, reminderTitle, weekOf } from '@/lib/compliance/reminder-rules';
 
 describe('VAT periods', () => {
   test('a period of months ends the day before the same date', () => {
@@ -108,5 +109,62 @@ describe('corporate tax', () => {
     assert.equal(smallBusinessReliefPossible('2026-12-31', 2_999_999_00), true);
     assert.equal(smallBusinessReliefPossible('2026-12-31', 3_000_001_00), false);
     assert.equal(smallBusinessReliefPossible('2027-12-31', 1_000_00), false);
+  });
+});
+
+describe('reminders', () => {
+  test('30, 14, 7, 3, 1 days before and on the day', () => {
+    assert.equal(reminderStage('2026-10-10', '2026-11-28'), null, 'more than 30 days away');
+    assert.equal(reminderStage('2026-10-29', '2026-11-28'), 'due-30');
+    assert.equal(reminderStage('2026-11-14', '2026-11-28'), 'due-14');
+    assert.equal(
+      reminderStage('2026-11-20', '2026-11-28'),
+      'due-14',
+      'between stages: the last one reached',
+    );
+    assert.equal(reminderStage('2026-11-21', '2026-11-28'), 'due-7');
+    assert.equal(reminderStage('2026-11-27', '2026-11-28'), 'due-1');
+    assert.equal(reminderStage('2026-11-28', '2026-11-28'), 'due-0');
+  });
+
+  test('late: again every three days until done', () => {
+    assert.equal(reminderStage('2026-11-29', '2026-11-28'), 'late-0');
+    assert.equal(reminderStage('2026-12-01', '2026-11-28'), 'late-0');
+    assert.equal(reminderStage('2026-12-02', '2026-11-28'), 'late-1');
+    assert.equal(reminderStage('2026-12-05', '2026-11-28'), 'late-2');
+  });
+
+  test('headings say how long is left', () => {
+    assert.equal(reminderTitle('VAT return', '2026-11-28', '2026-11-28'), 'Due today: VAT return');
+    assert.equal(
+      reminderTitle('VAT return', '2026-11-28', '2026-11-27'),
+      'Due tomorrow: VAT return',
+    );
+    assert.equal(
+      reminderTitle('VAT return', '2026-11-28', '2026-11-21'),
+      'Due in 7 days: VAT return',
+    );
+    assert.equal(reminderTitle('VAT return', '2026-08-28', '2026-10-10'), 'Late: VAT return');
+  });
+
+  test('weekly reminders are keyed by the Monday', () => {
+    assert.equal(weekOf('2026-10-10'), '2026-10-05');
+    assert.equal(weekOf('2026-10-05'), '2026-10-05');
+  });
+
+  test('your VAT quarters: Feb–Apr, May–Jul, Aug–Oct, Nov–Jan', () => {
+    const periods = vatPeriods(
+      { firstStart: '2026-02-01', firstEnd: '2026-04-30', months: 3 },
+      '2026-10-10',
+    );
+    assert.deepEqual(
+      periods.map((p) => [p.from, p.to, p.due]),
+      [
+        ['2026-02-01', '2026-04-30', '2026-05-28'],
+        ['2026-05-01', '2026-07-31', '2026-08-28'],
+        ['2026-08-01', '2026-10-31', '2026-11-28'],
+        ['2026-11-01', '2027-01-31', '2027-02-28'],
+      ],
+    );
   });
 });

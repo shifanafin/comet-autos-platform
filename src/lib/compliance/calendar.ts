@@ -109,8 +109,13 @@ const DATE_FIELDS = {
 /** The company's dates, as the form shows them. */
 export async function getCompanyDates(user: AuthenticatedUser) {
   requirePermission(user, 'accounting.view');
+  return readCompanyDates(user.organizationId);
+}
+
+/** The company's dates for the calendar and the reminder job. No permission check: callers check. */
+export async function readCompanyDates(organizationId: string) {
   const org = await prisma.organization.findUnique({
-    where: { id: user.organizationId },
+    where: { id: organizationId },
     select: {
       ...DATE_FIELDS,
       taxNumber: true,
@@ -138,7 +143,7 @@ export async function getCompanyDates(user: AuthenticatedUser) {
   };
 }
 
-export type CompanyDates = Awaited<ReturnType<typeof getCompanyDates>>;
+export type CompanyDates = Awaited<ReturnType<typeof readCompanyDates>>;
 
 /** Saves the company's dates. Nothing already booked changes. */
 export async function saveCompanyDates(user: AuthenticatedUser, rawInput: unknown) {
@@ -251,6 +256,8 @@ export interface VatPeriodRow {
   status: string;
   netVat: string | null;
   href: string;
+  /** Ends before these books began: filed (or not) outside the app. */
+  beforeBooks: boolean;
 }
 
 const vatHref = (from: string, to: string) => `/finance/vat?period=custom&from=${from}&to=${to}`;
@@ -263,10 +270,34 @@ const inDays = (today: string, due: string) => {
   return `${-days} day${days === -1 ? '' : 's'} ago`;
 };
 
+/** The calendar as the person sees it — with the year's profit if they may see reports. */
 export async function getComplianceCalendar(user: AuthenticatedUser) {
   requirePermission(user, 'accounting.view');
-  const dates = await getCompanyDates(user);
-  const today = localDateString();
+  const canSeeProfit = hasPermission(user, 'reports.view');
+  return buildCompliance(
+    user.organizationId,
+    localDateString(),
+    canSeeProfit
+      ? (from, to) => getLedgerProfitAndLoss(user, { period: 'custom', from, to })
+      : null,
+  );
+}
+
+type ProfitOf = (
+  from: string,
+  to: string,
+) => Promise<{ income: { total: string }; netProfit: string; netProfitFils: number }>;
+
+/**
+ * Everything the calendar and the reminders work from, for one workshop on
+ * one day. `profitOf` adds each year's figures; the reminder job leaves it out.
+ */
+export async function buildCompliance(
+  organizationId: string,
+  today: string,
+  profitOf: ProfitOf | null = null,
+) {
+  const dates = await readCompanyDates(organizationId);
   const [year, month] = today.split('-').map(Number);
   // The last month that has ended: its routine is what is due now.
   const lastMonthEnd = lastDayOfMonth(year, month - 1);
@@ -276,7 +307,7 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
     year: 'numeric',
     timeZone: 'UTC',
   });
-  const org = user.organizationId;
+  const org = organizationId;
 
   const [
     filings,
@@ -288,11 +319,19 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
     assets,
     depreciated,
     bankAccounts,
+    priorMonths,
   ] = await Promise.all([
     prisma.vatFiling.findMany({
       where: { organizationId: org },
       orderBy: { periodTo: 'asc' },
-      select: { periodFrom: true, periodTo: true, netVat: true, filedOn: true, settledOn: true },
+      select: {
+        periodFrom: true,
+        periodTo: true,
+        netVat: true,
+        filedOn: true,
+        settledOn: true,
+        outsideBooks: true,
+      },
     }),
     prisma.bankReconciliation.findFirst({
       where: { organizationId: org, status: 'COMPLETED' },
@@ -340,7 +379,32 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
     prisma.chartOfAccount.count({
       where: { organizationId: org, isActive: true, role: 'BANK' },
     }),
+    // Months before the books, entered as totals.
+    prisma.priorPeriodSummary.findMany({
+      where: { organizationId: org },
+      orderBy: { periodFrom: 'asc' },
+      select: { periodFrom: true, periodTo: true },
+    }),
   ]);
+  const priorRanges = priorMonths.map((row) => ({
+    from: day(row.periodFrom)!,
+    to: day(row.periodTo)!,
+  }));
+  /** Whether every day from `from` to `to` is in a month entered as totals. */
+  const priorCovers = (from: string, to: string) => {
+    let covered = 0;
+    for (const range of priorRanges) {
+      const start = range.from > from ? range.from : from;
+      const end = range.to < to ? range.to : to;
+      if (end >= start) covered += daysBetween(start, end) + 1;
+    }
+    return covered >= daysBetween(from, to) + 1;
+  };
+  // The first day the books know about: the earliest month entered, or the opening date.
+  const knownFrom =
+    priorRanges[0] && (!dates.booksStart || priorRanges[0].from < dates.booksStart)
+      ? priorRanges[0].from
+      : dates.booksStart;
 
   // ── VAT ──
   const vatSet = Boolean(
@@ -359,6 +423,16 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
       ).map((period) => {
         const filing = filingFor(period.to);
         const href = vatHref(period.from, period.to);
+        const booksStart = dates.booksStart;
+        const beforeBooks = Boolean(booksStart && period.to < booksStart);
+        // Part of the period is before the books: those weeks must be added first.
+        const partBefore =
+          booksStart &&
+          period.from < booksStart &&
+          period.to >= booksStart &&
+          !priorCovers(period.from, addDays(booksStart, -1))
+            ? ` Sales and purchases from ${period.from} to ${addDays(booksStart, -1)} are before these books began — add them before filing.`
+            : '';
         if (filing) {
           const net = filing.netVat.toString();
           const owed = !net.startsWith('-') && toFils(net) > 0;
@@ -367,42 +441,55 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
             ...period,
             href,
             netVat: net,
+            beforeBooks,
             state: !owed || settled ? 'done' : today > period.due ? 'late' : 'todo',
-            status: !owed
-              ? settled
-                ? 'Filed — refund received'
-                : net.startsWith('-')
-                  ? 'Filed — refund due from the FTA'
-                  : 'Filed — nothing to pay'
-              : settled
-                ? 'Filed and paid'
-                : today > period.due
-                  ? `Filed — payment was due ${inDays(today, period.due)}`
-                  : `Filed — pay by the due date (${inDays(today, period.due)})`,
+            status:
+              (filing.outsideBooks ? 'Filed in EmaraTax before these books — ' : '') +
+              (!owed
+                ? settled
+                  ? 'Filed — refund received'
+                  : net.startsWith('-')
+                    ? 'Filed — refund due from the FTA'
+                    : 'Filed — nothing to pay'
+                : settled
+                  ? 'Filed and paid'
+                  : today > period.due
+                    ? `Filed — payment was due ${inDays(today, period.due)}`
+                    : `Filed — pay by the due date (${inDays(today, period.due)})`),
           } satisfies VatPeriodRow;
         }
         if (period.from > today) {
-          return { ...period, href, netVat: null, state: 'upcoming', status: 'Not started yet' };
+          return {
+            ...period,
+            href,
+            netVat: null,
+            beforeBooks,
+            state: 'upcoming',
+            status: 'Not started yet',
+          } satisfies VatPeriodRow;
         }
         if (period.to >= today) {
           return {
             ...period,
             href,
             netVat: null,
+            beforeBooks,
             state: 'upcoming',
-            status: `Running now — file after ${period.to}`,
-          };
+            status: `Running now — file after ${period.to}.${partBefore}`,
+          } satisfies VatPeriodRow;
         }
         return {
           ...period,
           href,
           netVat: null,
+          beforeBooks,
           state: today > period.due ? 'late' : 'todo',
-          status:
-            today > period.due
-              ? `Not filed — was due ${inDays(today, period.due)}`
-              : `Return due ${inDays(today, period.due)}`,
-        };
+          status: beforeBooks
+            ? `Before these books began, so the app can't tell whether it was filed. Check EmaraTax (VAT → VAT Returns): if it shows Submitted, record it here; if not, file it now — it was due ${inDays(today, period.due)}.`
+            : (today > period.due
+                ? `Not filed — was due ${inDays(today, period.due)}.`
+                : `Return due ${inDays(today, period.due)}.`) + partBefore,
+        } satisfies VatPeriodRow;
       });
 
   // ── Financial year & corporate tax ──
@@ -410,17 +497,17 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
     ? {
         endMonth: dates.financialYearEndMonth,
         firstYearEnd: dates.firstFinancialYearEnd,
-        booksStart: dates.booksStart,
+        booksStart: knownFrom,
       }
     : null;
   const currentYear: FinancialYear | null = rule ? financialYearOf(today, rule) : null;
   const endedYear: FinancialYear | null = rule ? lastEndedYear(today, rule) : null;
-  const canSeeProfit = hasPermission(user, 'reports.view');
+  const canSeeProfit = profitOf !== null;
   const yearFigures = async (fy: FinancialYear | null) => {
-    if (!fy || !canSeeProfit) return null;
+    if (!fy || !profitOf) return null;
     const from = fy.start ?? dates.booksStart ?? `${fy.end.slice(0, 4)}-01-01`;
     const to = fy.end < today ? fy.end : today;
-    const pl = await getLedgerProfitAndLoss(user, { period: 'custom', from, to });
+    const pl = await profitOf(from, to);
     const revenueFils = toFils(pl.income.total.replace('-', ''));
     return {
       from,
@@ -567,6 +654,21 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
       action: 'Opening balances',
     },
   ];
+  // VAT quarters that began before the books need those months' totals.
+  if (dates.booksStart && vatSet && dates.vatFirstPeriodStart! < dates.booksStart) {
+    const dayBefore = addDays(dates.booksStart, -1);
+    const done = priorCovers(dates.vatFirstPeriodStart!, dayBefore);
+    setup.push({
+      key: 'prior-months',
+      title: 'Months before these books',
+      detail: done
+        ? `Totals entered from ${priorRanges[0]?.from} to ${dayBefore}: the VAT returns and the year's profit include them.`
+        : `VAT began on ${dates.vatFirstPeriodStart} but these books on ${dates.booksStart}. Enter each month's totals from then (and from the first month of your first tax year) — the VAT returns and the corporate tax return need them.`,
+      state: done ? 'done' : 'missing',
+      href: '/finance/accounting/prior-periods',
+      action: 'Enter the months',
+    });
+  }
   if (activeEmployees > 0) {
     setup.push({
       key: 'salaries',

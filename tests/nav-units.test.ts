@@ -115,10 +115,15 @@ describe('the sidebar sections', () => {
 
   test('pages sit in the section of their module; only Finance has sub-sections', () => {
     assert.equal(sectionOf('/job-cards'), 'Workshop');
-    assert.equal(sectionOf('/finance/invoices'), 'Sales');
-    assert.equal(sectionOf('/vehicles'), 'Customers');
+    assert.equal(sectionOf('/finance/invoices'), 'Sales and Customers');
+    assert.equal(sectionOf('/vehicles'), 'Sales and Customers');
+    assert.equal(sectionOf('/inventory/suppliers'), 'Bills and Suppliers');
+    assert.equal(sectionOf('/my-work'), 'My Team');
     assert.equal(sectionOf('/inventory/purchases'), 'Inventory');
-    assert.equal(sectionOf('/finance/vat'), 'Finance');
+    // VAT returns have their own section, beside Finance.
+    assert.equal(sectionOf('/finance/vat'), 'VAT');
+    assert.equal(sectionOf('/finance/calendar'), 'Finance');
+    assert.equal(sectionOf('/finance/accounting/prior-periods'), 'Finance');
     assert.equal(sectionOf('/finance/accounting?view=journal'), 'Finance');
     assert.equal(sectionOf('/hr/payroll'), 'HR');
     assert.equal(sectionOf('/settings/users'), 'Settings');

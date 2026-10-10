@@ -2,6 +2,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { runAttendanceReminders } from '@/lib/notifications/reminders';
 import { SELF_CHECK_IN } from '@/lib/hr/self-attendance';
+import { runComplianceReminders } from '@/lib/compliance/reminders';
+
+let complianceRanAt = 0;
 
 /*
  * The scheduled job behind the check-in and check-out reminders. Something
@@ -27,6 +30,15 @@ function authorized(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return new NextResponse('Unauthorized', { status: 401 });
+  // Whatever schedule calls this also sends the tax & accounting reminders,
+  // at most once an hour.
+  if (Date.now() - complianceRanAt > 60 * 60 * 1000) {
+    complianceRanAt = Date.now();
+    await runComplianceReminders().catch((error) => {
+      complianceRanAt = 0;
+      console.error('Compliance reminders failed', error);
+    });
+  }
   // Checking in from the phone is switched off: nobody to remind.
   if (!SELF_CHECK_IN) return NextResponse.json({ ok: true, off: true, sent: 0 });
   const result = await runAttendanceReminders();
