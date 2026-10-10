@@ -3,12 +3,13 @@ import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { hasPermission, requirePermission } from '@/lib/auth/authorize';
+import { assertCanGrantRoles, assertCanManageAccount } from '@/lib/access/escalation';
 import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { parseInput } from '@/lib/form-data';
 import { emptyToNull, normalizePhone } from '@/lib/normalize';
-import { hashPassword } from '@/lib/auth/password';
+import { hashPassword, temporaryPassword } from '@/lib/auth/password';
 import { getDesignationOptions } from '@/lib/hr/designations';
 
 /*
@@ -63,10 +64,32 @@ const employeeSchema = z.object({
   terminationDate: z
     .union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid date.')])
     .optional(),
+  /** End of probation (at most 6 months, Art. 9). Empty: 6 months from joining. */
+  probationEndDate: z
+    .union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid date.')])
+    .optional(),
+  /** Normal working hours a day (8 under Art. 17): beyond them is overtime. */
+  normalHoursPerDay: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || (/^\d{1,2}(\.\d{1,2})?$/.test(v) && Number(v) > 0 && Number(v) <= 12),
+      'Enter hours between 1 and 12.',
+    ),
+  /** Annual leave they had on a date — for staff who joined before these books. */
+  leaveOpeningDays: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || /^-?\d{1,3}(\.\d{1,2})?$/.test(v), 'Enter days like 12.5.'),
+  leaveOpeningAsOf: z
+    .union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid date.')])
+    .optional(),
   branchId: z.string({ error: 'Choose a branch.' }).trim().min(1, 'Choose a branch.'),
   /**
    * Their system login: an existing login's id, `new` to create one (signs in
-   * with the employee code, first password the code too), or empty for none.
+   * with the employee code and a one-time password shown once), or empty for none.
    */
   userId: z.string().trim().optional(),
   isActive: z.enum(['true', 'false']).optional(),
@@ -177,8 +200,49 @@ function employeeData(input: EmployeeInput) {
     department: emptyToNull(input.department),
     hireDate: new Date(`${input.hireDate}T00:00:00Z`),
     terminationDate: input.terminationDate ? new Date(`${input.terminationDate}T00:00:00Z`) : null,
+    probationEndDate: input.probationEndDate
+      ? new Date(`${input.probationEndDate}T00:00:00Z`)
+      : null,
+    normalHoursPerDay: input.normalHoursPerDay
+      ? Number(input.normalHoursPerDay).toFixed(2)
+      : '8.00',
+    leaveOpeningDays:
+      input.leaveOpeningDays && input.leaveOpeningAsOf ? input.leaveOpeningDays : null,
+    leaveOpeningAsOf:
+      input.leaveOpeningDays && input.leaveOpeningAsOf
+        ? new Date(`${input.leaveOpeningAsOf}T00:00:00Z`)
+        : null,
     branchId: input.branchId,
   };
+}
+
+/** The rules every saved employee keeps: leaving needs a date, probation ≤ 6 months. */
+function assertEmployeeRules(input: EmployeeInput) {
+  if (input.isActive === 'false' && !input.terminationDate) {
+    throw new DomainError(
+      'Enter the day they left: without it their last salary and final settlement can’t be worked out.',
+      'terminationDate',
+    );
+  }
+  if (Boolean(input.leaveOpeningDays) !== Boolean(input.leaveOpeningAsOf)) {
+    throw new DomainError(
+      'Enter both the leave balance and the date it stood on.',
+      input.leaveOpeningDays ? 'leaveOpeningAsOf' : 'leaveOpeningDays',
+    );
+  }
+  if (input.probationEndDate) {
+    const hire = new Date(`${input.hireDate}T00:00:00Z`);
+    const limit = new Date(
+      Date.UTC(hire.getUTCFullYear(), hire.getUTCMonth() + 6, hire.getUTCDate()),
+    );
+    const probation = new Date(`${input.probationEndDate}T00:00:00Z`);
+    if (probation < hire || probation > limit) {
+      throw new DomainError(
+        'Probation ends within 6 months of joining (Labour Law Art. 9).',
+        'probationEndDate',
+      );
+    }
+  }
 }
 
 /** The login field: an existing login's id, a request for a new one, or none. */
@@ -190,14 +254,20 @@ function loginChoice(value: string | undefined) {
 
 /**
  * Makes the employee's login: signs in with their employee code, and the
- * first password is the code too — which is why the first sign-in must
+ * first password is a random one-time password, shown once — the first sign-in must
  * choose a new one. It holds their designation's role, so it can do exactly
  * what the designation allows.
  */
 async function createEmployeeLogin(
   tx: Prisma.TransactionClient,
   actor: AuthenticatedUser,
-  employee: { id: string; employeeCode: string; firstName: string; lastName: string; branchId: string },
+  employee: {
+    id: string;
+    employeeCode: string;
+    firstName: string;
+    lastName: string;
+    branchId: string;
+  },
   designation: { name: string; roleId: string | null } | null,
 ) {
   if (!hasPermission(actor, 'user.create')) {
@@ -217,11 +287,16 @@ async function createEmployeeLogin(
   }
   const username = employee.employeeCode.toUpperCase();
   const taken = await tx.user.findFirst({
-    where: { organizationId: actor.organizationId, username: { equals: username, mode: 'insensitive' } },
+    where: {
+      organizationId: actor.organizationId,
+      username: { equals: username, mode: 'insensitive' },
+    },
     select: { id: true },
   });
   if (taken) throw new DomainError(`Someone already signs in as ${username}.`, 'employeeCode');
 
+  // A random one-time password, shown once to whoever made the login.
+  const password = temporaryPassword();
   const login = await tx.user.create({
     data: {
       organizationId: actor.organizationId,
@@ -229,12 +304,13 @@ async function createEmployeeLogin(
       username,
       email: null,
       fullName: name(employee),
-      passwordHash: await hashPassword(username),
+      passwordHash: await hashPassword(password),
       mustChangePassword: true,
       isActive: true,
     },
     select: { id: true },
   });
+  await assertCanGrantRoles(tx, actor, [designation.roleId]);
   await tx.userRole.create({
     data: {
       organizationId: actor.organizationId,
@@ -252,9 +328,9 @@ async function createEmployeeLogin(
     entityType: 'User',
     entityId: login.id,
     afterData: { fullName: name(employee), username, designation: designation.name },
-    metadata: { employeeId: employee.id, firstPasswordIsEmployeeCode: true },
+    metadata: { employeeId: employee.id, temporaryPassword: true },
   });
-  return login;
+  return { id: login.id, temporaryPassword: password };
 }
 
 /**
@@ -289,6 +365,8 @@ async function moveDesignationRole(
       'designationId',
     );
   }
+  await assertCanManageAccount(tx, actor, loginId, 'change the access of');
+  if (grant) await assertCanGrantRoles(tx, actor, [toRoleId!]);
   if (revoke) {
     await tx.userRole.updateMany({
       where: { userId: loginId, roleId: fromRoleId, revokedAt: null, branchId: null },
@@ -309,6 +387,7 @@ async function moveDesignationRole(
 
 export async function createEmployee(user: AuthenticatedUser, rawInput: unknown) {
   const input = parseInput(employeeSchema, rawInput);
+  assertEmployeeRules(input);
   requirePermission(user, 'employee.create');
   const data = employeeData(input);
   if (data.terminationDate && data.terminationDate < data.hireDate) {
@@ -362,7 +441,12 @@ export async function createEmployee(user: AuthenticatedUser, rawInput: unknown)
       },
     });
     await settleRequestKey(tx, user, rawInput, employee.id);
-    return { ...employee, userId: created?.id ?? employee.userId };
+    return {
+      ...employee,
+      userId: created?.id ?? employee.userId,
+      /** Shown once to whoever made the login; never stored in the clear. */
+      temporaryPassword: created?.temporaryPassword ?? null,
+    };
   });
 }
 
@@ -373,6 +457,7 @@ export async function updateEmployee(
 ) {
   const input = parseInput(employeeSchema, rawInput);
   requirePermission(user, 'employee.edit');
+  assertEmployeeRules(input);
   const before = await prisma.employee.findFirst({
     where: { id: employeeId, organizationId: user.organizationId },
     include: {
@@ -422,7 +507,8 @@ export async function updateEmployee(
     if (keptLoginId) {
       // The same login keeps following the designation; a login newly linked
       // is given the designation's role.
-      const fromRoleId = keptLoginId === before.userId ? (before.designation?.roleId ?? null) : null;
+      const fromRoleId =
+        keptLoginId === before.userId ? (before.designation?.roleId ?? null) : null;
       await moveDesignationRole(tx, user, keptLoginId, fromRoleId, designation?.roleId ?? null);
       // A login that signs in with the employee code follows a new code.
       if (
@@ -439,7 +525,8 @@ export async function updateEmployee(
           },
           select: { id: true },
         });
-        if (taken) throw new DomainError(`Someone already signs in as ${employeeCode}.`, 'employeeCode');
+        if (taken)
+          throw new DomainError(`Someone already signs in as ${employeeCode}.`, 'employeeCode');
         await tx.user.update({ where: { id: keptLoginId }, data: { username: employeeCode } });
       }
     }
@@ -481,7 +568,12 @@ export async function updateEmployee(
         isActive: employee.isActive,
       },
     });
-    return { ...employee, userId: created?.id ?? employee.userId };
+    return {
+      ...employee,
+      userId: created?.id ?? employee.userId,
+      /** Shown once to whoever made the login; never stored in the clear. */
+      temporaryPassword: created?.temporaryPassword ?? null,
+    };
   });
 }
 
@@ -499,6 +591,7 @@ export async function resetEmployeeLogin(user: AuthenticatedUser, employeeId: st
     });
     if (!employee) throw new NotFoundError('employee');
     if (!employee.userId) throw new DomainError('This employee has no login to reset.');
+    await assertCanManageAccount(tx, user, employee.userId, 'reset the password of');
     const username = employee.employeeCode.toUpperCase();
     const taken = await tx.user.findFirst({
       where: {
@@ -509,9 +602,10 @@ export async function resetEmployeeLogin(user: AuthenticatedUser, employeeId: st
       select: { id: true },
     });
     if (taken) throw new DomainError(`Someone else already signs in as ${username}.`);
+    const password = temporaryPassword();
     await tx.user.update({
       where: { id: employee.userId },
-      data: { username, passwordHash: await hashPassword(username), mustChangePassword: true },
+      data: { username, passwordHash: await hashPassword(password), mustChangePassword: true },
     });
     const { count } = await tx.session.updateMany({
       where: { userId: employee.userId, revokedAt: null },
@@ -524,9 +618,9 @@ export async function resetEmployeeLogin(user: AuthenticatedUser, employeeId: st
       action: 'user.password_reset',
       entityType: 'User',
       entityId: employee.userId,
-      metadata: { employeeId, toEmployeeCode: true, sessionsRevoked: count },
+      metadata: { employeeId, temporaryPassword: true, sessionsRevoked: count },
     });
-    return { username };
+    return { username, temporaryPassword: password };
   });
 }
 

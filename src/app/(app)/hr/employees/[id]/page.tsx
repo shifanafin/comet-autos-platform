@@ -16,6 +16,9 @@ import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { InlineForm } from '@/components/shared/inline-form';
 import { PayDetailsForm, SalaryForm } from '@/components/hr/payroll-forms';
 import { ResetLoginButton } from '@/components/hr/reset-login-button';
+import { PrepareSettlementForm } from '@/components/hr/settlement-forms';
+import { getEmployeeLeaveSummary } from '@/lib/hr/leave';
+import { getEmployeeSettlement } from '@/lib/hr/settlement';
 
 export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -36,6 +39,10 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     hasPermission(user, 'user.edit') && !!employee.user && employee.user.id !== user.id;
   // Pay is shown only to those who prepare or approve payroll.
   const pay = canSeePay(user) ? await getSalaryHistory(user, employee.id) : null;
+  const [leave, settlement] = await Promise.all([
+    hasPermission(user, 'leave.view') ? getEmployeeLeaveSummary(user, employee.id) : null,
+    pay ? getEmployeeSettlement(user, employee.id) : null,
+  ]);
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -238,7 +245,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                           <span className="text-xs text-muted-foreground">
                             {employee.user.lastLoginAt
                               ? 'Has not chosen their own password yet.'
-                              : 'Not signed in yet. First password: their employee code.'}
+                              : 'Not signed in yet — they use the one-time password given when the login was made (Reset password gives a new one).'}
                           </span>
                         ) : null}
                         {canResetLogin ? <ResetLoginButton employeeId={employee.id} /> : null}
@@ -360,6 +367,89 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 </Panel>
               </Section>
             </div>
+          ) : null}
+
+          {leave ? (
+            <Section
+              title="Annual leave"
+              description={`As of ${formatCalendarDate(leave.asOf)}. Builds up with every day of service; unpaid leave and absent days don't count.`}
+            >
+              <Panel padding="none" className="overflow-hidden">
+                <dl className="grid grid-cols-2 gap-4 px-4 py-5 text-sm sm:grid-cols-4 sm:px-6">
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-xs font-medium text-muted-foreground">Earned</dt>
+                    <dd className="font-medium tabular-nums">{leave.annual.earned} days</dd>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-xs font-medium text-muted-foreground">Taken</dt>
+                    <dd className="font-medium tabular-nums">{leave.annual.taken} days</dd>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-xs font-medium text-muted-foreground">Left</dt>
+                    <dd className="font-semibold tabular-nums">{leave.annual.balance} days</dd>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-xs font-medium text-muted-foreground">Service counted</dt>
+                    <dd className="tabular-nums">
+                      {leave.serviceDays} of {leave.calendarDays} days
+                    </dd>
+                  </div>
+                </dl>
+                <div className="flex flex-col gap-1 border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-6">
+                  {leave.annual.accruing > 0 ? (
+                    <p>
+                      {leave.annual.accruing} days building up — usable once they complete 6 months.
+                    </p>
+                  ) : null}
+                  <p>
+                    {leave.inProbation
+                      ? `On probation until ${formatCalendarDate(leave.probationEnd)}: sick leave is unpaid.`
+                      : `Sick leave this year: ${leave.sickFullUsed} of 15 days on full pay, ${leave.sickHalfUsed} of 30 on half pay.`}
+                  </p>
+                </div>
+              </Panel>
+            </Section>
+          ) : null}
+
+          {pay ? (
+            <Section
+              title="Leaving"
+              description="Final settlement: end-of-service, unused leave and notice — due within 14 days."
+            >
+              <Panel>
+                {settlement ? (
+                  <Link
+                    href={`/hr/settlements/${settlement.id}`}
+                    className="flex items-center justify-between gap-3 text-sm hover:underline"
+                  >
+                    <span>
+                      Final settlement · leaving {formatCalendarDate(settlement.terminationDate)} ·{' '}
+                      {settlement.status.toLowerCase()}
+                    </span>
+                    <span className="font-semibold tabular-nums">
+                      {formatMoney(settlement.netPayable.toString())}
+                    </span>
+                  </Link>
+                ) : canSetSalary ? (
+                  <InlineForm
+                    label="Work out a final settlement"
+                    hint="When someone resigns, is let go or their contract ends."
+                    icon={<Banknote className="size-4" />}
+                  >
+                    <PrepareSettlementForm
+                      employeeId={employee.id}
+                      defaults={{
+                        terminationDate: employee.terminationDate
+                          ? employee.terminationDate.toISOString().slice(0, 10)
+                          : null,
+                      }}
+                    />
+                  </InlineForm>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No settlement yet.</p>
+                )}
+              </Panel>
+            </Section>
           ) : null}
 
           <Section title="Work recorded" description="Across every job, all time.">

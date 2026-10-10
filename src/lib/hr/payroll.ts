@@ -12,7 +12,17 @@ import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { approvedLeaveDays, leaveDays, overlapDays } from '@/lib/hr/leave';
 import { syncPosting } from '@/lib/accounting/journal';
-import { gratuityEarnedFils } from '@/lib/hr/gratuity';
+import { gratuityForServiceDaysFils } from '@/lib/hr/gratuity';
+import {
+  leaveDeductionFils,
+  leaveLiabilityFils,
+  maxOtherDeductionFils,
+  overtimePayFils,
+  type OvertimeRateKind,
+} from '@/lib/hr/leave-rules';
+import { leavePosition, payWindowDays } from '@/lib/hr/leave-ledger';
+import type { DeductionKind } from '@/generated/prisma/enums';
+import { automaticPayrollMonth } from '@/lib/hr/payroll-schedule';
 
 /*
  * Salaries and the monthly payroll run.
@@ -44,9 +54,9 @@ import { gratuityEarnedFils } from '@/lib/hr/gratuity';
  * deducted automatically — whether an absence is docked is the manager's
  * call, made with the deduction edit.
  *
- * Who may see pay: anyone who prepares payroll (`payroll.create`) or signs
- * it off (`payroll.approve`). `payroll.view` alone is the team directory,
- * attendance and leave — not what people earn.
+ * Who may see pay: Payroll → View ("Salaries and payroll runs") or the
+ * authority that signs runs off (`payroll.approve`). Without either, the
+ * team directory, attendance and leave show — never what people earn.
  */
 
 export const PAYROLL_STATUS_LABEL: Record<PayrollStatus, string> = {
@@ -266,7 +276,22 @@ interface CalculatedLine {
   netPay: string;
   gratuityLiability: string;
   gratuityAccrual: string;
+  unpaidDays: string;
+  halfPayDays: string;
+  absentDays: string;
+  leaveDeduction: string;
+  otherDeduction: string;
+  otherDeductionKind: DeductionKind | null;
+  otherDeductionReason: string | null;
+  overtimeHours: string;
+  overtimePay: string;
+  leaveBalanceDays: string;
+  leaveLiability: string;
+  leaveAccrual: string;
 }
+
+/** A hand-entered deduction, kept when a run is recalculated. */
+type KeptDeduction = { amountFils: number; kind: DeductionKind | null; reason: string | null };
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -294,14 +319,24 @@ async function assertNoLaterRun(
 }
 
 /**
- * Every line for one month, from the salaries, employment dates and
- * approved unpaid leave. Four queries for the whole team.
+ * Every line for one month, under the UAE rules in lib/hr/leave-rules.ts:
+ *
+ *   pay        basic and allowances in force on the month's last day,
+ *              pro-rated by calendar days for anyone who joined or left;
+ *   less       unpaid days and unexcused absence at a day's wage (÷ 30),
+ *              and half a day's wage for each half-pay day (sick, maternity);
+ *   plus       approved overtime at +25% / +50% of the hourly basic;
+ *   less       a hand-entered deduction (advance, penalty), kept on recalculation;
+ *   set aside  the end-of-service gratuity and the unused annual leave earned
+ *              to the period end, on counted service (unpaid days excluded) —
+ *              the change since the last run is this month's cost.
  */
 async function calculateLines(
   tx: Prisma.TransactionClient,
   organizationId: string,
   start: Date,
   end: Date,
+  kept: Map<string, KeptDeduction> = new Map(),
 ) {
   const employees = await tx.employee.findMany({
     where: {
@@ -311,16 +346,25 @@ async function calculateLines(
       // inactive record with no leaving date is not paid at all.
       OR: [{ isActive: true, terminationDate: null }, { terminationDate: { gte: start } }],
     },
-    select: { id: true, firstName: true, lastName: true, hireDate: true, terminationDate: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      hireDate: true,
+      terminationDate: true,
+      probationEndDate: true,
+      leaveOpeningDays: true,
+      leaveOpeningAsOf: true,
+      normalHoursPerDay: true,
+    },
   });
   const ids = employees.map((employee) => employee.id);
-  const [salaries, leave, earlier, organization] = await Promise.all([
+  const [salaries, earlier, organization, overtime] = await Promise.all([
     tx.salary.findMany({
       where: { organizationId, employeeId: { in: ids }, effectiveFrom: { lte: end } },
       orderBy: { effectiveFrom: 'desc' },
     }),
-    approvedLeaveDays(tx, organizationId, ids, start, end),
-    // The gratuity each person's last payroll had set aside.
+    // What each person's last payroll had set aside.
     tx.payrollItem.findMany({
       where: {
         organizationId,
@@ -328,19 +372,33 @@ async function calculateLines(
         payroll: { status: { not: 'CANCELLED' }, periodEnd: { lt: start } },
       },
       orderBy: { payroll: { periodEnd: 'desc' } },
-      select: { employeeId: true, gratuityLiability: true },
+      select: { employeeId: true, gratuityLiability: true, leaveLiability: true },
     }),
     tx.organization.findUniqueOrThrow({
       where: { id: organizationId },
       select: { openingBalanceDate: true },
     }),
+    tx.overtimeEntry.findMany({
+      where: {
+        organizationId,
+        employeeId: { in: ids },
+        status: 'APPROVED',
+        workDate: { gte: start, lte: end },
+      },
+      select: { employeeId: true, workDate: true, hours: true, kind: true },
+    }),
   ]);
-  const setAside = new Map<string, number>();
+  const setAside = new Map<string, { gratuity: number; leave: number }>();
   for (const item of earlier) {
-    if (!setAside.has(item.employeeId)) setAside.set(item.employeeId, fils(item.gratuityLiability));
+    if (!setAside.has(item.employeeId)) {
+      setAside.set(item.employeeId, {
+        gratuity: fils(item.gratuityLiability),
+        leave: fils(item.leaveLiability),
+      });
+    }
   }
-  // Gratuity earned before the books began is part of the opening balances
-  // (Provision for end-of-service benefits), not this month's cost.
+  // What was earned before the books began is part of the opening balances
+  // (the end-of-service and annual leave provisions), not this month's cost.
   const booksStart = organization.openingBalanceDate;
   const dayBeforeBooks = booksStart ? isoDay(new Date(booksStart.getTime() - DAY_MS)) : null;
 
@@ -361,36 +419,103 @@ async function calculateLines(
     }
     const employed = overlapDays(employee.hireDate, employee.terminationDate ?? end, start, end);
     if (employed === 0) continue;
+    const from = isoDay(employee.hireDate > start ? employee.hireDate : start);
+    const to = isoDay(
+      employee.terminationDate && employee.terminationDate < end ? employee.terminationDate : end,
+    );
 
     const monthlyBasic = fils(salary.basicSalary);
     const monthlyAllowances = fils(salary.allowances);
     const basic = employed === days ? monthlyBasic : divRound(monthlyBasic * employed, days);
     const allowances =
       employed === days ? monthlyAllowances : divRound(monthlyAllowances * employed, days);
-    const unpaid = Math.min(leave.get(employee.id)?.UNPAID ?? 0, employed);
-    const deductions = Math.min(
-      divRound((monthlyBasic + monthlyAllowances) * unpaid, days),
-      basic + allowances,
+    const gross = basic + allowances;
+
+    // Unpaid and half-pay leave, and absence no leave covers — only while employed.
+    const window = await payWindowDays(tx, organizationId, employee.id, from, to);
+    const leaveDeduction = Math.min(
+      leaveDeductionFils(
+        monthlyBasic + monthlyAllowances,
+        window.unpaid + window.absent,
+        window.half,
+      ),
+      gross,
     );
-    // Earned to the month end — or to the last day worked, for someone who left.
-    const hired = isoDay(employee.hireDate);
-    const asOf = isoDay(
-      employee.terminationDate && employee.terminationDate < end ? employee.terminationDate : end,
-    );
-    const liability = gratuityEarnedFils(hired, asOf, monthlyBasic);
-    const before =
-      setAside.get(employee.id) ??
-      (dayBeforeBooks && hired <= dayBeforeBooks
-        ? gratuityEarnedFils(hired, dayBeforeBooks, monthlyBasic)
-        : 0);
+
+    // Approved overtime on days worked this month.
+    const normalHours = Number(employee.normalHoursPerDay.toString());
+    let overtimeHours = 0;
+    let overtimePay = 0;
+    for (const entry of overtime) {
+      if (entry.employeeId !== employee.id) continue;
+      const date = isoDay(entry.workDate);
+      if (date < from || date > to) continue;
+      const hours = Number(entry.hours.toString());
+      overtimeHours += hours;
+      overtimePay += overtimePayFils(
+        hours,
+        monthlyBasic,
+        normalHours,
+        entry.kind as OvertimeRateKind,
+      );
+    }
+
+    // A hand deduction carried over a recalculation, never above the Art. 25 cap.
+    const keep = kept.get(employee.id);
+    const otherDeduction = keep
+      ? Math.min(
+          keep.amountFils,
+          maxOtherDeductionFils(gross),
+          gross + overtimePay - leaveDeduction,
+        )
+      : 0;
+
+    // Set aside to the period end, on counted service.
+    const position = await leavePosition(tx, organizationId, employee.id, employee, to);
+    const gratuityLiability = gratuityForServiceDaysFils(position.serviceDays, monthlyBasic);
+    const leaveBalance = Math.max(0, position.annual.balance);
+    const leaveLiability = leaveLiabilityFils(leaveBalance, monthlyBasic);
+    let before = setAside.get(employee.id);
+    if (!before) {
+      const hired = isoDay(employee.hireDate);
+      if (dayBeforeBooks && hired <= dayBeforeBooks) {
+        const opening = await leavePosition(
+          tx,
+          organizationId,
+          employee.id,
+          employee,
+          dayBeforeBooks,
+        );
+        before = {
+          gratuity: gratuityForServiceDaysFils(opening.serviceDays, monthlyBasic),
+          leave: leaveLiabilityFils(Math.max(0, opening.annual.balance), monthlyBasic),
+        };
+      } else {
+        before = { gratuity: 0, leave: 0 };
+      }
+    }
+
+    const deductions = leaveDeduction + otherDeduction;
     lines.push({
       employeeId: employee.id,
       basicSalary: filsToString(basic),
       allowances: filsToString(allowances),
       deductions: filsToString(deductions),
-      netPay: filsToString(basic + allowances - deductions),
-      gratuityLiability: filsToString(liability),
-      gratuityAccrual: signed(liability - before),
+      netPay: filsToString(Math.max(0, gross + overtimePay - deductions)),
+      gratuityLiability: filsToString(gratuityLiability),
+      gratuityAccrual: signed(gratuityLiability - before.gratuity),
+      unpaidDays: window.unpaid.toFixed(2),
+      halfPayDays: window.half.toFixed(2),
+      absentDays: window.absent.toFixed(2),
+      leaveDeduction: filsToString(leaveDeduction),
+      otherDeduction: filsToString(otherDeduction),
+      otherDeductionKind: otherDeduction > 0 ? (keep?.kind ?? null) : null,
+      otherDeductionReason: otherDeduction > 0 ? (keep?.reason ?? null) : null,
+      overtimeHours: overtimeHours.toFixed(2),
+      overtimePay: filsToString(overtimePay),
+      leaveBalanceDays: leaveBalance.toFixed(2),
+      leaveLiability: filsToString(leaveLiability),
+      leaveAccrual: signed(leaveLiability - before.leave),
     });
   }
   return { lines, missingSalary };
@@ -444,6 +569,16 @@ export async function runPayroll(user: AuthenticatedUser, rawInput: unknown) {
   if (input.month > localDateString().slice(0, 7)) {
     throw new DomainError('Payroll can’t be run for a month that hasn’t started.', 'month');
   }
+  const books = await prisma.organization.findUnique({
+    where: { id: user.organizationId },
+    select: { openingBalanceDate: true },
+  });
+  if (books?.openingBalanceDate && end < books.openingBalanceDate) {
+    throw new DomainError(
+      `${monthLabel(start)} ended before these books began (${books.openingBalanceDate.toISOString().slice(0, 10)}): its salaries belong in the months entered as totals (Accounting → Months before the books), not a payroll run — running it would count them twice.`,
+      'month',
+    );
+  }
 
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'payroll.run');
@@ -476,6 +611,8 @@ export async function runPayroll(user: AuthenticatedUser, rawInput: unknown) {
           data: {
             status: 'CALCULATED',
             calculatedAt: now,
+            createdByUserId: user.id,
+            automatic: false,
             approvedAt: null,
             approvedByUserId: null,
             paidAt: null,
@@ -513,6 +650,69 @@ export async function runPayroll(user: AuthenticatedUser, rawInput: unknown) {
     );
     await settleRequestKey(tx, user, rawInput, payroll.id);
     return { ...payroll, missingSalary };
+  });
+}
+
+/**
+ * Calculates last month's payroll by itself (from the 1st), leaving it for a
+ * person to approve. Does nothing when the month already has a run of any
+ * kind (a cancelled one was a person's decision), when a later month has
+ * been run, or when no one has a salary. Safe to call as often as wanted.
+ */
+export async function runPayrollAutomatically(organizationId: string, today = localDateString()) {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { openingBalanceDate: true, isActive: true },
+  });
+  if (!organization?.isActive) return null;
+  const month = automaticPayrollMonth(
+    today,
+    organization.openingBalanceDate?.toISOString().slice(0, 10) ?? null,
+  );
+  if (!month) return null;
+  const { start, end } = monthPeriod(month);
+
+  return prisma.$transaction(async (tx) => {
+    // One at a time per workshop, so two servers never both create it.
+    await tx.$executeRaw`SELECT id FROM organizations WHERE id = ${organizationId}::uuid FOR UPDATE`;
+    const existing = await tx.payroll.findFirst({
+      where: { organizationId, periodStart: start, periodEnd: end },
+      select: { id: true },
+    });
+    if (existing) return null;
+    const later = await tx.payroll.findFirst({
+      where: { organizationId, status: { not: 'CANCELLED' }, periodStart: { gt: end } },
+      select: { id: true },
+    });
+    if (later) return null;
+
+    const { lines, missingSalary } = await calculateLines(tx, organizationId, start, end);
+    if (lines.length === 0)
+      return { payroll: null, month, label: monthLabel(start), missingSalary };
+    const payroll = await tx.payroll.create({
+      data: {
+        organizationId,
+        periodStart: start,
+        periodEnd: end,
+        status: 'CALCULATED',
+        calculatedAt: new Date(),
+        automatic: true,
+      },
+    });
+    await tx.payrollItem.createMany({
+      data: lines.map((line) => ({ organizationId, payrollId: payroll.id, ...line })),
+    });
+    const totals = totalsOf(lines);
+    await writeAuditLog(tx, {
+      organizationId,
+      actorUserId: null,
+      action: 'payroll.calculated',
+      entityType: 'Payroll',
+      entityId: payroll.id,
+      afterData: { month, employees: totals.count, gross: totals.gross, net: totals.net },
+      metadata: { automatic: true, ...(missingSalary.length ? { missingSalary } : {}) },
+    });
+    return { payroll: { id: payroll.id, totals }, month, label: monthLabel(start), missingSalary };
   });
 }
 
@@ -556,12 +756,27 @@ export async function recalculatePayroll(user: AuthenticatedUser, payrollId: str
   return prisma.$transaction(async (tx) => {
     const payroll = await loadRun(tx, user, payrollId, ['DRAFT', 'CALCULATED'], 'recalculated');
     await assertNoLaterRun(tx, user.organizationId, payroll.periodEnd, 'recalculated');
-    const before = totalsOf(await tx.payrollItem.findMany({ where: { payrollId: payroll.id } }));
+    const existing = await tx.payrollItem.findMany({ where: { payrollId: payroll.id } });
+    const before = totalsOf(existing);
+    // Hand-entered deductions survive: recalculating only re-reads leave, overtime and salaries.
+    const kept = new Map<string, KeptDeduction>(
+      existing
+        .filter((item) => fils(item.otherDeduction) > 0)
+        .map((item) => [
+          item.employeeId,
+          {
+            amountFils: fils(item.otherDeduction),
+            kind: item.otherDeductionKind,
+            reason: item.otherDeductionReason,
+          },
+        ]),
+    );
     const { lines, missingSalary } = await calculateLines(
       tx,
       user.organizationId,
       payroll.periodStart,
       payroll.periodEnd,
+      kept,
     );
     if (lines.length === 0) {
       throw new DomainError('No one has a salary for this month, so there is nothing to pay.');
@@ -594,10 +809,14 @@ export async function recalculatePayroll(user: AuthenticatedUser, payrollId: str
 }
 
 const adjustSchema = z.object({
+  /** The hand-entered deduction for the month — 0 to remove it. */
   deductions: z
     .string({ error: 'Enter the deduction.' })
     .trim()
     .regex(MONEY, 'Enter an amount like 150.00.'),
+  kind: z
+    .enum(['ADVANCE', 'PENALTY', 'OTHER'], { error: 'Choose what the deduction is for.' })
+    .optional(),
   reason: z
     .string({ error: 'Say why the deduction is changing.' })
     .trim()
@@ -606,7 +825,12 @@ const adjustSchema = z.object({
   requestKey: z.string().optional(),
 });
 
-/** Sets one line's deduction by hand, with a reason, before the run is approved. */
+/**
+ * Sets one line's hand-entered deduction — a salary advance recovered, a
+ * penalty, other — with a reason, before the run is approved. The leave and
+ * absence deduction is the calculation's and stays; together they never
+ * exceed the pay, and the hand part never half the month's wage (Art. 25).
+ */
 export async function adjustDeduction(
   user: AuthenticatedUser,
   payrollId: string,
@@ -624,15 +848,34 @@ export async function adjustDeduction(
     });
     if (!item) throw new NotFoundError('payroll line');
     const gross = fils(item.basicSalary) + fils(item.allowances);
-    if (deduction > gross) {
+    const leaveDeduction = fils(item.leaveDeduction);
+    const overtime = fils(item.overtimePay);
+    const cap = maxOtherDeductionFils(gross);
+    if (deduction > cap) {
       throw new DomainError(
-        `The deduction can’t be more than the gross pay of ${filsToString(gross)}.`,
+        `UAE Labour Law caps deductions at half the month's wage: at most ${filsToString(cap)}.`,
         'deductions',
       );
     }
+    if (deduction > gross + overtime - leaveDeduction) {
+      throw new DomainError(
+        `After the leave deduction there is ${filsToString(gross + overtime - leaveDeduction)} left to pay — the deduction can’t be more.`,
+        'deductions',
+      );
+    }
+    if (deduction > 0 && !input.kind) {
+      throw new DomainError('Choose what the deduction is for.', 'kind');
+    }
+    const total = leaveDeduction + deduction;
     const updated = await tx.payrollItem.update({
       where: { id: item.id },
-      data: { deductions: filsToString(deduction), netPay: filsToString(gross - deduction) },
+      data: {
+        otherDeduction: filsToString(deduction),
+        otherDeductionKind: deduction > 0 ? (input.kind ?? null) : null,
+        otherDeductionReason: deduction > 0 ? input.reason : null,
+        deductions: filsToString(total),
+        netPay: filsToString(gross + overtime - total),
+      },
     });
     await audit(
       tx,
@@ -642,10 +885,11 @@ export async function adjustDeduction(
       payroll.id,
       {
         employeeId: item.employeeId,
-        deductions: filsToString(deduction),
+        otherDeduction: filsToString(deduction),
+        kind: deduction > 0 ? (input.kind ?? null) : null,
         netPay: updated.netPay.toString(),
       },
-      { deductions: item.deductions.toString(), netPay: item.netPay.toString() },
+      { otherDeduction: item.otherDeduction.toString(), netPay: item.netPay.toString() },
       { reason: input.reason },
     );
     return updated;
@@ -906,9 +1150,28 @@ export async function getPayrollRun(user: AuthenticatedUser, payrollId: string) 
         /** End-of-service gratuity earned to the period end, and this month's part of it. */
         gratuityLiability: filsToString(fils(item.gratuityLiability)),
         gratuityAccrual: signed(fils(item.gratuityAccrual)),
-        unpaidLeaveDays: days?.UNPAID ?? 0,
-        paidLeaveDays: days ? days.ANNUAL + days.SICK + days.OTHER : 0,
-        absentDays: absent.get(item.employeeId) ?? 0,
+        /** As calculated for the run — the figures it was paid on. */
+        unpaidLeaveDays: Number(item.unpaidDays.toString()),
+        halfPayDays: Number(item.halfPayDays.toString()),
+        paidLeaveDays: days
+          ? Object.values(days).reduce((sum, n) => sum + n, 0) -
+            Number(item.unpaidDays.toString()) -
+            Number(item.halfPayDays.toString())
+          : 0,
+        absentDays: Number(item.absentDays.toString()) || (absent.get(item.employeeId) ?? 0),
+        leaveDeduction: filsToString(fils(item.leaveDeduction)),
+        otherDeduction: filsToString(fils(item.otherDeduction)),
+        otherDeductionKind: item.otherDeductionKind,
+        otherDeductionReason: item.otherDeductionReason,
+        overtimeHours: Number(item.overtimeHours.toString()),
+        overtimePay: filsToString(fils(item.overtimePay)),
+        /** Pay with overtime, before deductions. */
+        earned: filsToString(
+          fils(item.basicSalary) + fils(item.allowances) + fils(item.overtimePay),
+        ),
+        leaveBalanceDays: Number(item.leaveBalanceDays.toString()),
+        leaveLiability: filsToString(fils(item.leaveLiability)),
+        leaveAccrual: signed(fils(item.leaveAccrual)),
       };
     })
     .sort((a, b) => a.employee.name.localeCompare(b.employee.name));
@@ -922,7 +1185,8 @@ export async function getPayrollRun(user: AuthenticatedUser, payrollId: string) 
     days: leaveDays(payroll.periodStart, payroll.periodEnd),
     status: payroll.status,
     calculatedAt: payroll.calculatedAt,
-    createdBy: payroll.createdBy.fullName,
+    createdBy: payroll.createdBy?.fullName ?? null,
+    automatic: payroll.automatic,
     approvedBy: payroll.approvedBy?.fullName ?? null,
     approvedAt: payroll.approvedAt,
     paidBy: payroll.paidBy?.fullName ?? null,

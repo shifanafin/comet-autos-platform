@@ -306,19 +306,21 @@ export async function sourceLinks(
                           ? '/finance/vat'
                           : source === 'PRIOR_PERIOD'
                             ? '/finance/accounting/prior-periods'
-                            : source === 'CARD_COLLECTION' || source === 'PAYMENT_VOUCHER'
-                              ? `/finance/payment-vouchers/${id}`
-                              : source === 'MONEY_TRANSFER'
-                                ? '/finance/money/transfers'
-                                : source === 'OWNER_MONEY'
-                                  ? '/finance/money/owner'
-                                  : source === 'CUSTOMER_ADVANCE'
-                                    ? `/finance/advances/${id}`
-                                    : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
-                                          source === 'CUSTOMER_ADVANCE_REFUND') &&
-                                        advanceOf.get(id)
-                                      ? `/finance/advances/${advanceOf.get(id)}`
-                                      : null;
+                            : source === 'FINAL_SETTLEMENT' || source === 'FINAL_SETTLEMENT_PAYMENT'
+                              ? `/hr/settlements/${id}`
+                              : source === 'CARD_COLLECTION' || source === 'PAYMENT_VOUCHER'
+                                ? `/finance/payment-vouchers/${id}`
+                                : source === 'MONEY_TRANSFER'
+                                  ? '/finance/money/transfers'
+                                  : source === 'OWNER_MONEY'
+                                    ? '/finance/money/owner'
+                                    : source === 'CUSTOMER_ADVANCE'
+                                      ? `/finance/advances/${id}`
+                                      : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
+                                            source === 'CUSTOMER_ADVANCE_REFUND') &&
+                                          advanceOf.get(id)
+                                        ? `/finance/advances/${advanceOf.get(id)}`
+                                        : null;
     return { type: source, id, href };
   };
 }

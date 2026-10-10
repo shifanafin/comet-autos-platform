@@ -42,12 +42,14 @@ export function LeaveForm({
   const router = useRouter();
   const [start, setStart] = useState(localDateString());
   const [end, setEnd] = useState(localDateString());
-  const [state, onSubmit, isPending] = useFormAction<ActionResult>(
+  const [state, onSubmit, isPending] = useFormAction<ActionResult<{ payNote: string | null }>>(
     async (prev, formData) => {
       const result = await requestLeaveAction(prev, formData);
       if (result.ok) {
         toast.success(
           formData.get('approveNow') ? 'Leave recorded and approved' : 'Leave recorded',
+          // Some days unpaid or half paid under the leave rules: say so.
+          result.data?.payNote ? { description: result.data.payNote, duration: 10000 } : undefined,
         );
         router.refresh();
       }

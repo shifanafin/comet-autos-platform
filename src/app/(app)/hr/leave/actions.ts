@@ -12,13 +12,14 @@ function refresh() {
 }
 
 export async function requestLeaveAction(
-  _prev: ActionResult,
+  _prev: ActionResult<{ payNote: string | null }>,
   formData: FormData,
-): Promise<ActionResult> {
+): Promise<ActionResult<{ payNote: string | null }>> {
   const user = await requireUser();
   const result = await runAction(() => requestLeave(user, formDataToObject(formData)));
   if (result.ok || result.duplicate) refresh();
-  return toClientResult(result);
+  // Some days unpaid or on half pay under the leave rules: the form says so.
+  return { ...toClientResult(result), data: { payNote: result.data?.payNote ?? null } };
 }
 
 export async function decideLeaveAction(

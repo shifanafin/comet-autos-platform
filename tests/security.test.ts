@@ -57,7 +57,11 @@ describe('staff sign-in', () => {
   test('five wrong passwords lock the account — even the right password waits', async () => {
     for (let attempt = 1; attempt <= 4; attempt += 1) {
       const result = await authenticate(email, `wrong-${attempt}`, address);
-      assert.deepEqual(result, { ok: false, error: INVALID_CREDENTIALS_MESSAGE }, `attempt ${attempt}`);
+      assert.deepEqual(
+        result,
+        { ok: false, error: INVALID_CREDENTIALS_MESSAGE },
+        `attempt ${attempt}`,
+      );
     }
     const fifth = await authenticate(email, 'wrong-5', address);
     assert.equal(fifth.ok, false);
@@ -145,5 +149,21 @@ describe('customer link', () => {
     const dead = await quotePreview('x'.repeat(43));
     assert.equal(dead.amount, null);
     assert.equal(dead.button, 'Open');
+  });
+});
+
+describe('database', () => {
+  test('every table has row-level security, so the public data API reads nothing', async () => {
+    const open = await prisma.$queryRaw<{ relname: string }[]>`
+      SELECT c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relrowsecurity
+      ORDER BY c.relname`;
+    assert.deepEqual(
+      open.map((row) => row.relname),
+      [],
+      'tables without RLS — add ALTER TABLE … ENABLE ROW LEVEL SECURITY to their migration',
+    );
   });
 });

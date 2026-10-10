@@ -34,6 +34,7 @@ import {
   monthPeriod,
   recalculatePayroll,
   runPayroll,
+  runPayrollAutomatically,
   setSalary,
 } from '@/lib/hr/payroll';
 import { gratuityEarnedFils } from '@/lib/hr/gratuity';
@@ -399,5 +400,41 @@ describe('payroll run', () => {
     await assert.rejects(getPayrollRun(b.owner, runId), NotFoundError);
     const overview = await getPayrollOverview(b.owner);
     assert.equal(overview.runs.length, 0);
+  });
+});
+
+describe('automatic payroll', () => {
+  let c: TestOrg;
+  before(async () => {
+    c = await createTestOrg('PayAuto');
+    await setSalary(c.owner, c.technicianIds[0], {
+      basicSalary: '3000.00',
+      effectiveFrom: '2024-01-01',
+    });
+  });
+
+  test('nothing before the books: a month that began earlier is left alone', async () => {
+    await prisma.organization.update({
+      where: { id: c.organizationId },
+      data: { openingBalanceDate: d(`${thisMonth}-01`) },
+    });
+    assert.equal(await runPayrollAutomatically(c.organizationId), null);
+  });
+
+  test('last month is calculated by itself, once, for a person to approve', async () => {
+    await prisma.organization.update({
+      where: { id: c.organizationId },
+      data: { openingBalanceDate: d(`${twoMonthsAgo}-01`) },
+    });
+    const first = await runPayrollAutomatically(c.organizationId);
+    assert.ok(first?.payroll, 'a run was made');
+    const run = await prisma.payroll.findUniqueOrThrow({ where: { id: first.payroll.id } });
+    assert.equal(run.status, 'CALCULATED', 'waiting for approval — never approved by itself');
+    assert.equal(run.automatic, true);
+    assert.equal(run.createdByUserId, null);
+    assert.equal(run.periodStart.toISOString().slice(0, 7), lastMonth);
+    assert.equal(await runPayrollAutomatically(c.organizationId), null, 'never twice');
+    const detail = await getPayrollRun(c.owner, first.payroll.id);
+    assert.equal(detail.automatic, true);
   });
 });

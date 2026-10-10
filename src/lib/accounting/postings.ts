@@ -85,15 +85,31 @@ import { priorPostingAmounts, stockCarried } from '@/lib/accounting/prior-period
  *   its reversal                      the same, the other way round
  *
  * PAYROLL (approved or paid; nothing if cancelled before payment)
- *   when approved, at the period end  Dr Salaries & wages     net pay
- *                                     Cr Salaries payable
- *   when paid, on the day paid        Dr Salaries payable
- *                                     Cr Bank
- *   Salaries count at net pay — the same rule as the payroll screens.
+ *   when approved, at the period end  Dr Salaries & wages     the wage cost: pay
+ *                                                             and overtime, less
+ *                                                             unpaid days
+ *                                     Cr Salaries payable     net pay
+ *                                     Cr Staff advances       advances recovered
+ *                                     Cr Other income         penalties and other
+ *                                                             hand deductions
  *   and, in the same entry,           Dr End-of-service benefits expense
  *                                     Cr Provision for end-of-service benefits
- *                                     the gratuity set aside for the month (the
- *                                     other way round if it fell)
+ *                                     Dr Annual leave expense
+ *                                     Cr Provision for annual leave
+ *                                     what was set aside for the month (the other
+ *                                     way round when it fell — leave taken)
+ *   when paid, on the day paid        Dr Salaries payable
+ *                                     Cr Bank
+ *
+ * FINAL SETTLEMENT (approved; reversed if cancelled), at the leaving date
+ *                                     Dr Provision for end-of-service benefits
+ *                                        and Dr/Cr the expense for the difference
+ *                                     Dr Provision for annual leave
+ *                                        and Dr/Cr the expense for the difference
+ *                                     Dr Salaries & wages     notice pay, additions
+ *                                     Cr Staff advances       recoveries
+ *                                     Cr Salaries payable     net payable
+ *   when paid                         Dr Salaries payable / Cr the money account
  *
  * VAT RETURN (filed with the FTA)
  *   when filed, at the period end     Dr Output VAT payable   the output VAT
@@ -1010,7 +1026,15 @@ async function payrollRun(tx: Tx, organizationId: string, payrollId: string) {
       periodEnd: true,
       approvedAt: true,
       paidAt: true,
-      items: { select: { netPay: true, gratuityAccrual: true } },
+      items: {
+        select: {
+          netPay: true,
+          gratuityAccrual: true,
+          leaveAccrual: true,
+          otherDeduction: true,
+          otherDeductionKind: true,
+        },
+      },
     },
   });
 }
@@ -1020,21 +1044,35 @@ const payrollMonth = (run: { periodStart: Date }) => run.periodStart.toISOString
 const postPayroll: Poster = async (tx, organizationId, payrollId, accounts) => {
   const run = await payrollRun(tx, organizationId, payrollId);
   if (!run || (run.status !== 'APPROVED' && run.status !== 'PAID')) return null;
+  const signedFils = (value: { toString(): string }) => {
+    const text = value.toString();
+    return text.startsWith('-') ? -fils(text.slice(1)) : fils(text);
+  };
   const net = run.items.reduce((sum, item) => sum + fils(item.netPay), 0);
-  // Below zero when a salary fell and less gratuity is owed than was set aside.
-  const gratuity = run.items.reduce((sum, item) => {
-    const text = item.gratuityAccrual.toString();
-    return sum + (text.startsWith('-') ? -fils(text.slice(1)) : fils(text));
-  }, 0);
+  // Hand deductions: an advance recovered clears Staff advances; the rest is income.
+  let advances = 0;
+  let otherIncome = 0;
+  for (const item of run.items) {
+    const amount = fils(item.otherDeduction);
+    if (item.otherDeductionKind === 'ADVANCE') advances += amount;
+    else otherIncome += amount;
+  }
+  // Below zero when less is owed than was set aside (a lower salary, leave taken).
+  const gratuity = run.items.reduce((sum, item) => sum + signedFils(item.gratuityAccrual), 0);
+  const leave = run.items.reduce((sum, item) => sum + signedFils(item.leaveAccrual), 0);
   return {
     date: run.periodEnd,
     branchId: null,
     description: `Payroll ${payrollMonth(run)} — salaries owed`,
     lines: new Lines()
-      .debit(accounts.SALARIES_EXPENSE, net)
+      .debit(accounts.SALARIES_EXPENSE, net + advances + otherIncome)
       .credit(accounts.SALARIES_PAYABLE, net)
+      .credit(accounts.STAFF_ADVANCES, advances)
+      .credit(accounts.OTHER_INCOME, otherIncome)
       .debit(accounts.GRATUITY_EXPENSE, gratuity)
       .credit(accounts.GRATUITY_PROVISION, gratuity)
+      .debit(accounts.LEAVE_EXPENSE, leave)
+      .credit(accounts.LEAVE_PROVISION, leave)
       .build(),
   };
 };
@@ -1048,6 +1086,74 @@ const postPayrollPayment: Poster = async (tx, organizationId, payrollId, account
     branchId: null,
     description: `Payroll ${payrollMonth(run)} — salaries paid`,
     lines: new Lines().debit(accounts.SALARIES_PAYABLE, net).credit(accounts.BANK, net).build(),
+  };
+};
+
+// ─── Final settlements ──────────────────────────────────────────────────────
+
+async function finalSettlement(tx: Tx, organizationId: string, settlementId: string) {
+  return tx.finalSettlement.findFirst({
+    where: { id: settlementId, organizationId },
+    select: {
+      status: true,
+      terminationDate: true,
+      gratuity: true,
+      gratuityProvision: true,
+      leaveEncashment: true,
+      leaveProvision: true,
+      noticePay: true,
+      otherAdditions: true,
+      recoveries: true,
+      netPayable: true,
+      paidOn: true,
+      paidFromAccountId: true,
+      employee: { select: { firstName: true, lastName: true } },
+    },
+  });
+}
+
+const postFinalSettlement: Poster = async (tx, organizationId, settlementId, accounts) => {
+  const row = await finalSettlement(tx, organizationId, settlementId);
+  if (!row || (row.status !== 'APPROVED' && row.status !== 'PAID')) return null;
+  const signedFils = (value: { toString(): string }) => {
+    const text = value.toString();
+    return text.startsWith('-') ? -fils(text.slice(1)) : fils(text);
+  };
+  const gratuity = fils(row.gratuity);
+  const gratuityHeld = fils(row.gratuityProvision);
+  const leave = fils(row.leaveEncashment);
+  const leaveHeld = fils(row.leaveProvision);
+  const who = `${row.employee.firstName} ${row.employee.lastName}`.trim();
+  return {
+    date: row.terminationDate,
+    branchId: null,
+    description: `Final settlement — ${who}`,
+    lines: new Lines()
+      // What was set aside is used; the difference is this period's cost (or a release).
+      .debit(accounts.GRATUITY_PROVISION, gratuityHeld)
+      .debit(accounts.GRATUITY_EXPENSE, gratuity - gratuityHeld)
+      .debit(accounts.LEAVE_PROVISION, leaveHeld)
+      .debit(accounts.LEAVE_EXPENSE, leave - leaveHeld)
+      .debit(accounts.SALARIES_EXPENSE, signedFils(row.noticePay) + fils(row.otherAdditions))
+      .credit(accounts.STAFF_ADVANCES, fils(row.recoveries))
+      .credit(accounts.SALARIES_PAYABLE, fils(row.netPayable))
+      .build(),
+  };
+};
+
+const postFinalSettlementPayment: Poster = async (tx, organizationId, settlementId, accounts) => {
+  const row = await finalSettlement(tx, organizationId, settlementId);
+  if (!row || row.status !== 'PAID' || !row.paidOn) return null;
+  const net = fils(row.netPayable);
+  const who = `${row.employee.firstName} ${row.employee.lastName}`.trim();
+  return {
+    date: row.paidOn,
+    branchId: null,
+    description: `Final settlement paid — ${who}`,
+    lines: new Lines()
+      .debit(accounts.SALARIES_PAYABLE, net)
+      .credit(row.paidFromAccountId ?? accounts.BANK, net)
+      .build(),
   };
 };
 
@@ -1506,4 +1612,6 @@ export const POSTING_RULES: Record<
   CARD_COLLECTION: postCardCollection,
   PAYMENT_VOUCHER: postPaymentVoucher,
   PRIOR_PERIOD: postPriorPeriod,
+  FINAL_SETTLEMENT: postFinalSettlement,
+  FINAL_SETTLEMENT_PAYMENT: postFinalSettlementPayment,
 };

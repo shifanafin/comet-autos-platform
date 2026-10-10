@@ -83,6 +83,9 @@ export const SYSTEM_ACCOUNTS: SystemAccount[] = [
     name: 'Provision for end-of-service benefits',
     type: 'LIABILITY',
   },
+  { role: 'LEAVE_PROVISION', code: '2505', name: 'Provision for annual leave', type: 'LIABILITY' },
+  { role: 'STAFF_ADVANCES', code: '1110', name: 'Staff advances', type: 'ASSET' },
+  { role: 'OTHER_INCOME', code: '4100', name: 'Other income', type: 'REVENUE' },
   {
     role: 'OWNER_ADVANCES',
     code: '2520',
@@ -114,6 +117,7 @@ export const SYSTEM_ACCOUNTS: SystemAccount[] = [
     name: 'End-of-service benefits expense',
     type: 'EXPENSE',
   },
+  { role: 'LEAVE_EXPENSE', code: '5166', name: 'Annual leave expense', type: 'EXPENSE' },
   // What the bank keeps: the card machine's fee on a settlement.
   { role: 'BANK_CHARGES', code: '5190', name: 'Bank charges', type: 'EXPENSE' },
   { role: 'OTHER_EXPENSES', code: '5900', name: 'Miscellaneous expenses', type: 'EXPENSE' },
@@ -124,7 +128,6 @@ export const STANDARD_ACCOUNTS: ChartAccount[] = [
   // Assets
   { code: '1005', name: 'Petty cash', type: 'ASSET', payment: true },
   { code: '1030', name: 'Post-dated cheques received (PDC)', type: 'ASSET', payment: true },
-  { code: '1110', name: 'Staff advances', type: 'ASSET' },
   { code: '1120', name: 'Prepaid expenses', type: 'ASSET' },
   { code: '1130', name: 'Refundable deposits', type: 'ASSET' },
   { code: '1500', name: 'Property, plant & equipment — workshop equipment', type: 'ASSET' },
@@ -140,7 +143,6 @@ export const STANDARD_ACCOUNTS: ChartAccount[] = [
   { code: '2510', name: 'Bank loans', type: 'LIABILITY' },
   // Equity: Owner's capital (3000) and drawings (3100) are system accounts above.
   // Income
-  { code: '4100', name: 'Other income', type: 'REVENUE' },
   // Cost of sales
   { code: '5020', name: 'Cost of sales — sublet repairs', type: 'EXPENSE' },
   { code: '5030', name: 'Cost of sales — consumables & lubricants', type: 'EXPENSE' },

@@ -122,10 +122,28 @@ const subscriptionSchema = z.object({
   }),
 });
 
+/** Chrome/Android, Safari/iOS, Firefox and Edge push services — nothing else. */
+const PUSH_HOSTS = [
+  /^fcm\.googleapis\.com$/,
+  /^android\.googleapis\.com$/,
+  /(^|\.)push\.apple\.com$/,
+  /^updates\.push\.services\.mozilla\.com$/,
+  /(^|\.)notify\.windows\.com$/,
+];
+function isPushService(endpoint: string) {
+  try {
+    const url = new URL(endpoint);
+    return url.protocol === 'https:' && PUSH_HOSTS.some((host) => host.test(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
 /** Remembers this device, so pushes reach it. Re-subscribing the same device updates it. */
 export async function savePushSubscription(user: AuthenticatedUser, raw: unknown, userAgent: string | null) {
   const input = parseInput(subscriptionSchema, raw);
-  if (!/^https:\/\//.test(input.endpoint)) throw new DomainError('That device can’t receive notifications.');
+  // Only the browsers' own push services: the server posts to this address.
+  if (!isPushService(input.endpoint)) throw new DomainError('That device can’t receive notifications.');
   await prisma.pushSubscription.upsert({
     where: { endpoint: input.endpoint },
     update: {

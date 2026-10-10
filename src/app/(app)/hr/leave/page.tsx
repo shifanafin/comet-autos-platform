@@ -172,6 +172,7 @@ export default async function LeavePage({
                     status={<Status row={row} />}
                     details={[
                       { label: 'Dates', value: dates(row) },
+                      { label: 'Pay', value: row.pay || null },
                       { label: 'Reason', value: row.reason },
                     ]}
                     footer={decidedBy(row)}
@@ -218,7 +219,14 @@ export default async function LeavePage({
                         </td>
                         <td className="px-2 py-4">{LEAVE_TYPE_LABEL[row.leaveType]}</td>
                         <td className="px-2 py-4 tabular-nums whitespace-nowrap">{dates(row)}</td>
-                        <td className="px-2 py-4 text-right tabular-nums">{row.days}</td>
+                        <td className="px-2 py-4 text-right tabular-nums">
+                          {row.days}
+                          {row.pay ? (
+                            <span className="block text-xs whitespace-nowrap text-muted-foreground">
+                              {row.pay}
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="px-2 py-4">
                           <span className="flex flex-col gap-1">
                             <Status row={row} />

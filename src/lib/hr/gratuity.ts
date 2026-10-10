@@ -45,3 +45,15 @@ export function gratuityEarnedFils(
   const earned = Math.round((basicMonthlyFils * gratuityDays(serviceYears(hireDate, asOf))) / 30);
   return Math.min(earned, basicMonthlyFils * 24);
 }
+
+/**
+ * The gratuity set aside for `serviceDays` of counted service (unpaid leave
+ * and absence excluded, Art. 51) — accrued from the first day, as the
+ * provision. Paying it on leaving waits for a full year
+ * (lib/hr/leave-rules.ts gratuityOnLeavingFils).
+ */
+export function gratuityForServiceDaysFils(serviceDays: number, basicMonthlyFils: number): number {
+  if (basicMonthlyFils <= 0 || serviceDays <= 0) return 0;
+  const earned = Math.round((basicMonthlyFils * gratuityDays(serviceDays / 365)) / 30);
+  return Math.min(earned, basicMonthlyFils * 24);
+}

@@ -11,6 +11,7 @@ import { emptyToNull } from '@/lib/normalize';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { getLedgerProfitAndLoss } from '@/lib/accounting/reports';
 import { gratuityEarnedFils } from '@/lib/hr/gratuity';
+import { settlementsDue } from '@/lib/hr/settlement';
 import {
   addDays,
   corporateTaxDue,
@@ -532,6 +533,13 @@ export async function buildCompliance(
       }
     : null;
 
+  // ── People: approvals waiting, and final settlements ──
+  const [pendingOvertime, pendingLeave, settlements] = await Promise.all([
+    prisma.overtimeEntry.count({ where: { organizationId: org, status: 'PENDING' } }),
+    prisma.leave.count({ where: { organizationId: org, status: 'PENDING' } }),
+    settlementsDue(org),
+  ]);
+
   // ── This month's routine ──
   const monthly: CalendarItem[] = [];
   if (activeEmployees > 0) {
@@ -543,10 +551,28 @@ export async function buildCompliance(
         ? 'Run, approved and paid — the salary cost is in the books.'
         : payroll && day(payroll.periodEnd)! <= lastMonthEnd
           ? `The payroll is ${payroll.status.toLowerCase()} but not yet marked paid. Pay the team (through WPS) and record the payment.`
-          : 'Run the payroll for the month, approve it and record the payment. UAE salaries are paid through WPS and are late 15 days after they fall due.',
+          : 'The payroll is calculated automatically on the 1st (from the first full month of these books). If it is not there, check every employee has a salary — or run it from Payroll. Then approve it, pay through WPS (late 15 days after salaries fall due) and mark it paid.',
       state: paid ? 'done' : 'todo',
       href: payroll ? `/hr/payroll/${payroll.id}` : '/hr/payroll',
       action: paid ? 'Open payroll' : 'Run payroll',
+    });
+  }
+  if (pendingOvertime || pendingLeave) {
+    monthly.unshift({
+      key: 'approvals',
+      title: 'Overtime and leave waiting for approval',
+      detail: [
+        pendingOvertime
+          ? `${pendingOvertime} overtime entr${pendingOvertime === 1 ? 'y' : 'ies'}`
+          : null,
+        pendingLeave ? `${pendingLeave} leave request${pendingLeave === 1 ? '' : 's'}` : null,
+      ]
+        .filter(Boolean)
+        .join(' and ')
+        .concat(' — decide them before the payroll is approved, so it pays the right amounts.'),
+      state: 'todo',
+      href: pendingOvertime ? '/hr/overtime' : '/hr/leave',
+      action: 'Decide',
     });
   }
   const reconciledTo = day(reconciled?.statementDate);
@@ -777,6 +803,35 @@ export async function buildCompliance(
       detail: 'Renew with Dubai Economy and Tourism before it expires.',
       state: daysBetween(today, dates.tradeLicenceExpiry) < 0 ? 'late' : 'todo',
       due: dates.tradeLicenceExpiry,
+    });
+  }
+  // Final settlements: due 14 days after the last working day (Labour Law Art. 53).
+  const settlementDue = (date: Date) => addDays(day(date)!, 14);
+  for (const row of settlements.leavers) {
+    const due = settlementDue(row.terminationDate!);
+    deadlines.push({
+      key: `settlement-new-${row.id}`,
+      title: `Final settlement for ${row.firstName} ${row.lastName}`.trim(),
+      detail: 'They left: work out their end-of-service and unused leave, approve and pay it.',
+      state: today > due ? 'late' : 'todo',
+      due,
+      href: `/hr/employees/${row.id}`,
+      action: 'Work it out',
+    });
+  }
+  for (const row of settlements.open) {
+    const due = settlementDue(row.terminationDate);
+    deadlines.push({
+      key: `settlement-${row.id}`,
+      title: `Final settlement for ${row.employee.firstName} ${row.employee.lastName}`.trim(),
+      detail:
+        row.status === 'DRAFT'
+          ? 'Worked out — check and approve it.'
+          : 'Approved — pay it and record the payment.',
+      state: today > due ? 'late' : 'todo',
+      due,
+      href: `/hr/settlements/${row.id}`,
+      action: row.status === 'DRAFT' ? 'Approve' : 'Record payment',
     });
   }
   deadlines.sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''));

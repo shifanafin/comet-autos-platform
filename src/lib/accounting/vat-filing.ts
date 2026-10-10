@@ -12,6 +12,7 @@ import { emptyToNull } from '@/lib/normalize';
 import { getVatReturn, VAT_DUE_DAYS } from '@/lib/finance/vat';
 import { syncPosting } from '@/lib/accounting/journal';
 import { booksClosedThrough } from '@/lib/accounting/periods';
+import { vatPeriods } from '@/lib/compliance/rules';
 
 /*
  * VAT returns, once filed with the FTA.
@@ -46,7 +47,6 @@ const fileSchema = z.object({
     .string({ error: 'Enter the date it was filed.' })
     .min(1, 'Enter the date it was filed.'),
   ftaReference: z.string().trim().max(60, 'Keep the reference under 60 characters.').optional(),
-  closeBooks: z.union([z.enum(['true', 'false']), z.array(z.enum(['true', 'false']))]).optional(),
   requestKey: z.string().optional(),
 });
 
@@ -71,9 +71,32 @@ export async function fileVatReturn(user: AuthenticatedUser, rawInput: unknown) 
   if (input.filedOn <= input.to) {
     throw new DomainError('A return is filed after its period ends.', 'filedOn');
   }
-  const closeBooks =
-    (Array.isArray(input.closeBooks) ? input.closeBooks.at(-1) : input.closeBooks) !== 'false';
+  // What the FTA received can't change afterwards: filing always closes the
+  // books through the period's last day (FDL 8/2017 Art. 60-62 — corrections
+  // are credit notes in a later period, never edits to a filed one).
+  const closeBooks = true;
 
+  const schedule = await prisma.organization.findUnique({
+    where: { id: user.organizationId },
+    select: { vatFirstPeriodStart: true, vatFirstPeriodEnd: true, vatPeriodMonths: true },
+  });
+  if (schedule?.vatFirstPeriodStart && schedule.vatFirstPeriodEnd && schedule.vatPeriodMonths) {
+    const periods = vatPeriods(
+      {
+        firstStart: schedule.vatFirstPeriodStart.toISOString().slice(0, 10),
+        firstEnd: schedule.vatFirstPeriodEnd.toISOString().slice(0, 10),
+        months: schedule.vatPeriodMonths,
+      },
+      input.to,
+    );
+    if (!periods.some((period) => period.from === input.from && period.to === input.to)) {
+      const near = periods.find((period) => period.to >= input.to) ?? periods.at(-1)!;
+      throw new DomainError(
+        `A return is filed for one of your FTA periods — this one would be ${near.from} to ${near.to}. Choose that period on the VAT screen.`,
+        'from',
+      );
+    }
+  }
   const vat = await getVatReturn(user, { period: 'custom', from: input.from, to: input.to });
   if (!vat.registered) {
     throw new DomainError(

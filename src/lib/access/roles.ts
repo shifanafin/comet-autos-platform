@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
+import { assertCanEditRolePermissions } from '@/lib/access/escalation';
 import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { parseInput } from '@/lib/form-data';
@@ -316,6 +317,7 @@ export async function updateRolePermissions(
     if (added.length === 0 && removed.length === 0) {
       return { id: role.id, changed: false, added, removed };
     }
+    await assertCanEditRolePermissions(tx, user, role.id, added);
 
     // Dropping `user.edit` from this role must not empty the workshop of
     // people who can manage access. Anyone whose only route to it is this

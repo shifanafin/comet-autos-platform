@@ -214,6 +214,14 @@ enum AccountRole {
   /// "Provision for end-of-service benefits": the gratuity the team has
   /// earned so far, owed when each person leaves.
   GRATUITY_PROVISION
+  /// "Annual leave expense": each month's change in the leave the team is owed.
+  LEAVE_EXPENSE
+  /// "Provision for annual leave": unused leave the team has earned, at basic pay.
+  LEAVE_PROVISION
+  /// "Staff advances": money lent to staff, recovered from their salary.
+  STAFF_ADVANCES
+  /// "Other income": e.g. penalties deducted from salary.
+  OTHER_INCOME
   /// "Bank charges": what the bank keeps — the card machine's fee on a
   /// settlement — and the fee recovered from someone it was really for.
   BANK_CHARGES
@@ -280,6 +288,10 @@ enum JournalSource {
   PAYMENT_VOUCHER
   /// One month's totals from before these books began (PriorPeriodSummary).
   PRIOR_PERIOD
+  /// An employee's final settlement on leaving, once approved.
+  FINAL_SETTLEMENT
+  /// The final settlement paid out.
+  FINAL_SETTLEMENT_PAYMENT
 }
 
 enum ApprovalStatus {
@@ -449,6 +461,55 @@ enum LeaveType {
   SICK
   UNPAID
   OTHER
+  /// 60 days: 45 on full pay, 15 on half (Labour Law Art. 30).
+  MATERNITY
+  /// 5 working days on full pay within 6 months of a birth (Art. 32).
+  PARENTAL
+  /// 5 days for a spouse, 3 for a parent, child or sibling, on full pay (Art. 32).
+  BEREAVEMENT
+  /// 10 days a year on full pay after 2 years' service, for exams (Art. 32).
+  STUDY
+}
+
+/// How an approved overtime hour is paid (Labour Law Art. 19, 28).
+enum OvertimeKind {
+  /// Beyond the normal hours on a working day: +25%.
+  NORMAL
+  /// Between 22:00 and 04:00: +50%.
+  NIGHT
+  /// On the weekly rest day: +50% (or a substitute rest day).
+  REST_DAY
+  /// On a public holiday: +50% (or a substitute rest day).
+  HOLIDAY
+}
+
+enum OvertimeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// What a hand-entered payroll deduction is for — it decides where it is booked.
+enum DeductionKind {
+  /// Recovers a salary advance or loan: clears Staff advances.
+  ADVANCE
+  /// A disciplinary penalty under the internal regulations: other income.
+  PENALTY
+  OTHER
+}
+
+enum SettlementReason {
+  RESIGNATION
+  TERMINATION
+  END_OF_CONTRACT
+  OTHER
+}
+
+enum SettlementStatus {
+  DRAFT
+  APPROVED
+  PAID
+  CANCELLED
 }
 
 enum LeaveStatus {
@@ -580,6 +641,9 @@ model Organization {
   /// the routing code of the bank the salaries are paid from (9 digits).
   mohreEstablishmentId  String?   @map("mohre_establishment_id")
   wpsRoutingCode        String?   @map("wps_routing_code")
+  /// The weekly rest day (0 Sunday … 6 Saturday): overtime that day is paid
+  /// at the rest-day rate. Empty: not set.
+  weeklyRestDay         Int?      @map("weekly_rest_day") @db.SmallInt
   isActive              Boolean   @default(true) @map("is_active")
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
@@ -635,6 +699,9 @@ model Organization {
   paymentModes            PaymentMode[]
   vatFilings              VatFiling[]
   priorPeriodSummaries    PriorPeriodSummary[]
+  overtimeEntries         OvertimeEntry[]
+  publicHolidays          PublicHoliday[]
+  finalSettlements        FinalSettlement[]
 
   creditNotes         CreditNote[]
   creditNoteItems     CreditNoteItem[]
@@ -776,6 +843,9 @@ model User {
 
   vatFilingsFiled          VatFiling[]                 @relation("VatFilingFiledBy")
   priorPeriodsRecorded     PriorPeriodSummary[]        @relation("PriorPeriodRecordedBy")
+  overtimeDecided          OvertimeEntry[]             @relation("OvertimeDecidedBy")
+  settlementsApproved      FinalSettlement[]           @relation("SettlementApprovedBy")
+  settlementsCreated       FinalSettlement[]           @relation("SettlementCreatedBy")
   creditNotesCreated       CreditNote[]                @relation("CreditNoteCreatedBy")
   reconciliationsCreated   BankReconciliation[]        @relation("ReconciliationCreatedBy")
   moneyTransfersCreated    MoneyTransfer[]             @relation("MoneyTransferCreatedBy")
@@ -2170,6 +2240,7 @@ model ChartOfAccount {
   payments          Payment[]
   supplierPayments  SupplierPayment[]
   vatFilings        VatFiling[]
+  settlementsPaid   FinalSettlement[]
   journalEntryLines JournalEntryLine[]
 
   creditNoteItems        CreditNoteItem[]
@@ -2595,6 +2666,14 @@ model Employee {
   wpsPersonCode   String?   @map("wps_person_code")
   wpsAgentCode    String?   @map("wps_agent_code")
   salaryIban      String?   @map("salary_iban")
+  /// Probation ends (at most 6 months after joining, Art. 9). Empty: 6 months.
+  probationEndDate DateTime? @map("probation_end_date") @db.Date
+  /// Normal working hours a day (8 under Art. 17): beyond them is overtime.
+  normalHoursPerDay Decimal  @default(8) @map("normal_hours_per_day") @db.Decimal(4, 2)
+  /// Annual leave balance carried in on a date (staff who joined before
+  /// these books, or leave taken before the app). Accrual counts from then.
+  leaveOpeningDays Decimal?  @map("leave_opening_days") @db.Decimal(6, 2)
+  leaveOpeningAsOf DateTime? @map("leave_opening_as_of") @db.Date
   hireDate        DateTime  @map("hire_date") @db.Date
   terminationDate DateTime? @map("termination_date") @db.Date
   isActive        Boolean   @default(true) @map("is_active")
@@ -2615,6 +2694,8 @@ model Employee {
   qualityChecks  QualityCheck[]
   attendances    Attendance[]
   leaves         Leave[]
+  overtimeEntries OvertimeEntry[]
+  finalSettlement FinalSettlement?
   salaries       Salary[]
   payrollItems   PayrollItem[]
   tasks          Task[]
@@ -2672,6 +2753,94 @@ model Attendance {
   @@map("attendances")
 }
 
+/// Overtime worked on one day, of one kind — suggested from attendance or
+/// entered by hand, paid only once approved (lib/hr/overtime.ts).
+model OvertimeEntry {
+  id               String         @id @default(uuid(7)) @db.Uuid
+  organizationId   String         @map("organization_id") @db.Uuid
+  employeeId       String         @map("employee_id") @db.Uuid
+  workDate         DateTime       @map("work_date") @db.Date
+  kind             OvertimeKind   @default(NORMAL)
+  hours            Decimal        @db.Decimal(5, 2)
+  status           OvertimeStatus @default(PENDING)
+  /// AUTO from check-in/out; MANUAL entered by a manager.
+  source           String         @default("MANUAL")
+  note             String?
+  decidedByUserId  String?        @map("decided_by_user_id") @db.Uuid
+  decidedAt        DateTime?      @map("decided_at") @db.Timestamptz
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  employee     Employee     @relation(fields: [organizationId, employeeId], references: [organizationId, id], onDelete: Restrict)
+  decidedBy    User?        @relation("OvertimeDecidedBy", fields: [organizationId, decidedByUserId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, employeeId, workDate, kind])
+  @@index([organizationId, status, workDate])
+  @@map("overtime_entries")
+}
+
+/// A public holiday: paid; work on it is overtime at the holiday rate.
+model PublicHoliday {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  holidayDate    DateTime @map("holiday_date") @db.Date
+  name           String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, holidayDate])
+  @@map("public_holidays")
+}
+
+/// What an employee is owed on leaving (Labour Law Art. 51-53): end-of-service
+/// gratuity, unused annual leave, notice pay, less recoveries. Due within 14
+/// days of the contract ending (lib/hr/settlement.ts).
+model FinalSettlement {
+  id                   String           @id @default(uuid(7)) @db.Uuid
+  organizationId       String           @map("organization_id") @db.Uuid
+  employeeId           String           @map("employee_id") @db.Uuid
+  terminationDate      DateTime         @map("termination_date") @db.Date
+  reason               SettlementReason
+  /// Service counted for gratuity (unpaid leave and absence excluded).
+  serviceDays          Int              @map("service_days")
+  basicSalary          Decimal          @map("basic_salary") @db.Decimal(14, 2)
+  gratuity             Decimal          @db.Decimal(14, 2)
+  /// The gratuity already set aside for them by payroll.
+  gratuityProvision    Decimal          @map("gratuity_provision") @db.Decimal(14, 2)
+  leaveDays            Decimal          @map("leave_days") @db.Decimal(7, 2)
+  leaveEncashment      Decimal          @map("leave_encashment") @db.Decimal(14, 2)
+  leaveProvision       Decimal          @map("leave_provision") @db.Decimal(14, 2)
+  /// Paid in lieu of notice (positive), or the notice the employee owes (deducted).
+  noticePay            Decimal          @default(0) @map("notice_pay") @db.Decimal(14, 2)
+  otherAdditions       Decimal          @default(0) @map("other_additions") @db.Decimal(14, 2)
+  /// Advances still owed, recovered from the settlement.
+  recoveries           Decimal          @default(0) @db.Decimal(14, 2)
+  netPayable           Decimal          @map("net_payable") @db.Decimal(14, 2)
+  note                 String?
+  status               SettlementStatus @default(DRAFT)
+  approvedByUserId     String?          @map("approved_by_user_id") @db.Uuid
+  approvedAt           DateTime?        @map("approved_at") @db.Timestamptz
+  paidOn               DateTime?        @map("paid_on") @db.Date
+  paidFromAccountId    String?          @map("paid_from_account_id") @db.Uuid
+  createdByUserId      String           @map("created_by_user_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  employee     Employee        @relation(fields: [organizationId, employeeId], references: [organizationId, id], onDelete: Restrict)
+  approvedBy   User?           @relation("SettlementApprovedBy", fields: [organizationId, approvedByUserId], references: [organizationId, id], onDelete: Restrict)
+  createdBy    User            @relation("SettlementCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
+  paidFrom     ChartOfAccount? @relation(fields: [organizationId, paidFromAccountId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, employeeId])
+  @@index([organizationId, status])
+  @@map("final_settlements")
+}
+
 model Leave {
   id               String      @id @default(uuid(7)) @db.Uuid
   organizationId   String      @map("organization_id") @db.Uuid
@@ -2681,6 +2850,11 @@ model Leave {
   endDate          DateTime    @map("end_date") @db.Date
   status           LeaveStatus @default(PENDING)
   reason           String?
+  /// How the days are paid, in order from the first day: full pay, then half
+  /// pay, then unpaid (lib/hr/leave-rules.ts). They add up to the days.
+  fullPayDays      Int         @default(0) @map("full_pay_days")
+  halfPayDays      Int         @default(0) @map("half_pay_days")
+  unpaidDays       Int         @default(0) @map("unpaid_days")
   approvedByUserId String?     @map("approved_by_user_id") @db.Uuid
   approvedAt       DateTime?   @map("approved_at") @db.Timestamptz
   createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz
@@ -2733,13 +2907,16 @@ model Payroll {
   paidByUserId     String?       @map("paid_by_user_id") @db.Uuid
   paidAt           DateTime?     @map("paid_at") @db.Timestamptz
   journalEntryId   String?       @map("journal_entry_id") @db.Uuid
-  createdByUserId  String        @map("created_by_user_id") @db.Uuid
+  /// Who ran it — empty when the app calculated it by itself on the 1st
+  /// (lib/hr/payroll.ts runPayrollAutomatically).
+  createdByUserId  String?       @map("created_by_user_id") @db.Uuid
+  automatic        Boolean       @default(false)
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   journalEntry JournalEntry? @relation(fields: [organizationId, journalEntryId], references: [organizationId, id], onDelete: Restrict)
-  createdBy    User          @relation("PayrollCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
+  createdBy    User?         @relation("PayrollCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
   approvedBy   User?         @relation("PayrollApprovedBy", fields: [organizationId, approvedByUserId], references: [organizationId, id], onDelete: Restrict)
   paidBy       User?         @relation("PayrollPaidBy", fields: [organizationId, paidByUserId], references: [organizationId, id], onDelete: Restrict)
 
@@ -2767,6 +2944,23 @@ model PayrollItem {
   /// the last payroll (negative if the basic salary fell) — booked with the run.
   gratuityLiability Decimal  @default(0) @map("gratuity_liability") @db.Decimal(14, 2)
   gratuityAccrual   Decimal  @default(0) @map("gratuity_accrual") @db.Decimal(14, 2)
+  /// Days not paid (unpaid leave, absence) and paid at half (sick, maternity).
+  unpaidDays        Decimal @default(0) @map("unpaid_days") @db.Decimal(6, 2)
+  halfPayDays       Decimal @default(0) @map("half_pay_days") @db.Decimal(6, 2)
+  absentDays        Decimal @default(0) @map("absent_days") @db.Decimal(6, 2)
+  /// What the leave and absence took off; and a hand-entered deduction, kept
+  /// apart so a recalculation never loses it.
+  leaveDeduction    Decimal @default(0) @map("leave_deduction") @db.Decimal(14, 2)
+  otherDeduction    Decimal @default(0) @map("other_deduction") @db.Decimal(14, 2)
+  otherDeductionKind DeductionKind? @map("other_deduction_kind")
+  otherDeductionReason String? @map("other_deduction_reason")
+  /// Approved overtime in the month, and its pay.
+  overtimeHours     Decimal @default(0) @map("overtime_hours") @db.Decimal(6, 2)
+  overtimePay       Decimal @default(0) @map("overtime_pay") @db.Decimal(14, 2)
+  /// Annual leave owed at the period end, its value at basic pay, and the change.
+  leaveBalanceDays  Decimal @default(0) @map("leave_balance_days") @db.Decimal(7, 2)
+  leaveLiability    Decimal @default(0) @map("leave_liability") @db.Decimal(14, 2)
+  leaveAccrual      Decimal @default(0) @map("leave_accrual") @db.Decimal(14, 2)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

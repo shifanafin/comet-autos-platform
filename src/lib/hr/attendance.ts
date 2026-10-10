@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { suggestOvertimeForDay } from '@/lib/hr/overtime';
 import type { Prisma } from '@/generated/prisma/client';
 import type { AttendanceStatus } from '@/generated/prisma/enums';
 import { prisma } from '@/lib/prisma';
@@ -450,6 +451,8 @@ export async function clockOut(user: AuthenticatedUser, employeeId: string, rawI
       { date: key, clockOutAt: at.toISOString(), minutes: minutesWorked(record) },
       { clockOutAt: null },
     );
+    // The day's overtime, suggested for a manager to approve.
+    await suggestOvertimeForDay(tx, user.organizationId, record.id);
     await settleRequestKey(tx, user, rawInput, record.id);
     return record;
   });

@@ -217,6 +217,22 @@ export async function createPart(
       },
     });
     const openingMilli = input.openingStock ? toMilli(input.openingStock) : 0;
+    if (openingMilli > 0) {
+      // Opening stock is what was on the shelf when the books began — it is
+      // booked against opening balance equity. Stock that came later was
+      // bought (or found), and goes in as a purchase or a stock adjustment.
+      const books = await tx.organization.findUnique({
+        where: { id: user.organizationId },
+        select: { openingBalanceDate: true },
+      });
+      const booksStart = books?.openingBalanceDate?.toISOString().slice(0, 10);
+      if (booksStart && new Date().toISOString().slice(0, 10) > booksStart) {
+        throw new DomainError(
+          `The books began on ${booksStart}: stock that came in since is entered as a purchase (or a stock adjustment), not as opening stock. Leave this empty and receive it on a purchase.`,
+          'openingStock',
+        );
+      }
+    }
     const opening =
       openingMilli > 0
         ? await postMovement(tx, {

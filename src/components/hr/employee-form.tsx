@@ -2,13 +2,19 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Field, FormError, NativeSelect, TextField } from '@/components/forms/fields';
 import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
 import { LinkButton } from '@/components/shared/link-button';
+import { Button } from '@/components/ui/button';
+import { IssuedPassword } from '@/components/hr/issued-password';
 import type { ActionResult } from '@/lib/errors';
 
 const INPUT = '[&_input]:h-11 [&_input]:text-base md:[&_input]:text-sm';
+
+/** A login just made, with its one-time password. */
+type IssuedLogin = { id: string; username: string; temporaryPassword: string };
 
 /** The login choice that creates a new login (lib/hr/employees NEW_LOGIN). */
 const NEW_LOGIN = 'new';
@@ -28,7 +34,10 @@ export function EmployeeForm({
   initial,
   cancelHref,
 }: {
-  action: (prev: ActionResult, formData: FormData) => Promise<ActionResult>;
+  action: (
+    prev: ActionResult<IssuedLogin>,
+    formData: FormData,
+  ) => Promise<ActionResult<IssuedLogin>>;
   options: EmployeeFormOptions;
   initial?: {
     firstName: string;
@@ -41,19 +50,44 @@ export function EmployeeForm({
     department: string | null;
     hireDate: string;
     terminationDate: string | null;
+    probationEndDate?: string | null;
+    normalHoursPerDay?: string | null;
+    leaveOpeningDays?: string | null;
+    leaveOpeningAsOf?: string | null;
     branchId: string;
     userId: string | null;
     isActive: boolean;
   };
   cancelHref: string;
 }) {
-  const [state, onSubmit, isPending] = useFormAction<ActionResult>(action, { ok: false });
+  const [state, onSubmit, isPending] = useFormAction<ActionResult<IssuedLogin>>(action, {
+    ok: false,
+  });
+  const router = useRouter();
   const errors = state.fieldErrors ?? {};
   const offerNewLogin = options.canCreateLogin && !initial?.userId;
   const [login, setLogin] = useState(
     initial ? (initial.userId ?? '') : offerNewLogin ? NEW_LOGIN : '',
   );
   const legacyTitle = initial && !initial.designationId ? initial.jobTitle : null;
+
+  // A login was just made: show its one-time password once, then move on.
+  if (state.ok && state.data?.temporaryPassword) {
+    return (
+      <div className="flex flex-col gap-5">
+        <IssuedPassword username={state.data.username} password={state.data.temporaryPassword} />
+        <div>
+          <Button
+            size="lg"
+            className="h-11"
+            onClick={() => router.push(`/hr/employees/${state.data!.id}`)}
+          >
+            Continue
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-8">
@@ -197,6 +231,48 @@ export function EmployeeForm({
       </fieldset>
 
       <fieldset className="flex flex-col gap-6 border-t border-border pt-8">
+        <legend className="text-sm font-semibold">Work and leave</legend>
+        <div className="grid gap-6 sm:grid-cols-2">
+          <TextField
+            label="Probation ends"
+            name="probationEndDate"
+            type="date"
+            defaultValue={initial?.probationEndDate ?? ''}
+            error={errors.probationEndDate}
+            hint="Empty: 6 months after joining. Sick leave in probation is unpaid."
+            className={INPUT}
+          />
+          <TextField
+            label="Normal hours a day"
+            name="normalHoursPerDay"
+            inputMode="decimal"
+            defaultValue={initial?.normalHoursPerDay ?? '8'}
+            error={errors.normalHoursPerDay}
+            hint="8 under UAE law. Hours beyond are overtime."
+            className={INPUT}
+          />
+          <TextField
+            label="Annual leave balance carried in (days)"
+            name="leaveOpeningDays"
+            inputMode="decimal"
+            defaultValue={initial?.leaveOpeningDays ?? ''}
+            error={errors.leaveOpeningDays}
+            hint="Only for someone who joined before these books: the days they had left."
+            className={INPUT}
+          />
+          <TextField
+            label="…on this date"
+            name="leaveOpeningAsOf"
+            type="date"
+            defaultValue={initial?.leaveOpeningAsOf ?? ''}
+            error={errors.leaveOpeningAsOf}
+            hint="Leave builds up from this date on."
+            className={INPUT}
+          />
+        </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-6 border-t border-border pt-8">
         <legend className="sr-only">System access</legend>
         <Field
           label="System login"
@@ -204,7 +280,7 @@ export function EmployeeForm({
           error={errors.userId}
           hint={
             login === NEW_LOGIN
-              ? 'They sign in with their employee code, and their first password is the code too — they choose their own at the first sign-in. What they can do comes from the designation.'
+              ? 'They sign in with their employee code. A one-time password is shown once after saving — give it to them privately; they choose their own at the first sign-in. What they can do comes from the designation.'
               : 'Optional. A technician who never signs in is still recorded against their work.'
           }
         >

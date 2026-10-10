@@ -83,7 +83,8 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
   requirePermission(user, 'vat.view');
   const period: ResolvedPeriod = resolvePeriod({ ...input, period: input.period ?? 'quarter' });
   const organizationId = user.organizationId;
-  const branch = user.primaryBranchId ? { branchId: user.primaryBranchId } : {};
+  // VAT is registered and returned per TRN: the return covers every branch,
+  // whoever opens it (FDL 8/2017 — one registration per legal person).
   const dates = { gte: parseCalendarDate(period.from)!, lte: parseCalendarDate(period.to)! };
 
   const [
@@ -106,7 +107,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       prisma.invoice.findMany({
         where: {
           organizationId,
-          ...branch,
           invoiceType: 'TAX_INVOICE',
           status: { in: SUPPLY_STATUSES },
           issueDate: dates,
@@ -127,7 +127,7 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
         },
       }),
       prisma.creditNote.findMany({
-        where: { organizationId, ...branch, status: 'ISSUED', issueDate: dates },
+        where: { organizationId, status: 'ISSUED', issueDate: dates },
         orderBy: [{ issueDate: 'asc' }, { creditNoteNumber: 'asc' }],
         select: {
           id: true,
@@ -145,7 +145,7 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
         },
       }),
       prisma.expense.findMany({
-        where: { organizationId, ...branch, status: 'RECORDED', expenseDate: dates },
+        where: { organizationId, status: 'RECORDED', expenseDate: dates },
         orderBy: [{ expenseDate: 'asc' }, { createdAt: 'asc' }],
         select: {
           id: true,
@@ -162,7 +162,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       prisma.inventoryTransaction.findMany({
         where: {
           organizationId,
-          ...branch,
           transactionType: { in: ['PURCHASE_RECEIPT', 'RETURN_TO_SUPPLIER'] },
           createdAt: { gte: period.start, lt: period.end },
           purchaseItem: {
@@ -203,7 +202,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       prisma.inventoryTransaction.findMany({
         where: {
           organizationId,
-          ...branch,
           transactionType: { in: ['PURCHASE_RECEIPT', 'RETURN_TO_SUPPLIER'] },
           purchaseItem: {
             purchase: {
@@ -248,7 +246,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       prisma.purchase.aggregate({
         where: {
           organizationId,
-          ...branch,
           status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] },
           billStatus: 'PENDING',
         },
@@ -272,7 +269,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       prisma.paymentVoucher.findMany({
         where: {
           organizationId,
-          ...branch,
           kind: 'CARD_COLLECTION',
           status: 'PAID',
           paidOn: dates,

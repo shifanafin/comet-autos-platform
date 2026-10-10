@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { suggestOvertimeForDay } from '@/lib/hr/overtime';
 import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
@@ -324,6 +325,8 @@ export async function selfClock(user: AuthenticatedUser, direction: 'IN' | 'OUT'
         ...where,
       },
     });
+    // The day's overtime, suggested for a manager to approve.
+    await suggestOvertimeForDay(tx, user.organizationId, record.id);
     await settleRequestKey(tx, user, rawInput, record.id);
     return { record, closed: [] as string[] };
   });

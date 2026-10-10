@@ -212,6 +212,25 @@ export async function applyJobStatusChange(
   if (params.source === 'manual' && from !== 'ON_HOLD' && WORKFLOW_OWNED[toStatus]) {
     throw new InvalidJobStatusTransitionError(WORKFLOW_OWNED[toStatus]!);
   }
+  if (toStatus === 'CANCELLED') {
+    // Parts fitted and not taken back have left stock but are costed only on
+    // the job's invoice — a cancelled job has none, so they would vanish from
+    // the books. They go back to stock (or are billed) first.
+    const fitted = await tx.inventoryTransaction.aggregate({
+      where: {
+        organizationId: params.organizationId,
+        transactionType: { in: ['JOB_CONSUMPTION', 'JOB_RETURN'] },
+        partUsage: { jobCardId: jobCard.id },
+      },
+      _sum: { quantity: true },
+    });
+    // Fitted parts are stored as negative quantities, returns as positive.
+    if (fitted._sum?.quantity && fitted._sum.quantity.lt(0)) {
+      throw new InvalidJobStatusTransitionError(
+        'Parts are still fitted on this job. Take them back into stock from the repair screen (or invoice them) before cancelling.',
+      );
+    }
+  }
   if (params.source === 'manual' && from === 'ON_HOLD' && toStatus !== 'CANCELLED') {
     const history = await tx.jobStatusHistory.findMany({
       where: { organizationId: params.organizationId, jobCardId: jobCard.id },

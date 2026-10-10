@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { localDateString } from '@/lib/format';
 import { notify } from '@/lib/notifications/service';
 import { buildCompliance } from '@/lib/compliance/calendar';
+import { runPayrollAutomatically } from '@/lib/hr/payroll';
 import { daysBetween } from '@/lib/compliance/rules';
 import { reminderStage, reminderTitle, weekOf } from '@/lib/compliance/reminder-rules';
 
@@ -59,13 +60,20 @@ export async function remindersFor(organizationId: string, today: string): Promi
   const month = today.slice(0, 7);
   for (const item of calendar.monthly) {
     if (item.state !== 'todo') continue;
+    // Approvals before the payroll (from the 1st); salaries from the 5th and
+    // 12th (WPS: late after the 15th); the rest of the routine on the 10th.
     const steps =
-      item.key === 'payroll'
+      item.key === 'approvals'
         ? [
-            { from: 5, stage: 'a' },
-            { from: 12, stage: 'b' },
+            { from: 1, stage: 'a' },
+            { from: 3, stage: 'b' },
           ]
-        : [{ from: 10, stage: 'a' }];
+        : item.key === 'payroll'
+          ? [
+              { from: 5, stage: 'a' },
+              { from: 12, stage: 'b' },
+            ]
+          : [{ from: 10, stage: 'a' }];
     const step = [...steps].reverse().find((s) => dayOfMonth >= s.from);
     if (!step) continue;
     reminders.push({
@@ -90,6 +98,11 @@ export async function remindersFor(organizationId: string, today: string): Promi
 
 /** Everyone who keeps the books: holds Accounting → View through a role in force. */
 async function bookkeepers(organizationId: string) {
+  return holders(organizationId, 'accounting.view');
+}
+
+/** Everyone active holding a permission through a role in force. */
+async function holders(organizationId: string, code: string) {
   const users = await prisma.user.findMany({
     where: {
       organizationId,
@@ -97,13 +110,52 @@ async function bookkeepers(organizationId: string) {
       userRoles: {
         some: {
           revokedAt: null,
-          role: { rolePermissions: { some: { permission: { code: 'accounting.view' } } } },
+          role: { rolePermissions: { some: { permission: { code } } } },
         },
       },
     },
     select: { id: true },
   });
   return users.map((user) => user.id);
+}
+
+/**
+ * Runs last month's payroll by itself (from the 1st) and tells whoever
+ * approves payroll that it is ready — and who was left out for want of a
+ * salary. Returns how many messages went out.
+ */
+async function automaticPayroll(organizationId: string, today: string) {
+  const result = await runPayrollAutomatically(organizationId, today);
+  if (!result) return 0;
+  const approvers = await holders(organizationId, 'payroll.approve');
+  let sent = 0;
+  for (const userId of approvers) {
+    if (result.payroll) {
+      const created = await notify({
+        organizationId,
+        userId,
+        kind: 'COMPLIANCE_REMINDER',
+        title: `Payroll for ${result.label} is ready to approve`,
+        body: `${result.payroll.totals.count} ${result.payroll.totals.count === 1 ? 'person' : 'people'}, ${result.payroll.totals.net} AED to pay. Check it, approve it, pay through WPS, then mark it paid.`,
+        href: `/hr/payroll/${result.payroll.id}`,
+        dedupeKey: `payroll-ready:${result.payroll.id}`,
+      });
+      if (created) sent += 1;
+    }
+    if (result.missingSalary.length) {
+      const created = await notify({
+        organizationId,
+        userId,
+        kind: 'COMPLIANCE_REMINDER',
+        title: `Left out of ${result.label} payroll: no salary set`,
+        body: `${result.missingSalary.join(', ')}. Set the salary on their page, then recalculate the payroll.`,
+        href: '/hr/employees',
+        dedupeKey: `payroll-missing:${result.month}`,
+      });
+      if (created) sent += 1;
+    }
+  }
+  return sent;
 }
 
 /** Sends today's reminders. Safe to run as often as wanted. */
@@ -119,6 +171,11 @@ export async function runComplianceReminders(
   });
   let sent = 0;
   for (const organization of organizations) {
+    // Payroll first: a run it makes today is then counted by the calendar.
+    sent += await automaticPayroll(organization.id, today).catch((error) => {
+      console.error('Automatic payroll failed', error);
+      return 0;
+    });
     const [reminders, people] = await Promise.all([
       remindersFor(organization.id, today),
       bookkeepers(organization.id),

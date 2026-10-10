@@ -13,38 +13,65 @@ function refreshTeam() {
   revalidatePath('/hr', 'layout');
 }
 
+/** A login just made, with its one-time password — shown once on the form. */
+type IssuedLogin = { id: string; username: string; temporaryPassword: string };
+
 export async function createEmployeeAction(
-  _prev: ActionResult,
+  _prev: ActionResult<IssuedLogin>,
   formData: FormData,
-): Promise<ActionResult> {
+): Promise<ActionResult<IssuedLogin>> {
   const user = await requireUser();
   const result = await runAction(() => createEmployee(user, formDataToObject(formData)));
   const id = result.data?.id ?? (result.duplicate ? result.duplicateOf : null);
-  if (!result.ok || !id) return toClientResult(result);
+  if (!result.ok || !id) return { ...toClientResult(result), data: undefined };
   refreshTeam();
+  // A new login's one-time password is shown on the form, once, before moving on.
+  if (result.data?.temporaryPassword) {
+    return {
+      ok: true,
+      data: {
+        id,
+        username: result.data.employeeCode.toUpperCase(),
+        temporaryPassword: result.data.temporaryPassword,
+      },
+    };
+  }
   redirect(`/hr/employees/${id}?created=1`);
 }
 
 export async function updateEmployeeAction(
   employeeId: string,
-  _prev: ActionResult,
+  _prev: ActionResult<IssuedLogin>,
   formData: FormData,
-): Promise<ActionResult> {
+): Promise<ActionResult<IssuedLogin>> {
   const user = await requireUser();
   const result = await runAction(() =>
     updateEmployee(user, employeeId, formDataToObject(formData)),
   );
-  if (!result.ok) return toClientResult(result);
+  if (!result.ok) return { ...toClientResult(result), data: undefined };
   refreshTeam();
+  if (result.data?.temporaryPassword) {
+    return {
+      ok: true,
+      data: {
+        id: employeeId,
+        username: result.data.employeeCode.toUpperCase(),
+        temporaryPassword: result.data.temporaryPassword,
+      },
+    };
+  }
   redirect(`/hr/employees/${employeeId}`);
 }
 
-/** Puts an employee's login back on their employee code, to be changed at the next sign-in. */
-export async function resetEmployeeLoginAction(employeeId: string): Promise<ActionResult> {
+/** Gives an employee's login a new one-time password, to be changed at the next sign-in. */
+export async function resetEmployeeLoginAction(
+  employeeId: string,
+): Promise<ActionResult<{ username: string; temporaryPassword: string }>> {
   const user = await requireUser();
   const result = await runAction(() => resetEmployeeLogin(user, employeeId));
-  if (result.ok) refreshTeam();
-  return toClientResult(result);
+  if (!result.ok || !result.data) return { ...toClientResult(result), data: undefined };
+  refreshTeam();
+  return { ok: true, data: result.data };
 }
 
 export async function createDesignationAction(

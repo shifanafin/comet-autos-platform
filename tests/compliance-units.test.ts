@@ -15,6 +15,7 @@ import {
   vatPeriods,
 } from '@/lib/compliance/rules';
 import { reminderStage, reminderTitle, weekOf } from '@/lib/compliance/reminder-rules';
+import { automaticPayrollMonth } from '@/lib/hr/payroll-schedule';
 
 describe('VAT periods', () => {
   test('a period of months ends the day before the same date', () => {
@@ -166,5 +167,19 @@ describe('reminders', () => {
         ['2026-11-01', '2027-01-31', '2027-02-28'],
       ],
     );
+  });
+});
+
+describe('automatic payroll', () => {
+  test('from the 1st, the month just ended — once it starts within the books', () => {
+    assert.equal(automaticPayrollMonth('2026-11-01', '2026-09-16'), '2026-10');
+    assert.equal(automaticPayrollMonth('2026-11-20', '2026-09-16'), '2026-10');
+    assert.equal(
+      automaticPayrollMonth('2026-10-10', '2026-09-16'),
+      null,
+      'September began before the books: its first half is in the months entered as totals',
+    );
+    assert.equal(automaticPayrollMonth('2027-01-05', '2026-09-16'), '2026-12');
+    assert.equal(automaticPayrollMonth('2026-11-01', null), null, 'no books, no payroll');
   });
 });

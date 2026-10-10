@@ -316,6 +316,8 @@ const LATER_SOURCES = [
   'CARD_COLLECTION',
   'PAYMENT_VOUCHER',
   'PRIOR_PERIOD',
+  'FINAL_SETTLEMENT',
+  'FINAL_SETTLEMENT_PAYMENT',
 ] as const;
 
 /** What is waiting to be booked, oldest first, by kind of record. */
@@ -346,6 +348,7 @@ async function unbooked(organizationId: string) {
     billedLater,
     cardCollections,
     priorPeriods,
+    settlements,
   ] = await Promise.all([
     prisma.invoice.findMany({
       where: {
@@ -506,6 +509,12 @@ async function unbooked(organizationId: string) {
       orderBy: [{ periodFrom: 'asc' }],
       select: { id: true },
     }),
+    // Final settlements approved or paid.
+    prisma.finalSettlement.findMany({
+      where: { organizationId, status: { in: ['APPROVED', 'PAID'] } },
+      orderBy: [{ terminationDate: 'asc' }],
+      select: { id: true, status: true },
+    }),
   ]);
   const booked = new Set(bookedMovements.map((entry) => entry.sourceId));
   const paidBooked = new Set(bookedPayrollPayments.map((entry) => entry.sourceId));
@@ -559,6 +568,11 @@ async function unbooked(organizationId: string) {
       'PAYMENT_VOUCHER',
     ),
     PRIOR_PERIOD: notBooked(priorPeriods, 'PRIOR_PERIOD'),
+    FINAL_SETTLEMENT: notBooked(settlements, 'FINAL_SETTLEMENT'),
+    FINAL_SETTLEMENT_PAYMENT: notBooked(
+      settlements.filter((row) => row.status === 'PAID'),
+      'FINAL_SETTLEMENT_PAYMENT',
+    ),
   } satisfies Record<PostedSource, string[]>;
 }
 
@@ -605,6 +619,8 @@ export async function bookExistingRecords(user: AuthenticatedUser) {
     'CARD_COLLECTION',
     'PAYMENT_VOUCHER',
     'PRIOR_PERIOD',
+    'FINAL_SETTLEMENT',
+    'FINAL_SETTLEMENT_PAYMENT',
   ];
   let booked = 0;
   const failed: string[] = [];

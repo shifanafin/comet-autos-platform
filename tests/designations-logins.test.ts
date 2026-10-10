@@ -154,7 +154,7 @@ describe('employee codes and logins', () => {
     );
   });
 
-  test('“create a login”: signs in with the code, the code is the first password', async () => {
+  test('“create a login”: signs in with the code and a one-time password — never the code', async () => {
     const employee = await createEmployee(
       a.owner,
       person({ employeeCode: CODE.toLowerCase(), designationId: technicianId, userId: NEW_LOGIN }),
@@ -170,7 +170,13 @@ describe('employee codes and logins', () => {
     assert.equal(login.mustChangePassword, true);
     assert.deepEqual(await activeRoles(loginId), [technicianRoleId]);
 
-    const signedIn = await authenticate(` ${CODE.toLowerCase()} `, CODE.toUpperCase(), ADDRESS);
+    assert.ok(employee.temporaryPassword && employee.temporaryPassword.length >= 10);
+    assert.equal(
+      (await authenticate(CODE, CODE.toUpperCase(), ADDRESS)).ok,
+      false,
+      'the employee code is never the password',
+    );
+    const signedIn = await authenticate(` ${CODE.toLowerCase()} `, employee.temporaryPassword!, ADDRESS);
     assert.equal(signedIn.ok && signedIn.user.id, loginId);
   });
 
@@ -213,11 +219,12 @@ describe('employee codes and logins', () => {
     );
   });
 
-  test('a reset puts the password back on the code, to be changed again', async () => {
-    await resetEmployeeLogin(a.owner, employeeId);
+  test('a reset gives a new one-time password, to be changed again', async () => {
+    const reset = await resetEmployeeLogin(a.owner, employeeId);
     const login = await prisma.user.findUniqueOrThrow({ where: { id: loginId } });
     assert.equal(login.mustChangePassword, true);
-    assert.equal((await authenticate(CODE, CODE.toUpperCase(), ADDRESS)).ok, true);
+    assert.equal((await authenticate(CODE, CODE.toUpperCase(), ADDRESS)).ok, false);
+    assert.equal((await authenticate(CODE, reset.temporaryPassword, ADDRESS)).ok, true);
     await assert.rejects(resetEmployeeLogin(a.viewer, employeeId), AuthError);
   });
 });

@@ -71,22 +71,10 @@ export function FileVatReturnForm({
           className="[&_input]:h-11"
         />
       </div>
-      <label className="flex items-start gap-3 text-sm">
-        <input type="hidden" name="closeBooks" value="false" />
-        <input
-          type="checkbox"
-          name="closeBooks"
-          value="true"
-          defaultChecked
-          className="mt-0.5 size-4 accent-primary"
-        />
-        <span>
-          <span className="font-medium">Close the books through the period&apos;s last day</span>
-          <span className="block text-muted-foreground">
-            Recommended: nothing in a filed period can then change.
-          </span>
-        </span>
-      </label>
+      <p className="text-sm text-muted-foreground">
+        Filing closes the books through the period&apos;s last day: what the FTA received can&apos;t
+        change. A later correction is made with a credit note, in the period it is issued.
+      </p>
       <FormError message={errors.from ?? errors.to ?? state.error} />
       <div>
         <SubmitButton pending={isPending} size="lg" pendingLabel="Recording…">

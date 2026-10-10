@@ -38,8 +38,10 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 
 function Payslip({ run, line }: { run: PayrollRun; line: Line }) {
   const leave = [
-    line.unpaidLeaveDays ? `${line.unpaidLeaveDays} day(s) unpaid leave` : null,
-    line.paidLeaveDays ? `${line.paidLeaveDays} day(s) paid leave` : null,
+    line.unpaidLeaveDays ? `${line.unpaidLeaveDays} day(s) unpaid` : null,
+    line.halfPayDays ? `${line.halfPayDays} day(s) on half pay` : null,
+    line.paidLeaveDays > 0 ? `${line.paidLeaveDays} day(s) paid leave` : null,
+    line.absentDays ? `${line.absentDays} day(s) absent` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -81,21 +83,37 @@ function Payslip({ run, line }: { run: PayrollRun; line: Line }) {
       <div className="flex flex-col gap-2 text-sm">
         <Row label="Basic salary" value={formatMoney(line.basicSalary)} />
         <Row label="Allowances" value={formatMoney(line.allowances)} />
-        <Row label="Gross pay" value={formatMoney(line.gross)} strong />
-        <Row
-          label="Deductions"
-          value={
-            line.deductions === '0.00' ? formatMoney('0.00') : `−${formatMoney(line.deductions)}`
-          }
-        />
+        {line.overtimePay !== '0.00' ? (
+          <Row
+            label={`Overtime (${line.overtimeHours} h)`}
+            value={`+${formatMoney(line.overtimePay)}`}
+          />
+        ) : null}
+        <Row label="Gross pay" value={formatMoney(line.earned)} strong />
+        {line.leaveDeduction !== '0.00' ? (
+          <Row label="Unpaid days and absence" value={`−${formatMoney(line.leaveDeduction)}`} />
+        ) : null}
+        {line.otherDeduction !== '0.00' ? (
+          <Row
+            label={
+              line.otherDeductionKind === 'ADVANCE'
+                ? 'Salary advance recovered'
+                : line.otherDeductionKind === 'PENALTY'
+                  ? 'Penalty'
+                  : 'Other deduction'
+            }
+            value={`−${formatMoney(line.otherDeduction)}`}
+          />
+        ) : null}
+        {line.deductions === '0.00' ? <Row label="Deductions" value={formatMoney('0.00')} /> : null}
         <Row label="Net pay" value={formatMoney(line.netPay)} strong />
       </div>
 
       {leave ? <p className="text-xs text-muted-foreground">Leave this month: {leave}.</p> : null}
       <p className="text-xs text-muted-foreground">
-        End-of-service gratuity earned to {formatCalendarDate(run.periodEnd)}:{' '}
-        {formatMoney(line.gratuityLiability)} — payable on leaving after a year of service, under
-        UAE Labour Law.
+        Annual leave balance on {formatCalendarDate(run.periodEnd)}: {line.leaveBalanceDays} days.
+        End-of-service gratuity earned so far: {formatMoney(line.gratuityLiability)} — payable on
+        leaving after a year of service, under UAE Labour Law.
       </p>
 
       <footer className="mt-4 grid grid-cols-2 gap-6 pt-8 text-xs text-muted-foreground">

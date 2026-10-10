@@ -205,7 +205,7 @@ export async function getWpsFile(user: AuthenticatedUser, payrollId: string) {
         iban: item.employee.salaryIban,
         fixedFils: toFils(item.netPay.toString()),
         variableFils: 0,
-        leaveDays: days ? days.ANNUAL + days.SICK + days.UNPAID + days.OTHER : 0,
+        leaveDays: days ? Object.values(days).reduce((sum, n) => sum + n, 0) : 0,
       };
     }),
   });

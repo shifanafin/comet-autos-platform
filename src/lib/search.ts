@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { requireUser } from '@/lib/auth/authorize';
+import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import type { JobCardStatus } from '@/generated/prisma/enums';
 
 export interface GlobalSearchResults {
@@ -33,39 +33,57 @@ export async function globalSearch(query: string): Promise<GlobalSearchResults> 
   const trimmed = query.trim();
   if (trimmed.length < 2) return EMPTY_RESULTS;
 
+  // Each group only for those allowed to see it — the same rules as its own screen.
+  const branch = user.primaryBranchId ? { branchId: user.primaryBranchId } : undefined;
+  const canCustomers = hasPermission(user, 'customer.view', branch);
+  const canVehicles = hasPermission(user, 'vehicle.view', branch);
+  const jobsOrgWide = hasPermission(user, 'job_card.view');
+  const canJobs = jobsOrgWide || hasPermission(user, 'job_card.view', branch);
+
   const [customers, vehicles, jobCards] = await Promise.all([
-    prisma.customer.findMany({
-      where: {
-        organizationId: user.organizationId,
-        isActive: true,
-        OR: [
-          { name: { contains: trimmed, mode: 'insensitive' } },
-          { phone: { contains: trimmed } },
-        ],
-      },
-      select: { id: true, name: true, phone: true },
-      take: 5,
-    }),
-    prisma.vehicle.findMany({
-      where: {
-        organizationId: user.organizationId,
-        isActive: true,
-        OR: [
-          { plateNumber: { contains: trimmed, mode: 'insensitive' } },
-          { vin: { contains: trimmed, mode: 'insensitive' } },
-        ],
-      },
-      include: {
-        customer: { select: { name: true } },
-        jobCards: { orderBy: { openedAt: 'desc' }, take: 1, select: { id: true } },
-      },
-      take: 5,
-    }),
-    prisma.jobCard.findMany({
-      where: { organizationId: user.organizationId, jobNumber: { contains: trimmed, mode: 'insensitive' } },
-      include: { customer: true, vehicle: true },
-      take: 5,
-    }),
+    !canCustomers
+      ? []
+      : prisma.customer.findMany({
+          where: {
+            organizationId: user.organizationId,
+            isActive: true,
+            OR: [
+              { name: { contains: trimmed, mode: 'insensitive' } },
+              { phone: { contains: trimmed } },
+            ],
+          },
+          select: { id: true, name: true, phone: true },
+          take: 5,
+        }),
+    !canVehicles
+      ? []
+      : prisma.vehicle.findMany({
+          where: {
+            organizationId: user.organizationId,
+            isActive: true,
+            OR: [
+              { plateNumber: { contains: trimmed, mode: 'insensitive' } },
+              { vin: { contains: trimmed, mode: 'insensitive' } },
+            ],
+          },
+          include: {
+            customer: { select: { name: true } },
+            jobCards: { orderBy: { openedAt: 'desc' }, take: 1, select: { id: true } },
+          },
+          take: 5,
+        }),
+    !canJobs
+      ? []
+      : prisma.jobCard.findMany({
+          where: {
+            organizationId: user.organizationId,
+            // A branch-only permission sees that branch's jobs only.
+            ...(jobsOrgWide ? {} : { branchId: user.primaryBranchId ?? undefined }),
+            jobNumber: { contains: trimmed, mode: 'insensitive' },
+          },
+          include: { customer: true, vehicle: true },
+          take: 5,
+        }),
   ]);
 
   return {

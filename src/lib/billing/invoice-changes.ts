@@ -1131,7 +1131,9 @@ export async function settleShortPayment(
         referenceNumber: `Reversal of ${last.paymentNumber ?? last.id}`,
         notes: input.reason,
         reversalOfPaymentId: last.id,
-        receivedAt: new Date(),
+        // On the original payment's day: that day's takings net to the
+        // corrected amount, and no period shows both receipts.
+        receivedAt: last.receivedAt,
         receivedByUserId: user.id,
       },
       select: { id: true },

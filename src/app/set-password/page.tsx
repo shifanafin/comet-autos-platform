@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Where a login with a password someone else set lands until it chooses its
- * own — an employee's first sign-in uses their employee code as the password.
+ * own — an employee's first sign-in uses the one-time password they were given.
  */
 export default async function SetPasswordPage() {
   const user = await getCurrentUser();

@@ -10,6 +10,7 @@ import { parseInput } from '@/lib/form-data';
 import { emptyToNull } from '@/lib/normalize';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { localDateString, parseCalendarDate } from '@/lib/format';
+import { leavePosition, proposeSplit } from '@/lib/hr/leave-ledger';
 
 /*
  * Time off.
@@ -33,10 +34,39 @@ import { localDateString, parseCalendarDate } from '@/lib/format';
  */
 
 export const LEAVE_TYPES: { value: LeaveType; label: string; detail: string }[] = [
-  { value: 'ANNUAL', label: 'Annual', detail: 'Paid holiday from the yearly allowance.' },
-  { value: 'SICK', label: 'Sick', detail: 'Off ill.' },
-  { value: 'UNPAID', label: 'Unpaid', detail: 'Deducted from pay in the payroll run.' },
-  { value: 'OTHER', label: 'Other', detail: 'Anything else — say what in the reason.' },
+  {
+    value: 'ANNUAL',
+    label: 'Annual',
+    detail:
+      'Paid from the leave balance (30 days a year after the first year). Days beyond it are unpaid.',
+  },
+  {
+    value: 'SICK',
+    label: 'Sick',
+    detail: 'After probation: 15 days a year on full pay, 30 on half pay, then unpaid.',
+  },
+  { value: 'UNPAID', label: 'Unpaid', detail: 'Not paid, and not counted as service.' },
+  { value: 'MATERNITY', label: 'Maternity', detail: '45 days on full pay, then 15 on half pay.' },
+  {
+    value: 'PARENTAL',
+    label: 'Parental',
+    detail: 'Up to 5 days on full pay, within 6 months of a birth.',
+  },
+  {
+    value: 'BEREAVEMENT',
+    label: 'Bereavement',
+    detail: 'Up to 5 days on full pay (spouse) or 3 (parent, child, sibling).',
+  },
+  {
+    value: 'STUDY',
+    label: 'Study',
+    detail: '10 days a year on full pay, after 2 years of service.',
+  },
+  {
+    value: 'OTHER',
+    label: 'Other (paid)',
+    detail: 'Paid leave the workshop agrees — say why in the reason.',
+  },
 ];
 
 export const LEAVE_TYPE_LABEL = Object.fromEntries(
@@ -52,6 +82,17 @@ export const LEAVE_STATUS_LABEL: Record<LeaveStatus, string> = {
 
 /** The statuses that still take the employee out of the workshop. */
 const LIVE: LeaveStatus[] = ['PENDING', 'APPROVED'];
+
+/** "7 paid · 3 unpaid" — how a leave's days are paid. */
+export function payWords(leave: { fullPayDays: number; halfPayDays: number; unpaidDays: number }) {
+  return [
+    leave.fullPayDays ? `${leave.fullPayDays} paid` : null,
+    leave.halfPayDays ? `${leave.halfPayDays} half pay` : null,
+    leave.unpaidDays ? `${leave.unpaidDays} unpaid` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 /** The longest single leave the form accepts. Longer is a data-entry slip. */
 const MAX_DAYS = 366;
@@ -84,7 +125,10 @@ const requestSchema = z.object({
     .string({ error: 'Choose who is taking the leave.' })
     .trim()
     .min(1, 'Choose who is taking the leave.'),
-  leaveType: z.enum(['ANNUAL', 'SICK', 'UNPAID', 'OTHER'], { error: 'Choose the kind of leave.' }),
+  leaveType: z.enum(
+    ['ANNUAL', 'SICK', 'UNPAID', 'OTHER', 'MATERNITY', 'PARENTAL', 'BEREAVEMENT', 'STUDY'],
+    { error: 'Choose the kind of leave.' },
+  ),
   startDate: date('Choose the first day of leave.'),
   endDate: date('Choose the last day of leave.'),
   reason: z.string().trim().max(500, 'Keep the reason under 500 characters.').optional(),
@@ -187,13 +231,33 @@ export async function requestLeave(user: AuthenticatedUser, rawInput: unknown) {
     await claimRequestKey(tx, user, rawInput, 'leave.request');
     const employee = await tx.employee.findFirst({
       where: { id: input.employeeId, organizationId: user.organizationId, ...branchScope(user) },
-      select: { id: true, branchId: true, firstName: true, lastName: true, isActive: true },
+      select: {
+        id: true,
+        branchId: true,
+        firstName: true,
+        lastName: true,
+        isActive: true,
+        hireDate: true,
+        probationEndDate: true,
+        leaveOpeningDays: true,
+        leaveOpeningAsOf: true,
+      },
     });
     if (!employee) throw new NotFoundError('employee');
     if (!employee.isActive) {
       throw new DomainError(`${name(employee)} is no longer active.`, 'employeeId');
     }
     await assertNoOverlap(tx, user.organizationId, employee.id, start, end, LIVE);
+    // How the days are paid — full, half, unpaid — under the leave rules.
+    const split = await proposeSplit(
+      tx,
+      user.organizationId,
+      employee.id,
+      employee,
+      input.leaveType,
+      input.startDate,
+      input.endDate,
+    );
 
     const leave = await tx.leave.create({
       data: {
@@ -203,6 +267,9 @@ export async function requestLeave(user: AuthenticatedUser, rawInput: unknown) {
         startDate: start,
         endDate: end,
         reason: emptyToNull(input.reason),
+        fullPayDays: split.full,
+        halfPayDays: split.half,
+        unpaidDays: split.unpaid,
         status: approveNow ? 'APPROVED' : 'PENDING',
         approvedByUserId: approveNow ? user.id : null,
         approvedAt: approveNow ? new Date() : null,
@@ -214,11 +281,14 @@ export async function requestLeave(user: AuthenticatedUser, rawInput: unknown) {
       startDate: input.startDate,
       endDate: input.endDate,
       days: leaveDays(start, end),
+      fullPayDays: split.full,
+      halfPayDays: split.half,
+      unpaidDays: split.unpaid,
       status: leave.status,
       reason: leave.reason,
     });
     await settleRequestKey(tx, user, rawInput, leave.id);
-    return leave;
+    return { ...leave, payNote: split.note };
   });
 }
 
@@ -235,7 +305,17 @@ export async function decideLeave(
   return prisma.$transaction(async (tx) => {
     const leave = await tx.leave.findFirst({
       where: { id: leaveId, organizationId: user.organizationId, employee: branchScope(user) },
-      include: { employee: { select: { branchId: true } } },
+      include: {
+        employee: {
+          select: {
+            branchId: true,
+            hireDate: true,
+            probationEndDate: true,
+            leaveOpeningDays: true,
+            leaveOpeningAsOf: true,
+          },
+        },
+      },
     });
     if (!leave) throw new NotFoundError('leave');
     if (leave.status !== 'PENDING') {
@@ -255,11 +335,33 @@ export async function decideLeave(
         leave.id,
       );
     }
+    // Approving re-decides how the days are paid: the balance may have
+    // changed since the request.
+    const split =
+      decision === 'APPROVED'
+        ? await proposeSplit(
+            tx,
+            user.organizationId,
+            leave.employeeId,
+            leave.employee,
+            leave.leaveType,
+            leave.startDate.toISOString().slice(0, 10),
+            leave.endDate.toISOString().slice(0, 10),
+            { exceptLeaveId: leave.id },
+          )
+        : null;
     // Guarded on the status it was read with, so two managers deciding at
     // once cannot both win.
     const updated = await tx.leave.updateMany({
       where: { id: leave.id, status: 'PENDING' },
-      data: { status: decision, approvedByUserId: user.id, approvedAt: new Date() },
+      data: {
+        status: decision,
+        approvedByUserId: user.id,
+        approvedAt: new Date(),
+        ...(split
+          ? { fullPayDays: split.full, halfPayDays: split.half, unpaidDays: split.unpaid }
+          : {}),
+      },
     });
     if (updated.count === 0) throw new DomainError('Someone else decided this leave just now.');
     await audit(
@@ -268,7 +370,14 @@ export async function decideLeave(
       leave.employee.branchId,
       decision === 'APPROVED' ? 'leave.approved' : 'leave.rejected',
       leave.id,
-      { status: decision },
+      split
+        ? {
+            status: decision,
+            fullPayDays: split.full,
+            halfPayDays: split.half,
+            unpaidDays: split.unpaid,
+          }
+        : { status: decision },
       { status: leave.status },
       input.reason ? { reason: input.reason } : undefined,
     );
@@ -398,6 +507,8 @@ export async function listLeave(user: AuthenticatedUser, filters: LeaveFilters =
       ...leave,
       employeeName: name(leave.employee),
       days: leaveDays(leave.startDate, leave.endDate),
+      /** How the days are paid, in words — "7 paid · 3 unpaid". */
+      pay: payWords(leave),
       /** Today falls inside an approved leave. */
       isCurrent: leave.status === 'APPROVED' && leave.startDate <= today && leave.endDate >= today,
     })),
@@ -442,7 +553,9 @@ export async function getLeaveFormOptions(user: AuthenticatedUser) {
 
 /**
  * Approved leave days per employee and type inside [from, to] — what a
- * payroll run needs. One query for the whole team.
+ * payroll run needs. One query for the whole team. With `employed`, each
+ * person's days are counted only while they were employed: unpaid leave
+ * running past a leaving date is not deducted from the last wages.
  */
 export async function approvedLeaveDays(
   client: Prisma.TransactionClient,
@@ -450,6 +563,7 @@ export async function approvedLeaveDays(
   employeeIds: string[],
   from: Date,
   to: Date,
+  employed?: Map<string, { from: Date; to: Date }>,
 ) {
   const leaves = await client.leave.findMany({
     where: {
@@ -463,10 +577,57 @@ export async function approvedLeaveDays(
   });
   const result = new Map<string, Record<LeaveType, number>>();
   for (const leave of leaves) {
-    const days = overlapDays(leave.startDate, leave.endDate, from, to);
-    const entry = result.get(leave.employeeId) ?? { ANNUAL: 0, SICK: 0, UNPAID: 0, OTHER: 0 };
+    const window = employed?.get(leave.employeeId);
+    const windowFrom = window && window.from > from ? window.from : from;
+    const windowTo = window && window.to < to ? window.to : to;
+    const days =
+      windowTo < windowFrom ? 0 : overlapDays(leave.startDate, leave.endDate, windowFrom, windowTo);
+    const entry =
+      result.get(leave.employeeId) ??
+      (Object.fromEntries(LEAVE_TYPES.map((type) => [type.value, 0])) as Record<LeaveType, number>);
     entry[leave.leaveType] += days;
     result.set(leave.employeeId, entry);
   }
   return result;
+}
+
+/**
+ * One employee's annual leave and service as of today (or their leaving
+ * day): earned, taken, left, what is still building up in the first six
+ * months, and the paid sick days used this year.
+ */
+export async function getEmployeeLeaveSummary(user: AuthenticatedUser, employeeId: string) {
+  requirePermission(user, 'leave.view');
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, organizationId: user.organizationId },
+    select: {
+      id: true,
+      hireDate: true,
+      terminationDate: true,
+      probationEndDate: true,
+      leaveOpeningDays: true,
+      leaveOpeningAsOf: true,
+    },
+  });
+  if (!employee) throw new NotFoundError('employee');
+  const today = localDateString();
+  const asOf =
+    employee.terminationDate && employee.terminationDate.toISOString().slice(0, 10) < today
+      ? employee.terminationDate.toISOString().slice(0, 10)
+      : today;
+  const position = await prisma.$transaction((tx) =>
+    leavePosition(tx, user.organizationId, employee.id, employee, asOf),
+  );
+  const sick = position.usedOf('SICK');
+  return {
+    asOf,
+    serviceDays: position.serviceDays,
+    calendarDays:
+      Math.round((parseCalendarDate(asOf)!.getTime() - employee.hireDate.getTime()) / DAY_MS) + 1,
+    inProbation: position.inProbation,
+    probationEnd: position.probationEnd,
+    annual: position.annual,
+    sickFullUsed: sick.full,
+    sickHalfUsed: sick.half,
+  };
 }

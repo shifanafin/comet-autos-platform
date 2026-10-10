@@ -1,4 +1,5 @@
 import {
+  Clock3,
   ArrowRightLeft,
   PiggyBank,
   LayoutDashboard,
@@ -374,6 +375,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'Leave', href: '/hr/leave', icon: CalendarOff, permission: 'leave.view' },
       { label: 'Payroll', href: '/hr/payroll', icon: Banknote, permission: 'payroll.view' },
+      { label: 'Overtime', href: '/hr/overtime', icon: Clock3, permission: 'payroll.view' },
     ],
   },
   {

@@ -13,7 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { FormError, TextField, TextareaField } from '@/components/forms/fields';
+import {
+  Field,
+  FormError,
+  NativeSelect,
+  TextField,
+  TextareaField,
+} from '@/components/forms/fields';
 import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
 import { ReasonAction } from '@/components/shared/reason-action';
@@ -289,12 +295,17 @@ export function AdjustDeductionButton({
   employeeName,
   gross,
   deductions,
+  kind,
+  leaveDeduction,
 }: {
   payrollId: string;
   itemId: string;
   employeeName: string;
   gross: string;
+  /** The hand-entered deduction (advance, penalty, other) — the leave deduction is calculated. */
   deductions: string;
+  kind?: string | null;
+  leaveDeduction?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -326,7 +337,12 @@ export function AdjustDeductionButton({
         <DialogHeader>
           <DialogTitle>Deduction for {employeeName}</DialogTitle>
           <DialogDescription>
-            Gross pay is {formatMoney(gross)}. The reason is kept in the audit trail.
+            Gross pay is {formatMoney(gross)}
+            {leaveDeduction && leaveDeduction !== '0.00'
+              ? `; unpaid leave and absence already take ${formatMoney(leaveDeduction)}`
+              : ''}
+            . UAE law caps this deduction at half the month&apos;s wage. The reason is kept in the
+            audit trail.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="flex flex-col gap-5">
@@ -337,8 +353,21 @@ export function AdjustDeductionButton({
             required
             defaultValue={deductions}
             error={errors.deductions}
+            hint="0 removes it."
             className={AMOUNT}
           />
+          <Field label="For" htmlFor={`kind-${itemId}`} error={errors.kind}>
+            <NativeSelect
+              id={`kind-${itemId}`}
+              name="kind"
+              defaultValue={kind ?? 'ADVANCE'}
+              className="h-11 text-base md:text-sm"
+            >
+              <option value="ADVANCE">Salary advance or loan recovered</option>
+              <option value="PENALTY">Penalty (internal regulations)</option>
+              <option value="OTHER">Other</option>
+            </NativeSelect>
+          </Field>
           <TextareaField
             label="Why?"
             name="reason"

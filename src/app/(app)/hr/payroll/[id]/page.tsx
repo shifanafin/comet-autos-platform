@@ -27,9 +27,29 @@ type Line = PayrollRun['lines'][number];
 /** Leave and absence behind a line, in words. Empty when there is nothing to say. */
 function notes(line: Line) {
   return [
-    line.unpaidLeaveDays ? `${line.unpaidLeaveDays} unpaid leave` : null,
-    line.paidLeaveDays ? `${line.paidLeaveDays} paid leave` : null,
+    line.unpaidLeaveDays ? `${line.unpaidLeaveDays} unpaid` : null,
+    line.halfPayDays ? `${line.halfPayDays} half pay` : null,
+    line.paidLeaveDays > 0 ? `${line.paidLeaveDays} paid leave` : null,
     line.absentDays ? `${line.absentDays} absent` : null,
+    line.overtimeHours ? `${line.overtimeHours} h overtime` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const DEDUCTION_KIND: Record<string, string> = {
+  ADVANCE: 'advance recovered',
+  PENALTY: 'penalty',
+  OTHER: 'other',
+};
+
+/** The deduction, split into its parts, in words. */
+function deductionParts(line: Line) {
+  return [
+    line.leaveDeduction !== '0.00' ? `leave & absence ${formatMoney(line.leaveDeduction)}` : null,
+    line.otherDeduction !== '0.00'
+      ? `${DEDUCTION_KIND[line.otherDeductionKind ?? 'OTHER']} ${formatMoney(line.otherDeduction)}`
+      : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -55,7 +75,11 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
   const wps = payable ? await getWpsFile(user, run.id) : null;
 
   const trail = [
-    run.calculatedAt ? `Calculated ${formatDateTime(run.calculatedAt)} by ${run.createdBy}` : null,
+    run.calculatedAt
+      ? run.automatic && !run.createdBy
+        ? `Calculated automatically ${formatDateTime(run.calculatedAt)}`
+        : `Calculated ${formatDateTime(run.calculatedAt)} by ${run.createdBy}`
+      : null,
     run.approvedAt ? `Approved ${formatDateTime(run.approvedAt)} by ${run.approvedBy}` : null,
     run.paidAt ? `Paid ${formatDateTime(run.paidAt)} by ${run.paidBy}` : null,
   ].filter(Boolean);
@@ -136,7 +160,11 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                 details={[
                   { label: 'Basic', value: formatMoney(line.basicSalary) },
                   { label: 'Allowances', value: formatMoney(line.allowances) },
-                  { label: 'Deductions', value: formatMoney(line.deductions) },
+                  {
+                    label: 'Overtime',
+                    value: line.overtimePay !== '0.00' ? formatMoney(line.overtimePay) : null,
+                  },
+                  { label: 'Deductions', value: deductionParts(line) || formatMoney('0.00') },
                   { label: 'Leave & absence', value: notes(line) || null },
                 ]}
               >
@@ -146,7 +174,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                     itemId={line.id}
                     employeeName={line.employee.name}
                     gross={line.gross}
-                    deductions={line.deductions}
+                    deductions={line.otherDeduction}
+                    kind={line.otherDeductionKind}
+                    leaveDeduction={line.leaveDeduction}
                   />
                 ) : null}
               </RecordCard>
@@ -154,13 +184,14 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
           </RecordList>
 
           <TableWrap>
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[920px] text-sm">
               <thead className="bg-muted/40 text-left text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
                 <tr>
                   <th className="px-4 py-4 pl-6">Employee</th>
                   <th className="px-2 py-4">Leave &amp; absence</th>
                   <th className="w-28 px-2 py-4 text-right">Basic</th>
                   <th className="w-28 px-2 py-4 text-right">Allowances</th>
+                  <th className="w-24 px-2 py-4 text-right">Overtime</th>
                   <th className="w-28 px-2 py-4 text-right">Deductions</th>
                   <th className="w-32 px-4 py-4 pr-6 text-right">Net pay</th>
                   {editable ? <th className="w-0 px-2 py-4" /> : null}
@@ -189,10 +220,17 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                       {formatMoney(line.allowances)}
                     </td>
                     <td className="px-2 py-4 text-right tabular-nums">
+                      {line.overtimePay === '0.00' ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        `+${formatMoney(line.overtimePay)}`
+                      )}
+                    </td>
+                    <td className="px-2 py-4 text-right tabular-nums">
                       {line.deductions === '0.00' ? (
                         <span className="text-muted-foreground">—</span>
                       ) : (
-                        `−${formatMoney(line.deductions)}`
+                        <span title={deductionParts(line)}>−{formatMoney(line.deductions)}</span>
                       )}
                     </td>
                     <td className="px-4 py-4 pr-6 text-right font-semibold tabular-nums">
@@ -205,7 +243,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                           itemId={line.id}
                           employeeName={line.employee.name}
                           gross={line.gross}
-                          deductions={line.deductions}
+                          deductions={line.otherDeduction}
+                          kind={line.otherDeductionKind}
+                          leaveDeduction={line.leaveDeduction}
                         />
                       </td>
                     ) : null}
@@ -214,7 +254,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
               </tbody>
               <tfoot className="border-t border-border bg-muted/30 font-semibold">
                 <tr>
-                  <td className="px-4 py-4 pl-6" colSpan={4}>
+                  <td className="px-4 py-4 pl-6" colSpan={5}>
                     Total
                   </td>
                   <td className="px-2 py-4 text-right tabular-nums">
@@ -292,6 +332,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
                 </span>
                 <span className="col-span-2 text-right font-semibold tabular-nums sm:col-span-1">
                   {formatMoney(line.gratuityLiability)}
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    + leave {line.leaveBalanceDays} d · {formatMoney(line.leaveLiability)}
+                  </span>
                 </span>
               </li>
             ))}
@@ -322,8 +365,10 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         <p className="flex items-start gap-2">
           <Info className="mt-0.5 size-3.5 shrink-0" />
           Salaries are taken as they stood on the last day of the month and pro-rated for anyone who
-          joined or left during it. Approved unpaid leave is deducted at (basic + allowances) ÷ days
-          in the month.
+          joined or left during it. Unpaid days and absence with no approved leave are deducted at
+          (basic + allowances) ÷ 30 a day, half-pay days at half that; approved overtime is added at
+          +25% or +50% of the hourly basic. Annual leave earned but not taken is set aside with the
+          end-of-service, at basic ÷ 30 a day.
         </p>
       </div>
     </Stack>

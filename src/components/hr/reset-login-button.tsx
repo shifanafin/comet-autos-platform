@@ -2,29 +2,35 @@
 
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { FormError } from '@/components/forms/fields';
 import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
 import type { ActionResult } from '@/lib/errors';
+import { IssuedPassword } from '@/components/hr/issued-password';
 import { resetEmployeeLoginAction } from '@/app/(app)/hr/actions';
 
-/** Puts the login's password back on the employee code; asks once before doing it. */
+type Issued = { username: string; temporaryPassword: string };
+
+/** Gives the login a new one-time password, shown once; asks before doing it. */
 export function ResetLoginButton({ employeeId }: { employeeId: string }) {
   const [confirming, setConfirming] = useState(false);
-  const [state, onSubmit, isPending] = useFormAction<ActionResult>(
+  const [state, onSubmit, isPending] = useFormAction<ActionResult<Issued>>(
     async () => {
       const result = await resetEmployeeLoginAction(employeeId);
-      if (result.ok) {
-        toast.success('Password reset to their employee code. They choose a new one at sign-in.');
-        setConfirming(false);
-      }
+      if (result.ok) setConfirming(false);
       return result;
     },
     { ok: false },
   );
 
+  if (state.ok && state.data) {
+    return (
+      <div className="mt-2">
+        <IssuedPassword username={state.data.username} password={state.data.temporaryPassword} />
+      </div>
+    );
+  }
   if (!confirming) {
     return (
       <Button
@@ -35,15 +41,15 @@ export function ResetLoginButton({ employeeId }: { employeeId: string }) {
         onClick={() => setConfirming(true)}
       >
         <KeyRound />
-        Reset password to employee code
+        Reset password
       </Button>
     );
   }
   return (
     <form onSubmit={onSubmit} className="mt-2 flex flex-col gap-2">
       <p className="text-xs text-muted-foreground">
-        They will be signed out everywhere and sign in again with their employee code as the
-        password, then choose a new one.
+        They will be signed out everywhere. A new one-time password is shown once — give it to them
+        privately; they choose their own at the next sign-in.
       </p>
       <div className="flex flex-wrap gap-2">
         <SubmitButton pending={isPending} size="sm" pendingLabel="Resetting…">

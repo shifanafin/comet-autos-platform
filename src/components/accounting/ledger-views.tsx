@@ -31,6 +31,8 @@ const SOURCE_LABEL: Record<string, string> = {
   CARD_COLLECTION: 'Payment voucher',
   PAYMENT_VOUCHER: 'Payment voucher',
   PRIOR_PERIOD: 'Before these books',
+  FINAL_SETTLEMENT: 'Final settlement',
+  FINAL_SETTLEMENT_PAYMENT: 'Final settlement',
   MANUAL: 'Manual',
 };
 

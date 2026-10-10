@@ -3,6 +3,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
+import { assertCanGrantRoles, assertCanManageAccount } from '@/lib/access/escalation';
 import { hashPassword } from '@/lib/auth/password';
 import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
@@ -413,6 +414,11 @@ export async function createUser(user: AuthenticatedUser, rawInput: unknown) {
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'user.create');
     const roles = await resolveRoles(tx, user.organizationId, roleIds);
+    await assertCanGrantRoles(
+      tx,
+      user,
+      roles.map((role) => role.id),
+    );
     const primaryBranchId = await resolveBranch(
       tx,
       user.organizationId,
@@ -511,6 +517,7 @@ export async function updateUser(user: AuthenticatedUser, userId: string, rawInp
       },
     });
     if (!before) throw new NotFoundError('user');
+    await assertCanManageAccount(tx, user, userId, 'change');
 
     const roles = await resolveRoles(tx, user.organizationId, roleIds);
     const primaryBranchId = await resolveBranch(
@@ -530,6 +537,11 @@ export async function updateUser(user: AuthenticatedUser, userId: string, rawInp
       );
     }
     if (rolesChanged) {
+      await assertCanGrantRoles(
+        tx,
+        user,
+        [...wanted].filter((id) => !held.has(id)),
+      );
       const losingManage = [...held].some((id) => !wanted.has(id));
       if (losingManage)
         await refuseIfLastAdmin(tx, user.organizationId, userId, 'Changing its roles');
@@ -631,6 +643,7 @@ export async function setUserActive(user: AuthenticatedUser, userId: string, raw
     });
     if (!target) throw new NotFoundError('user');
     if (target.isActive === isActive) return target;
+    await assertCanManageAccount(tx, user, userId, isActive ? 'reactivate' : 'deactivate');
 
     if (!isActive) {
       if (userId === user.id) {
@@ -682,6 +695,7 @@ export async function resetUserPassword(
       select: { id: true, fullName: true, primaryBranchId: true },
     });
     if (!target) throw new NotFoundError('user');
+    await assertCanManageAccount(tx, user, userId, 'reset the password of');
 
     // A password handed out by someone else is changed at the next sign-in.
     await tx.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true } });
