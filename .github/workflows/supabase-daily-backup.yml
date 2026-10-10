@@ -61,7 +61,7 @@ jobs:
             "$SUPABASE_DB_URL"
 
           test -s "$DUMP"
-          pg_restore --list "$DUMP" > /dev/null
+          /usr/lib/postgresql/17/bin/pg_restore --list "$DUMP" > /dev/null
 
           openssl enc -aes-256-cbc -salt -pbkdf2 \
             -in "$DUMP" \
@@ -74,7 +74,7 @@ jobs:
             -pass env:BACKUP_ENCRYPTION_PASSPHRASE
 
           cmp "$DUMP" backup/verify.dump
-          pg_restore --list backup/verify.dump > /dev/null
+          /usr/lib/postgresql/17/bin/pg_restore --list backup/verify.dump > /dev/null
 
           sha256sum "$ENC" > "${ENC}.sha256"
 
