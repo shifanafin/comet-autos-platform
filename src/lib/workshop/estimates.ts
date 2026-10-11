@@ -1218,6 +1218,45 @@ export async function getAdditionalEstimate(
  * so it is removed outright (its lines with it); the audit log keeps what it
  * was. Anything sent or on a job card is part of the record and stays.
  */
+/**
+ * Opens a replaced version again, as an option the customer may choose —
+ * while no version is approved yet and the current one is still a draft or
+ * waiting. Its old link stays withdrawn: send a new one from its page.
+ */
+export async function reopenVersion(user: AuthenticatedUser, estimateId: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimateId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
+    const estimate = await loadEstimate(tx, user.organizationId, estimateId);
+    requirePermission(user, 'quotation.edit', { branchId: estimate.branchId });
+    if (estimate.status !== 'SENT' || !estimate.replacedAt) {
+      throw new DomainError('Only a sent version that was replaced can be opened again.');
+    }
+    if (estimate.validUntil && estimate.validUntil.toISOString().slice(0, 10) < localDateString()) {
+      throw new DomainError('This version has expired. Make a new version instead.');
+    }
+    const current = (await versionsOf(tx, user.organizationId, estimate)).find(
+      (version) => version.isCurrent,
+    );
+    if (current && current.status !== 'SENT' && current.status !== 'DRAFT') {
+      throw new DomainError(
+        `Version ${current.version} is already ${current.status === 'REJECTED' ? 'rejected' : 'approved'}. Make a new version instead.`,
+      );
+    }
+    await tx.estimate.update({ where: { id: estimate.id }, data: { replacedAt: null } });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: estimate.branchId,
+      actorUserId: user.id,
+      action: 'estimate.reopened',
+      entityType: 'Estimate',
+      entityId: estimate.id,
+      beforeData: { replacedAt: estimate.replacedAt.toISOString() },
+      afterData: { replacedAt: null, version: estimate.version },
+    });
+    return { estimateId: estimate.id };
+  });
+}
+
 export async function deleteDraftQuotation(user: AuthenticatedUser, estimateId: string) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimateId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;

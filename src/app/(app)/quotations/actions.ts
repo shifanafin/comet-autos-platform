@@ -14,6 +14,7 @@ import {
   deleteDraftQuotation,
   recordCustomerDecision,
   reissueEstimateLink,
+  reopenVersion,
   reviseEstimate,
   saveEstimateDraft,
   sendEstimate,
@@ -126,6 +127,14 @@ export async function recordQuotationDecisionAction(
 }
 
 /** Deletes an unsent first draft, then goes back to the quotation list. */
+/** Opens a replaced version again as an option. */
+export async function reopenQuotationVersionAction(estimateId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => reopenVersion(user, estimateId));
+  if (result.ok) await refreshQuotation(estimateId);
+  return toClientResult(result);
+}
+
 export async function deleteDraftQuotationAction(estimateId: string): Promise<ActionResult> {
   const user = await requireUser();
   const result = await runAction(() => deleteDraftQuotation(user, estimateId));

@@ -16,6 +16,7 @@ import { checkInVehicle } from '@/lib/workshop/check-in';
 import {
   createEstimate,
   recordCustomerDecision,
+  reopenVersion,
   reviseEstimate,
   saveEstimateDraft,
   sendEstimate,
@@ -163,5 +164,26 @@ describe('a version replaced by a correction', () => {
     await sendEstimate(org.owner, v1);
     await recordCustomerDecision(org.owner, v1, { decision: 'REJECTED', method: 'PHONE' });
     await expectDomainError(reviseEstimate(org.owner, v1, true), /still waiting/);
+  });
+});
+
+describe('opening a replaced version again', () => {
+  test('a replaced version becomes an option again, and can then be approved', async () => {
+    const { jobCardId, v1 } = await quotedJob('900');
+    await sendEstimate(org.owner, v1);
+    const v2 = await reviseEstimate(org.owner, v1);
+    await fill(v2.id, '800');
+    await sendEstimate(org.owner, v2.id);
+    assert.ok((await row(v1)).replacedAt, 'replaced');
+
+    await reopenVersion(org.owner, v1);
+    assert.equal((await row(v1)).replacedAt, null, 'open again');
+    assert.equal((await getQuotation(org.owner, v1)).isOpenOption, true);
+
+    await recordCustomerDecision(org.owner, v1, { decision: 'APPROVED', method: 'IN_PERSON' });
+    assert.deepEqual(await row(v1), { status: 'APPROVED', isCurrent: true, replacedAt: null });
+    assert.ok((await row(v2.id)).replacedAt, 'version 2 closed as not chosen');
+    assert.equal(await jobStatus(jobCardId), 'APPROVED');
+    await expectDomainError(reopenVersion(org.owner, v2.id), /already approved/);
   });
 });

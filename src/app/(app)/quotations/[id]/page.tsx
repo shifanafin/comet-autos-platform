@@ -18,7 +18,11 @@ import { EstimateStatusPill } from '@/components/workshop/status-pills';
 import { EstimateLines } from '@/components/workshop/estimate-lines';
 import { editableBill, editableLine } from '@/lib/billing/editable-lines';
 import { QuotationBuilder } from '@/components/workshop/quotation-builder';
-import { NewLinkButton, RecordDecisionForm } from '@/components/workshop/quotation-controls';
+import {
+  NewLinkButton,
+  RecordDecisionForm,
+  ReopenVersionButton,
+} from '@/components/workshop/quotation-controls';
 import {
   ChangeQuotationPartyButton,
   QuotationHeaderActions,
@@ -63,6 +67,13 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
   const { customer, vehicle, jobCard, expired, isLatest, isOpenOption, versions } = quotation;
   const current = versions.find((version) => version.isCurrent);
   const canEdit = hasPermission(user, 'quotation.edit', { branchId: quotation.branchId });
+  // Replaced (or not chosen) while nothing is approved yet: it can be opened again.
+  const canReopen =
+    canEdit &&
+    quotation.status === 'SENT' &&
+    Boolean(quotation.replacedAt) &&
+    !expired &&
+    (current?.status === 'SENT' || current?.status === 'DRAFT');
   const canInvoice = hasPermission(user, 'invoice.create', { branchId: quotation.branchId });
   const defaultVatRate = await resolveDefaultVatRate(user.organizationId);
   const decision = quotation.approvals[0];
@@ -396,6 +407,17 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                 </Section>
               ) : null}
             </>
+          ) : null}
+
+          {canReopen ? (
+            <Section
+              title="This version was replaced"
+              description={`Version ${current?.version} is the current one. If the customer may still want this one, open it again as an option.`}
+            >
+              <Panel>
+                <ReopenVersionButton estimateId={quotation.id} version={quotation.version} />
+              </Panel>
+            </Section>
           ) : null}
 
           {versions.length > 1 ? (

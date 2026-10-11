@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import {
   recordQuotationDecisionAction,
   reissueQuotationLinkAction,
+  reopenQuotationVersionAction,
   reviseQuotationAction,
 } from '@/app/(app)/quotations/actions';
 import { createEstimateAction } from '@/app/(app)/job-cards/[id]/actions';
@@ -90,6 +91,31 @@ export function ReviseQuotationButton({
         confirmLabel="Create revision"
         onConfirm={async () =>
           run(() => reviseQuotationAction(estimateId), 'Revision created')
+        }
+      />
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+/** Opens a replaced version again as an option the customer may choose. */
+export function ReopenVersionButton({ estimateId, version }: { estimateId: string; version: number }) {
+  const { error, isPending, run } = useSimpleAction();
+  return (
+    <div className="flex flex-col gap-2">
+      <ConfirmAction
+        tone="default"
+        trigger={
+          <Button variant="outline" disabled={isPending}>
+            {isPending ? <Loader2 className="animate-spin" /> : <GitBranch />}
+            Open it again as an option
+          </Button>
+        }
+        title={`Open version ${version} again?`}
+        description="It becomes an option beside the current version: you can record the customer's decision on it, or send them a new link. Approving either one closes the other."
+        confirmLabel="Open as an option"
+        onConfirm={async () =>
+          run(() => reopenQuotationVersionAction(estimateId), `Version ${version} is open again`)
         }
       />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
