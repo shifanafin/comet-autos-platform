@@ -339,10 +339,42 @@ const postInvoice: Poster = async (tx, organizationId, invoiceId, accounts) => {
 
   // The parts fitted on its job, at what they cost, after any taken back.
   if (invoice.jobCardId) {
-    const usages = await tx.partUsage.findMany({
+    const fitted = await tx.partUsage.findMany({
       where: { organizationId, jobCardId: invoice.jobCardId },
       select: { id: true, quantity: true, unitCost: true },
     });
+    // A fitting that carries its own standing entry was costed there (parts
+    // recorded on old jobs after their invoice, booked on 5–6 October 2026 as
+    // historical job consumption): costing it here too would count it twice.
+    // Every other part fitted is costed on the invoice.
+    const fittings = await tx.inventoryTransaction.findMany({
+      where: {
+        organizationId,
+        transactionType: 'JOB_CONSUMPTION',
+        partUsageId: { in: fitted.map((usage) => usage.id) },
+      },
+      select: { id: true, partUsageId: true },
+    });
+    const bookedMovements = new Set(
+      (
+        await tx.journalEntry.findMany({
+          where: {
+            organizationId,
+            sourceType: 'STOCK_MOVEMENT',
+            sourceId: { in: fittings.map((movement) => movement.id) },
+            reversalOfJournalEntryId: null,
+            reversals: { none: {} },
+          },
+          select: { sourceId: true },
+        })
+      ).map((entry) => entry.sourceId),
+    );
+    const bookedUsages = new Set(
+      fittings
+        .filter((movement) => bookedMovements.has(movement.id))
+        .map((movement) => movement.partUsageId),
+    );
+    const usages = fitted.filter((usage) => !bookedUsages.has(usage.id));
     const net = await withNetQuantities(tx, organizationId, usages);
     const cost = net.reduce(
       (sum, usage) =>
