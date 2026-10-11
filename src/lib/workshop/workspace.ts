@@ -314,7 +314,7 @@ export async function getWorkQueues(user: AuthenticatedUser) {
       select: jobSelect,
     }),
     prisma.estimate.findMany({
-      where: { organizationId: org, nextVersions: { none: {} } },
+      where: { organizationId: org, isCurrent: true },
       orderBy: { updatedAt: 'desc' },
       take: 100,
       select: {

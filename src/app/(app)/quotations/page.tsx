@@ -75,6 +75,7 @@ export default async function QuotationsPage({
     const actions: QuotationAction[] = [];
     if (q.status === 'DRAFT' && canEdit) actions.push('edit');
     if ((q.status === 'SENT' || q.status === 'REJECTED') && canEdit) actions.push('revise');
+    if (q.status === 'SENT' && !q.expired && canEdit) actions.push('keepOpen');
     if (canCreate) actions.push('duplicate');
     if (q.status !== 'DRAFT') actions.push('pdf');
     if (canRemove && removable(q)) actions.push('delete');

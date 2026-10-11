@@ -221,7 +221,7 @@ export async function jobCardDetails(organizationId: string, ids: string[]) {
       },
       // The current version of each quotation that was sent or decided.
       estimates: {
-        where: { status: { notIn: ['DRAFT', 'REJECTED', 'EXPIRED'] }, nextVersions: { none: {} } },
+        where: { status: { notIn: ['DRAFT', 'REJECTED', 'EXPIRED'] }, isCurrent: true },
         orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
         select: { estimateNumber: true, totalAmount: true },
       },

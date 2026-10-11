@@ -797,7 +797,7 @@ export async function getJobDocuments(user: AuthenticatedUser, jobCardId: string
         organizationId: user.organizationId,
         jobCardId,
         status: { not: 'DRAFT' },
-        nextVersions: { none: {} },
+        isCurrent: true,
       },
       orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
       select: {

@@ -85,7 +85,7 @@ async function loadBillingSources(
       // A replaced version's approval stays on record but is never billed.
       where: {
         organizationId,
-        estimate: { jobCardId, organizationId, status: 'APPROVED', nextVersions: { none: {} } },
+        estimate: { jobCardId, organizationId, status: 'APPROVED', isCurrent: true },
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       include: {

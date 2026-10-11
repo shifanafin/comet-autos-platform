@@ -1345,6 +1345,12 @@ model Estimate {
   sentByUserId      String?        @map("sent_by_user_id") @db.Uuid
   validUntil        DateTime?      @map("valid_until") @db.Date
   sentAt            DateTime?      @map("sent_at") @db.Timestamptz
+  /// The version that counts — listed, invoiced, shared: the newest, until
+  /// an older version left open as an option is the one approved.
+  isCurrent         Boolean        @default(true) @map("is_current")
+  /// A sent version replaced by a correction, or not chosen when another
+  /// option was approved. A sent version without it is still open.
+  replacedAt        DateTime?      @map("replaced_at") @db.Timestamptz
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -1370,6 +1376,7 @@ model Estimate {
   @@index([organizationId, vehicleId])
   @@index([organizationId, previousVersionId])
   @@index([organizationId, jobCardId, kind])
+  @@index([organizationId, isCurrent])
   @@map("estimates")
 }
 

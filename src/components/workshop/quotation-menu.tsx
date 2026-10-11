@@ -48,7 +48,10 @@ import {
  *   draft             edit on the page itself; delete if it never left the
  *                     workshop; change customer/vehicle likewise
  *   sent / rejected   Edit makes the next version as a draft (the sent one,
- *                     and the customer's answer, are kept as they were)
+ *                     and the customer's answer, are kept as they were). A
+ *                     sent version still waiting is either replaced (its
+ *                     link stops working — a correction) or kept open as an
+ *                     option the customer may still choose
  *   approved          Change makes the next version, to add, remove or
  *                     change work before it is invoiced; the customer
  *                     approves that version. Duplicate starts a new one.
@@ -56,7 +59,8 @@ import {
  * Every rule is checked again on the server.
  */
 
-export type QuotationAction = 'edit' | 'revise' | 'duplicate' | 'delete' | 'pdf';
+/** 'keepOpen' is no menu item: it lets Edit keep the version open as an option. */
+export type QuotationAction = 'edit' | 'revise' | 'keepOpen' | 'duplicate' | 'delete' | 'pdf';
 
 function newRequestKey(): string {
   const bytes = new Uint8Array(16);
@@ -96,8 +100,11 @@ const CONFIRM = {
 
 type Confirmable = keyof typeof CONFIRM;
 
-/** One confirmation dialog, driven by which action is waiting on it. */
-function useQuotationConfirm(estimateId: string) {
+/**
+ * One confirmation dialog, driven by which action is waiting on it. Editing a
+ * version still waiting for the customer asks what becomes of it.
+ */
+function useQuotationConfirm(estimateId: string, canKeepOpen = false) {
   const router = useRouter();
   const [open, setOpen] = useState<Confirmable | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,13 +117,13 @@ function useQuotationConfirm(estimateId: string) {
     setOpen(action);
   }
 
-  function run(action: Confirmable) {
+  function run(action: Confirmable, keepOpen = false) {
     setError(null);
     startTransition(async () => {
       // Each of these redirects when it succeeds, so only a failure returns.
       const result: ActionResult | undefined =
         action === 'revise' || action === 'reviseApproved'
-          ? await reviseQuotationAction(estimateId)
+          ? await reviseQuotationAction(estimateId, keepOpen)
           : action === 'duplicate'
             ? await duplicateQuotationAction(estimateId, requestKey)
             : await deleteDraftQuotationAction(estimateId);
@@ -137,15 +144,39 @@ function useQuotationConfirm(estimateId: string) {
   }
 
   const copy = open ? CONFIRM[open] : null;
+  const choose = open === 'revise' && canKeepOpen;
   const dialog = (
     <Dialog open={open !== null} onOpenChange={(next) => (next ? null : setOpen(null))}>
       <DialogContent>
         {copy ? (
           <>
             <DialogHeader>
-              <DialogTitle>{copy.title}</DialogTitle>
-              <DialogDescription>{copy.description}</DialogDescription>
+              <DialogTitle>{choose ? 'Make a new version?' : copy.title}</DialogTitle>
+              <DialogDescription>
+                {choose
+                  ? 'A new draft is made from this version. What should happen to this one?'
+                  : copy.description}
+              </DialogDescription>
             </DialogHeader>
+            {choose ? (
+              <ul className="flex flex-col gap-2 text-sm">
+                <li className="rounded-lg border border-border px-4 py-3">
+                  <span className="font-medium">Replace it</span>
+                  <span className="block text-muted-foreground">
+                    For a correction. Its customer link stops working; the customer approves the new
+                    version.
+                  </span>
+                </li>
+                <li className="rounded-lg border border-border px-4 py-3">
+                  <span className="font-medium">Keep it open as an option</span>
+                  <span className="block text-muted-foreground">
+                    For a choice (genuine or aftermarket parts, say). Both stay open: the customer
+                    approves either, on its own link, or you record their choice. Approving one
+                    closes the other.
+                  </span>
+                </li>
+              </ul>
+            ) : null}
             {error ? (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -155,10 +186,22 @@ function useQuotationConfirm(estimateId: string) {
               <Button variant="outline" onClick={() => setOpen(null)}>
                 Never mind
               </Button>
-              <Button variant={copy.tone} disabled={isPending} onClick={() => open && run(open)}>
-                {isPending ? <Loader2 className="animate-spin" /> : null}
-                {isPending ? 'Working…' : copy.confirm}
-              </Button>
+              {choose ? (
+                <>
+                  <Button variant="outline" disabled={isPending} onClick={() => run('revise')}>
+                    Replace it
+                  </Button>
+                  <Button disabled={isPending} onClick={() => run('revise', true)}>
+                    {isPending ? <Loader2 className="animate-spin" /> : null}
+                    {isPending ? 'Working…' : 'Keep it open'}
+                  </Button>
+                </>
+              ) : (
+                <Button variant={copy.tone} disabled={isPending} onClick={() => open && run(open)}>
+                  {isPending ? <Loader2 className="animate-spin" /> : null}
+                  {isPending ? 'Working…' : copy.confirm}
+                </Button>
+              )}
             </DialogFooter>
           </>
         ) : null}
@@ -174,14 +217,17 @@ export function QuotationHeaderActions({
   canRevise,
   canDuplicate,
   approved = false,
+  canKeepOpen = false,
 }: {
   estimateId: string;
   canRevise: boolean;
   canDuplicate: boolean;
   /** Revising an approved quotation: said plainly, since the customer must approve again. */
   approved?: boolean;
+  /** Still waiting for the customer: the new version may leave this one open. */
+  canKeepOpen?: boolean;
 }) {
-  const { ask, dialog } = useQuotationConfirm(estimateId);
+  const { ask, dialog } = useQuotationConfirm(estimateId, canKeepOpen);
   if (!canRevise && !canDuplicate) return null;
   return (
     <>
@@ -212,8 +258,8 @@ export function QuotationRowMenu({
   number: string;
   actions: QuotationAction[];
 }) {
-  const { ask, dialog } = useQuotationConfirm(estimateId);
   const has = (action: QuotationAction) => actions.includes(action);
+  const { ask, dialog } = useQuotationConfirm(estimateId, has('keepOpen'));
   const href = `/quotations/${estimateId}`;
 
   return (

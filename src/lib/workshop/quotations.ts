@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { localDateString } from '@/lib/format';
+import { isOpenVersion, versionsOf } from '@/lib/workshop/estimates';
 
 /*
  * Reading quotations as documents in their own right — by customer and
@@ -54,80 +55,26 @@ export async function getQuotation(user: AuthenticatedUser, estimateId: string) 
           },
         },
       },
-      _count: { select: { nextVersions: true } },
     },
   });
   if (!estimate) throw new NotFoundError('quotation');
   requirePermission(user, 'quotation.view', { branchId: estimate.branchId });
 
-  // Every version of this quotation, newest first. A quotation on a work
-  // order groups its chain by that job card; a standalone one walks back
-  // through previousVersionId.
-  const versions = estimate.jobCardId
-    ? await prisma.estimate.findMany({
-        where: {
-          organizationId: user.organizationId,
-          jobCardId: estimate.jobCardId,
-          kind: estimate.kind,
-        },
-        orderBy: { version: 'desc' },
-        select: { id: true, version: true, status: true, totalAmount: true, validUntil: true },
-      })
-    : await standaloneChain(user.organizationId, estimate.id);
+  // Every version of this quotation, newest first.
+  const versions = await versionsOf(prisma, user.organizationId, estimate);
 
   return {
     ...estimate,
     expired: quotationExpired(estimate),
-    isLatest: estimate._count.nextVersions === 0,
+    /** The version that counts (lib/workshop/estimates.ts). */
+    isLatest: estimate.isCurrent,
+    /** An older version left open as an option: the customer may still choose it. */
+    isOpenOption: !estimate.isCurrent && isOpenVersion(estimate),
     versions,
   };
 }
 
 export type Quotation = Awaited<ReturnType<typeof getQuotation>>;
-
-/** The whole revision chain of a standalone quotation, newest version first. */
-async function standaloneChain(organizationId: string, estimateId: string) {
-  const chain: {
-    id: string;
-    version: number;
-    status: string;
-    totalAmount: { toString(): string };
-    validUntil: Date | null;
-  }[] = [];
-  const select = {
-    id: true,
-    version: true,
-    status: true,
-    totalAmount: true,
-    validUntil: true,
-    previousVersionId: true,
-  } as const;
-
-  // Forward to the newest version, then back through the chain.
-  let head = await prisma.estimate.findFirstOrThrow({
-    where: { id: estimateId, organizationId },
-    select,
-  });
-  for (let step = 0; step < 100; step += 1) {
-    const next = await prisma.estimate.findFirst({
-      where: { organizationId, previousVersionId: head.id },
-      select,
-    });
-    if (!next) break;
-    head = next;
-  }
-  let cursor: typeof head | null = head;
-  for (let step = 0; step < 100 && cursor; step += 1) {
-    chain.push(cursor);
-    cursor = cursor.previousVersionId
-      ? await prisma.estimate.findFirst({
-          where: { id: cursor.previousVersionId, organizationId },
-          select,
-        })
-      : null;
-  }
-  return chain;
-}
 
 export type QuotationFilter = '' | 'draft' | 'awaiting' | 'approved';
 
@@ -154,7 +101,7 @@ export async function listQuotations(
   const where: Prisma.EstimateWhereInput = {
     organizationId: user.organizationId,
     kind: 'ORIGINAL',
-    nextVersions: { none: {} },
+    isCurrent: true,
     ...(status === 'draft'
       ? { status: 'DRAFT' }
       : status === 'awaiting'

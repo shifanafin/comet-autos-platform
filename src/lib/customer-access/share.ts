@@ -71,7 +71,6 @@ async function shareQuotation(
     const estimate = await tx.estimate.findFirst({
       where: { id: estimateId, organizationId: user.organizationId },
       include: {
-        _count: { select: { nextVersions: true } },
         customer: { select: { name: true, phone: true } },
         vehicle: { select: { plateNumber: true, make: true, model: true } },
       },
@@ -80,7 +79,8 @@ async function shareQuotation(
     requirePermission(user, 'quotation.edit', { branchId: estimate.branchId });
     if (estimate.status === 'DRAFT')
       throw new DomainError('Send the quotation first — a draft can’t be shared.');
-    if (estimate._count.nextVersions > 0)
+    // The current version, or an older one still open as an option.
+    if (!estimate.isCurrent && !(estimate.status === 'SENT' && !estimate.replacedAt))
       throw new DomainError('A newer version of this quotation exists. Share that one instead.');
 
     let expiresAt: Date;

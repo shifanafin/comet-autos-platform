@@ -202,12 +202,12 @@ export async function getDocumentCounts(organizationId: string) {
       where: {
         organizationId,
         status: 'SENT',
-        nextVersions: { none: {} },
+        isCurrent: true,
         OR: [{ validUntil: null }, { validUntil: { gte: today } }],
       },
     }),
     prisma.estimate.count({
-      where: { organizationId, status: 'DRAFT', kind: 'ORIGINAL', nextVersions: { none: {} } },
+      where: { organizationId, status: 'DRAFT', kind: 'ORIGINAL', isCurrent: true },
     }),
     prisma.invoice.count({
       where: { organizationId, status: { in: ['ISSUED', 'PARTIALLY_PAID'] } },

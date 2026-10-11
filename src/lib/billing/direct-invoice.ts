@@ -136,11 +136,10 @@ async function linesFromEstimate(
     where: { id: estimateId, organizationId },
     include: {
       items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
-      _count: { select: { nextVersions: true } },
     },
   });
   if (!estimate) throw new DomainError('That quotation was not found.', 'estimateId');
-  if (estimate._count.nextVersions > 0) {
+  if (!estimate.isCurrent) {
     throw new DomainError('A newer version of this quotation exists. Invoice that one instead.', 'estimateId');
   }
   if (estimate.customerId !== customerId) {

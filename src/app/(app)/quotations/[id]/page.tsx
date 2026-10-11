@@ -10,7 +10,7 @@ import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { formatCalendarDate, formatDateTime, formatMoney, localDateString } from '@/lib/format';
 import { getQuotation } from '@/lib/workshop/quotations';
-import { approvedChangeBlocker } from '@/lib/workshop/estimates';
+import { approvedChangeBlocker, isOpenVersion } from '@/lib/workshop/estimates';
 import { prisma } from '@/lib/prisma';
 import { resolveDefaultVatRate } from '@/lib/tax';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
@@ -60,7 +60,8 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
     throw error;
   }
 
-  const { customer, vehicle, jobCard, expired, isLatest, versions } = quotation;
+  const { customer, vehicle, jobCard, expired, isLatest, isOpenOption, versions } = quotation;
+  const current = versions.find((version) => version.isCurrent);
   const canEdit = hasPermission(user, 'quotation.edit', { branchId: quotation.branchId });
   const canInvoice = hasPermission(user, 'invoice.create', { branchId: quotation.branchId });
   const defaultVatRate = await resolveDefaultVatRate(user.organizationId);
@@ -142,6 +143,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
               canRevise={canRevise}
               canDuplicate={canDuplicate}
               approved={approved}
+              canKeepOpen={quotation.status === 'SENT' && !expired}
             />
             {canChangeParty ? (
               <ChangeQuotationPartyButton
@@ -181,11 +183,22 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
         </p>
       ) : null}
 
-      {!isLatest ? (
+      {isOpenOption ? (
+        <div className="rounded-lg border border-info/30 bg-info/5 px-4 py-3 text-sm">
+          Version {quotation.version} is still open as an option beside{' '}
+          <Link
+            href={`/quotations/${current?.id ?? quotation.id}`}
+            className="font-medium underline"
+          >
+            version {current?.version}
+          </Link>
+          . The customer can approve either one; approving one closes the other.
+        </div>
+      ) : !isLatest ? (
         <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning">
           You are viewing an older version.{' '}
           <Link
-            href={`/quotations/${versions[0]?.id ?? quotation.id}`}
+            href={`/quotations/${current?.id ?? quotation.id}`}
             className="font-medium underline"
           >
             See the current version
@@ -352,7 +365,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
             </Section>
           ) : null}
 
-          {quotation.status === 'SENT' && isLatest && canEdit ? (
+          {quotation.status === 'SENT' && (isLatest || isOpenOption) && canEdit ? (
             <>
               <Section
                 title={expired ? 'Quotation expired' : 'Waiting for the customer'}
@@ -367,7 +380,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                     <NewLinkButton estimateId={quotation.id} customerName={customer.name} />
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      Editing makes version {quotation.version + 1}; this one is kept.
+                      Editing makes the next version; this one is kept.
                     </p>
                   )}
                 </Panel>
@@ -401,15 +414,24 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                         <span className="flex flex-col gap-0.5">
                           <span className="font-medium">
                             Version {version.version}
-                            {version.id === versions[0]?.id ? (
+                            {version.isCurrent ? (
                               <span className="font-normal text-muted-foreground"> · current</span>
+                            ) : isOpenVersion(version) ? (
+                              <span className="font-normal text-muted-foreground">
+                                {' '}
+                                · open option
+                              </span>
                             ) : null}
                           </span>
                           <span className="text-xs text-muted-foreground tabular-nums">
                             {formatMoney(version.totalAmount)}
                           </span>
                         </span>
-                        <EstimateStatusPill status={version.status as never} />
+                        {version.status === 'SENT' && version.replacedAt ? (
+                          <span className="text-xs text-muted-foreground">Replaced</span>
+                        ) : (
+                          <EstimateStatusPill status={version.status as never} />
+                        )}
                       </Link>
                     </li>
                   ))}

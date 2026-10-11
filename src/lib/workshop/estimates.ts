@@ -80,6 +80,122 @@ async function revisionChain(
   return chain;
 }
 
+const versionSelect = {
+  id: true,
+  version: true,
+  status: true,
+  isCurrent: true,
+  replacedAt: true,
+  validUntil: true,
+  totalAmount: true,
+  previousVersionId: true,
+} as const;
+
+/**
+ * Every version of the quotation this one belongs to, itself included. A
+ * job card's quotation groups its versions by the job; a standalone one by
+ * its revision links (a version may branch from an older one once that one
+ * was chosen). Additional-work requests are never revised: each is alone.
+ */
+export async function versionsOf(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  estimate: { id: string; jobCardId: string | null; kind: string },
+) {
+  if (estimate.kind === 'ADDITIONAL') {
+    return tx.estimate.findMany({
+      where: { id: estimate.id, organizationId },
+      select: versionSelect,
+    });
+  }
+  if (estimate.jobCardId) {
+    return tx.estimate.findMany({
+      where: { organizationId, jobCardId: estimate.jobCardId, kind: 'ORIGINAL' },
+      orderBy: { version: 'desc' },
+      select: versionSelect,
+    });
+  }
+  // Back to the first version, then every version made from it.
+  const rootId = (await revisionChain(tx, organizationId, estimate.id)).at(-1)?.id ?? estimate.id;
+  const all = await tx.estimate.findMany({
+    where: { id: rootId, organizationId },
+    select: versionSelect,
+  });
+  let frontier = all.map((version) => version.id);
+  for (let step = 0; step < 100 && frontier.length; step += 1) {
+    const next = await tx.estimate.findMany({
+      where: { organizationId, previousVersionId: { in: frontier } },
+      select: versionSelect,
+    });
+    all.push(...next);
+    frontier = next.map((version) => version.id);
+  }
+  return all.sort((a, b) => b.version - a.version);
+}
+
+/** Sent, neither replaced nor past its validity: the customer may still approve it. */
+export function isOpenVersion(version: {
+  status: string;
+  replacedAt: Date | null;
+  validUntil: Date | null;
+}) {
+  return (
+    version.status === 'SENT' &&
+    !version.replacedAt &&
+    !(version.validUntil && version.validUntil.toISOString().slice(0, 10) < localDateString())
+  );
+}
+
+/**
+ * One version was approved: it is the one that counts. Every other sent
+ * version is closed as not chosen (its link withdrawn), and an unsent draft
+ * of another version — now pointless — is removed.
+ */
+async function chooseVersion(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  chosen: { id: string; branchId: string; version: number },
+  versions: Awaited<ReturnType<typeof versionsOf>>,
+  actorUserId: string | null,
+) {
+  const others = versions.filter((version) => version.id !== chosen.id);
+  const now = new Date();
+  for (const draft of others.filter((version) => version.status === 'DRAFT')) {
+    await tx.estimate.delete({ where: { id: draft.id } });
+    await writeAuditLog(tx, {
+      organizationId,
+      branchId: chosen.branchId,
+      actorUserId,
+      action: 'estimate.draft_deleted',
+      entityType: 'Estimate',
+      entityId: draft.id,
+      beforeData: { version: draft.version },
+      metadata: { reason: `Version ${chosen.version} was approved instead` },
+    });
+  }
+  const closed = others.filter((version) => version.status === 'SENT' && !version.replacedAt);
+  if (closed.length) {
+    await tx.estimate.updateMany({
+      where: { organizationId, id: { in: closed.map((version) => version.id) } },
+      data: { replacedAt: now },
+    });
+  }
+  await revokeAccessTokens(
+    tx,
+    organizationId,
+    'ESTIMATE',
+    others.filter((version) => version.status !== 'DRAFT').map((version) => version.id),
+  );
+  await tx.estimate.updateMany({
+    where: {
+      organizationId,
+      id: { in: others.filter((v) => v.status !== 'DRAFT').map((v) => v.id) },
+    },
+    data: { isCurrent: false },
+  });
+  await tx.estimate.update({ where: { id: chosen.id }, data: { isCurrent: true } });
+}
+
 function defaultValidUntil(): Date {
   const today = parseCalendarDate(localDateString())!;
   return new Date(today.getTime() + DEFAULT_QUOTE_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
@@ -385,8 +501,7 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
 
     const fresh = await tx.estimate.findUniqueOrThrow({ where: { id: estimate.id } });
     if (fresh.status !== 'DRAFT') throw new DomainError('This quotation has already been sent.');
-    if (estimate._count.nextVersions > 0)
-      throw new DomainError('A newer version of this quotation exists.');
+    if (!fresh.isCurrent) throw new DomainError('A newer version of this quotation exists.');
     if (estimate.items.length === 0)
       throw new DomainError('Add at least one labour or parts line before sending.');
     if (!fresh.validUntil)
@@ -430,22 +545,25 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
       data: { status: 'SENT', sentAt, sentByUserId: user.id },
     });
 
-    // Revoke links to other versions of the same quotation chain only; an
-    // additional-work request never invalidates the original quotation's
-    // link. A standalone quotation has no job card to group siblings by, so
-    // its chain is walked through previousVersionId instead.
-    const siblings = estimate.jobCardId
-      ? await tx.estimate.findMany({
-          where: {
-            jobCardId: estimate.jobCardId,
-            organizationId: user.organizationId,
-            id: { not: estimate.id },
-            kind: fresh.kind,
-            ...(fresh.kind === 'ADDITIONAL' ? { status: { in: ['DRAFT', 'SENT'] } } : {}),
-          },
-          select: { id: true },
-        })
-      : await revisionChain(tx, user.organizationId, estimate.id);
+    // Revoke links to other versions of the same quotation only — except
+    // versions left open as options, which the customer may still choose.
+    // An additional-work request never invalidates the original quotation's
+    // link.
+    const siblings =
+      fresh.kind === 'ADDITIONAL' && estimate.jobCardId
+        ? await tx.estimate.findMany({
+            where: {
+              jobCardId: estimate.jobCardId,
+              organizationId: user.organizationId,
+              id: { not: estimate.id },
+              kind: 'ADDITIONAL',
+              status: { in: ['DRAFT', 'SENT'] },
+            },
+            select: { id: true },
+          })
+        : (await versionsOf(tx, user.organizationId, fresh)).filter(
+            (version) => version.id !== estimate.id && !isOpenVersion(version),
+          );
     await revokeAccessTokens(
       tx,
       user.organizationId,
@@ -485,9 +603,9 @@ export async function reissueEstimateLink(user: AuthenticatedUser, estimateId: s
   return prisma.$transaction(async (tx) => {
     const estimate = await loadEstimate(tx, user.organizationId, estimateId);
     requirePermission(user, 'quotation.edit', { branchId: estimate.branchId });
-    if (estimate.status !== 'SENT' || estimate._count.nextVersions > 0 || !estimate.validUntil) {
+    if (estimate.status !== 'SENT' || estimate.replacedAt || !estimate.validUntil) {
       throw new DomainError(
-        'A new link can only be created for the estimate currently waiting approval.',
+        'A new link can only be created for a quotation still waiting for the customer.',
       );
     }
     if (estimate.validUntil.toISOString().slice(0, 10) < localDateString()) {
@@ -677,18 +795,29 @@ export async function approvedChangeBlocker(
  * record; the new version needs the customer's approval of its own, and
  * until then the job is back at the quotation step and can't be invoiced.
  */
-export async function reviseEstimate(user: AuthenticatedUser, estimateId: string) {
+export async function reviseEstimate(
+  user: AuthenticatedUser,
+  estimateId: string,
+  /** Leave this version open as an option the customer may still choose. */
+  keepOpen = false,
+) {
   return prisma.$transaction(async (tx) => {
     const source = await loadEstimate(tx, user.organizationId, estimateId);
     requirePermission(user, 'quotation.edit', { branchId: source.branchId });
     if (source.jobCardId) await lockJob(tx, user.organizationId, source.jobCardId);
 
-    const newer = await tx.estimate.findFirst({
-      where: { previousVersionId: source.id, organizationId: user.organizationId },
-    });
-    if (newer) {
-      if (newer.status === 'DRAFT') return newer;
-      throw new DomainError('A newer version of this quotation already exists.');
+    const versions = await versionsOf(tx, user.organizationId, source);
+    if (!source.isCurrent) {
+      const current = versions.find((version) => version.isCurrent);
+      if (current?.status === 'DRAFT') {
+        return tx.estimate.findUniqueOrThrow({ where: { id: current.id } });
+      }
+      throw new DomainError('A newer version of this quotation already exists. Change that one.');
+    }
+    if (keepOpen && !isOpenVersion(source)) {
+      throw new DomainError(
+        'Only a version still waiting for the customer can stay open as an option.',
+      );
     }
     if (source.kind === 'ADDITIONAL') {
       throw new DomainError(
@@ -737,7 +866,7 @@ export async function reviseEstimate(user: AuthenticatedUser, estimateId: string
       });
     }
 
-    const version = source.version + 1;
+    const version = Math.max(...versions.map((v) => v.version), source.version) + 1;
     const revision = await tx.estimate.create({
       data: {
         organizationId: user.organizationId,
@@ -779,7 +908,16 @@ export async function reviseEstimate(user: AuthenticatedUser, estimateId: string
         },
       });
     }
-    await revokeAccessTokens(tx, user.organizationId, 'ESTIMATE', [source.id]);
+    // Replaced (a correction): its link stops working. Kept open: the
+    // customer may still choose it, on the link they already have.
+    await tx.estimate.update({
+      where: { id: source.id },
+      data: {
+        isCurrent: false,
+        ...(source.status === 'SENT' && !keepOpen ? { replacedAt: new Date() } : {}),
+      },
+    });
+    if (!keepOpen) await revokeAccessTokens(tx, user.organizationId, 'ESTIMATE', [source.id]);
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
       branchId: source.branchId,
@@ -787,7 +925,12 @@ export async function reviseEstimate(user: AuthenticatedUser, estimateId: string
       action: 'estimate.revised',
       entityType: 'Estimate',
       entityId: revision.id,
-      afterData: { version, previousVersionId: source.id, previousStatus: source.status },
+      afterData: {
+        version,
+        previousVersionId: source.id,
+        previousStatus: source.status,
+        previousKeptOpen: keepOpen,
+      },
     });
     return revision;
   });
@@ -842,7 +985,9 @@ export async function applyEstimateDecision(
         : 'This quotation is not waiting for approval.',
     );
   }
-  if (estimate._count.nextVersions > 0) {
+  // A version left open as an option may be decided; one replaced (or not
+  // chosen) may not.
+  if (!estimate.isCurrent && estimate.replacedAt) {
     throw new DomainError('This quotation has been replaced by a newer version.');
   }
   if (estimate.validUntil && estimate.validUntil.toISOString().slice(0, 10) < localDateString()) {
@@ -892,20 +1037,54 @@ export async function applyEstimateDecision(
         );
       }
     } else {
-      if (normalizeStatus(job.status) !== 'WAITING_APPROVAL') {
-        throw new DomainError(
-          'The job card is not waiting for approval (it may be on hold). Ask the workshop to resume it.',
-        );
+      const jobStatus = normalizeStatus(job.status);
+      const actor = online ? { customerId } : { userId: params.recordedByUserId! };
+      const metadata = { estimateId: estimate.id, approvalId: approval.id, method: params.method };
+      // Another version is still open, or a newer one is being drafted: a
+      // rejection of this one leaves the job where it is.
+      const otherOpen = (await versionsOf(tx, params.organizationId, estimate)).some(
+        (version) => version.id !== estimate.id && isOpenVersion(version),
+      );
+      const holdJob =
+        params.decision === 'REJECTED' &&
+        (otherOpen || (!estimate.isCurrent && jobStatus === 'ESTIMATE'));
+      if (!holdJob) {
+        // An older option approved while the next version is being drafted:
+        // the job goes on from the quotation step through waiting approval.
+        if (jobStatus === 'ESTIMATE' && !estimate.isCurrent) {
+          await applyJobStatusChange(tx, {
+            organizationId: params.organizationId,
+            jobCardId: estimate.jobCardId,
+            toStatus: 'WAITING_APPROVAL',
+            actor,
+            source: 'workflow',
+            metadata,
+          });
+        } else if (jobStatus !== 'WAITING_APPROVAL') {
+          throw new DomainError(
+            'The job card is not waiting for approval (it may be on hold). Ask the workshop to resume it.',
+          );
+        }
+        await applyJobStatusChange(tx, {
+          organizationId: params.organizationId,
+          jobCardId: estimate.jobCardId,
+          toStatus: params.decision,
+          actor,
+          source: 'workflow',
+          metadata,
+        });
       }
-      await applyJobStatusChange(tx, {
-        organizationId: params.organizationId,
-        jobCardId: estimate.jobCardId,
-        toStatus: params.decision,
-        actor: online ? { customerId } : { userId: params.recordedByUserId! },
-        source: 'workflow',
-        metadata: { estimateId: estimate.id, approvalId: approval.id, method: params.method },
-      });
     }
+  }
+  // The version approved is the one that counts; the others close.
+  if (params.decision === 'APPROVED' && estimate.kind === 'ORIGINAL') {
+    await chooseVersion(
+      tx,
+      params.organizationId,
+      estimate,
+      await versionsOf(tx, params.organizationId, estimate),
+      params.recordedByUserId,
+    );
   }
 
   await writeAuditLog(tx, {

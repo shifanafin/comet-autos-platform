@@ -100,9 +100,13 @@ export async function reissueQuotationLinkAction(
   });
 }
 
-export async function reviseQuotationAction(estimateId: string): Promise<ActionResult> {
+export async function reviseQuotationAction(
+  estimateId: string,
+  /** Keep this version open as an option instead of replacing it. */
+  keepOpen = false,
+): Promise<ActionResult> {
   const user = await requireUser();
-  const result = await runAction(() => reviseEstimate(user, estimateId));
+  const result = await runAction(() => reviseEstimate(user, estimateId, keepOpen));
   if (!result.ok) return toClientResult(result);
   await refreshQuotation(estimateId);
   redirect(`/quotations/${result.data!.id}`);
