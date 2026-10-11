@@ -20,6 +20,7 @@ import {
   reviseEstimate,
   saveEstimateDraft,
   sendEstimate,
+  switchApprovedVersion,
 } from '@/lib/workshop/estimates';
 import { decideQuoteAsCustomer, getQuoteAccess } from '@/lib/customer-access/quote';
 import { getQuotation } from '@/lib/workshop/quotations';
@@ -185,5 +186,41 @@ describe('opening a replaced version again', () => {
     assert.ok((await row(v2.id)).replacedAt, 'version 2 closed as not chosen');
     assert.equal(await jobStatus(jobCardId), 'APPROVED');
     await expectDomainError(reopenVersion(org.owner, v2.id), /already approved/);
+  });
+});
+
+describe('changing the approved version', () => {
+  test('the customer may switch to another version, and back, before anything is built on it', async () => {
+    const { jobCardId, v1 } = await quotedJob('1000');
+    await sendEstimate(org.owner, v1);
+    const v2 = await reviseEstimate(org.owner, v1, true);
+    await fill(v2.id, '1200');
+    await sendEstimate(org.owner, v2.id);
+    await recordCustomerDecision(org.owner, v1, { decision: 'APPROVED', method: 'PHONE' });
+
+    await switchApprovedVersion(org.owner, v2.id, {
+      method: 'PHONE',
+      notes: 'Genuine parts after all',
+    });
+    assert.equal((await row(v1)).status, 'REJECTED', 'the earlier choice is declined');
+    assert.deepEqual(await row(v2.id), { status: 'APPROVED', isCurrent: true, replacedAt: null });
+    assert.equal(await jobStatus(jobCardId), 'APPROVED', 'the job stays approved');
+
+    await switchApprovedVersion(org.owner, v1, { method: 'IN_PERSON' });
+    assert.equal((await row(v1)).status, 'APPROVED');
+    assert.equal((await row(v2.id)).status, 'REJECTED');
+    const approved = await prisma.estimate.count({
+      where: { jobCardId, status: 'APPROVED', isCurrent: true },
+    });
+    assert.equal(approved, 1, 'only one version counts as approved');
+  });
+
+  test('switching needs an approved version to switch from', async () => {
+    const { v1 } = await quotedJob('600');
+    await sendEstimate(org.owner, v1);
+    await expectDomainError(
+      switchApprovedVersion(org.owner, v1, { method: 'PHONE' }),
+      /No version is approved yet/,
+    );
   });
 });

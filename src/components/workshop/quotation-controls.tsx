@@ -22,6 +22,7 @@ import {
   recordQuotationDecisionAction,
   reissueQuotationLinkAction,
   reopenQuotationVersionAction,
+  switchQuotationVersionAction,
   reviseQuotationAction,
 } from '@/app/(app)/quotations/actions';
 import { createEstimateAction } from '@/app/(app)/job-cards/[id]/actions';
@@ -95,6 +96,59 @@ export function ReviseQuotationButton({
       />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
+  );
+}
+
+/** The customer changed their mind: approve this version instead of the one approved before. */
+export function SwitchVersionForm({
+  estimateId,
+  version,
+  approvedVersion,
+}: {
+  estimateId: string;
+  version: number;
+  approvedVersion: number;
+}) {
+  const router = useRouter();
+  const [state, onSubmit, isPending] = useFormAction<ActionResult>(
+    async (prev, formData) => {
+      const result = await switchQuotationVersionAction(estimateId, prev, formData);
+      if (result.ok) {
+        toast.success(`Version ${version} approved instead`);
+        router.refresh();
+      }
+      return result;
+    },
+    { ok: false },
+  );
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-5">
+      <Field
+        label="How did the customer tell you?"
+        htmlFor="switch-method"
+        required
+        error={state.fieldErrors?.method}
+      >
+        <NativeSelect id="switch-method" name="method" defaultValue="" required>
+          <option value="" disabled>
+            Choose…
+          </option>
+          <option value="IN_PERSON">In person</option>
+          <option value="PHONE">Phone call</option>
+          <option value="EMAIL">Email</option>
+          <option value="SMS">SMS / WhatsApp message</option>
+        </NativeSelect>
+      </Field>
+      <TextareaField
+        label="Notes"
+        name="notes"
+        placeholder="e.g. Prefers the genuine parts after all"
+      />
+      <FormError message={state.error} />
+      <SubmitButton pending={isPending} size="lg" className="self-start" pendingLabel="Approving…">
+        Approve version {version} instead of {approvedVersion}
+      </SubmitButton>
+    </form>
   );
 }
 

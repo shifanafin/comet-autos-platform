@@ -22,6 +22,7 @@ import {
   NewLinkButton,
   RecordDecisionForm,
   ReopenVersionButton,
+  SwitchVersionForm,
 } from '@/components/workshop/quotation-controls';
 import {
   ChangeQuotationPartyButton,
@@ -75,6 +76,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
     !expired &&
     (current?.status === 'SENT' || current?.status === 'DRAFT');
   const canInvoice = hasPermission(user, 'invoice.create', { branchId: quotation.branchId });
+  const canApprove = hasPermission(user, 'quotation.approve', { branchId: quotation.branchId });
   const defaultVatRate = await resolveDefaultVatRate(user.organizationId);
   const decision = quotation.approvals[0];
   const isDraft = quotation.status === 'DRAFT';
@@ -101,6 +103,34 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
     isLatest &&
     quotation.kind !== 'ADDITIONAL' &&
     (quotation.status === 'SENT' || quotation.status === 'REJECTED' || (approved && !changeBlocker));
+  // Another version is approved and nothing is built on it yet: the
+  // customer may still change their mind to this one.
+  const currentApproved =
+    current?.status === 'APPROVED' || current?.status === 'PARTIALLY_APPROVED';
+  const switchBlocker =
+    canApprove &&
+    !isLatest &&
+    currentApproved &&
+    (quotation.status === 'SENT' || quotation.status === 'REJECTED') &&
+    quotation.kind === 'ORIGINAL' &&
+    !expired &&
+    current
+      ? await approvedChangeBlocker(prisma, user.organizationId, {
+          id: current.id,
+          kind: quotation.kind,
+          jobCardId: quotation.jobCardId,
+        })
+      : undefined;
+  const canSwitch = switchBlocker === null;
+  // On the approved version: the other versions it may still be changed to.
+  const switchable =
+    approved && isLatest && !changeBlocker
+      ? versions.filter(
+          (version) =>
+            version.id !== quotation.id &&
+            (version.status === 'SENT' || version.status === 'REJECTED'),
+        )
+      : [];
   const canDuplicate = hasPermission(user, 'quotation.edit', {
     branchId: user.primaryBranchId ?? quotation.branchId,
   });
@@ -407,6 +437,36 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                 </Section>
               ) : null}
             </>
+          ) : null}
+
+          {canSwitch && current ? (
+            <Section
+              title="Approve this version instead"
+              description={`Version ${current.version} is approved, but nothing is invoiced or done on it yet. If the customer has changed their mind, approve this one instead — only one version stays approved.`}
+            >
+              <Panel>
+                <SwitchVersionForm
+                  estimateId={quotation.id}
+                  version={quotation.version}
+                  approvedVersion={current.version}
+                />
+              </Panel>
+            </Section>
+          ) : null}
+
+          {switchable.length ? (
+            <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+              Customer changed their mind? Open{' '}
+              {switchable.map((version, index) => (
+                <span key={version.id}>
+                  {index > 0 ? ' or ' : ''}
+                  <Link href={`/quotations/${version.id}`} className="font-medium text-primary hover:underline">
+                    version {version.version}
+                  </Link>
+                </span>
+              ))}{' '}
+              and approve it instead — until this one is invoiced or work starts.
+            </p>
           ) : null}
 
           {canReopen ? (

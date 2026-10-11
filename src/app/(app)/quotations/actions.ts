@@ -15,6 +15,7 @@ import {
   recordCustomerDecision,
   reissueEstimateLink,
   reopenVersion,
+  switchApprovedVersion,
   reviseEstimate,
   saveEstimateDraft,
   sendEstimate,
@@ -126,7 +127,20 @@ export async function recordQuotationDecisionAction(
   return toClientResult(result);
 }
 
-/** Deletes an unsent first draft, then goes back to the quotation list. */
+/** The customer changed their mind: this version is approved instead of the one before. */
+export async function switchQuotationVersionAction(
+  estimateId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    switchApprovedVersion(user, estimateId, formDataToObject(formData)),
+  );
+  if (result.ok) await refreshQuotation(estimateId);
+  return toClientResult(result);
+}
+
 /** Opens a replaced version again as an option. */
 export async function reopenQuotationVersionAction(estimateId: string): Promise<ActionResult> {
   const user = await requireUser();
@@ -135,6 +149,7 @@ export async function reopenQuotationVersionAction(estimateId: string): Promise<
   return toClientResult(result);
 }
 
+/** Deletes an unsent first draft, then goes back to the quotation list. */
 export async function deleteDraftQuotationAction(estimateId: string): Promise<ActionResult> {
   const user = await requireUser();
   const result = await runAction(() => deleteDraftQuotation(user, estimateId));

@@ -1185,6 +1185,128 @@ export async function recordCustomerDecision(
   });
 }
 
+const switchSchema = z.object({
+  method: z.enum(['IN_PERSON', 'PHONE', 'EMAIL', 'SMS'], {
+    error: 'Choose how the customer told you.',
+  }),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+/**
+ * The customer changes their mind after approving: another version of the
+ * same quotation is approved instead — only while nothing is invoiced and no
+ * work is recorded against the approval (approvedChangeBlocker). Only one
+ * version is ever approved: the earlier choice is recorded as declined in
+ * favour of this one (its approval stays on record), this one becomes the
+ * version that counts, and the job stays approved.
+ */
+export async function switchApprovedVersion(
+  user: AuthenticatedUser,
+  estimateId: string,
+  rawInput: unknown,
+) {
+  const input = parseInput(switchSchema, rawInput);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimateId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
+    const target = await loadEstimate(tx, user.organizationId, estimateId);
+    requirePermission(user, 'quotation.approve', { branchId: target.branchId });
+    // Sent and not decided, or declined (a switch away from it, or the
+    // customer's earlier no): either may be the customer's choice now.
+    if (target.kind !== 'ORIGINAL' || (target.status !== 'SENT' && target.status !== 'REJECTED')) {
+      throw new DomainError('Only a version that was sent can be approved instead.');
+    }
+    if (target.validUntil && target.validUntil.toISOString().slice(0, 10) < localDateString()) {
+      throw new DomainError('This version has expired. Make a new version with its lines instead.');
+    }
+    if (target.jobCardId) await lockJob(tx, user.organizationId, target.jobCardId);
+    const chosen = (await versionsOf(tx, user.organizationId, target)).find(
+      (version) =>
+        version.isCurrent && (version.status === 'APPROVED' || version.status === 'PARTIALLY_APPROVED'),
+    );
+    if (!chosen) {
+      throw new DomainError('No version is approved yet — record the decision on this one instead.');
+    }
+    const blocker = await approvedChangeBlocker(tx, user.organizationId, {
+      id: chosen.id,
+      kind: target.kind,
+      jobCardId: target.jobCardId,
+    });
+    if (blocker) throw new DomainError(blocker);
+
+    const previous = await loadEstimate(tx, user.organizationId, chosen.id);
+    const now = new Date();
+    const decide = async (
+      estimate: typeof target,
+      status: 'APPROVED' | 'REJECTED',
+      notes: string | null,
+    ) => {
+      const approval = await tx.approval.create({
+        data: {
+          organizationId: user.organizationId,
+          estimateId: estimate.id,
+          status,
+          approvalMethod: input.method,
+          approvedAt: status === 'APPROVED' ? now : null,
+          decidedAt: now,
+          customerId: estimate.customerId,
+          recordedByUserId: user.id,
+          notes,
+        },
+      });
+      if (estimate.items.length > 0) {
+        await tx.approvalItem.createMany({
+          data: estimate.items.map((item) => ({
+            organizationId: user.organizationId,
+            approvalId: approval.id,
+            estimateItemId: item.id,
+            decision: status,
+          })),
+        });
+      }
+      await tx.estimate.update({ where: { id: estimate.id }, data: { status } });
+      return approval;
+    };
+    const why = input.notes || null;
+    await decide(
+      previous,
+      'REJECTED',
+      `Changed to version ${target.version}${why ? ` — ${why}` : ''}`,
+    );
+    const approval = await decide(target, 'APPROVED', why);
+    await chooseVersion(
+      tx,
+      user.organizationId,
+      target,
+      await versionsOf(tx, user.organizationId, target),
+      user.id,
+    );
+
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: target.branchId,
+      actorUserId: user.id,
+      action: 'approval.switched',
+      entityType: 'Approval',
+      entityId: approval.id,
+      beforeData: {
+        estimateId: previous.id,
+        version: previous.version,
+        totalAmount: previous.totalAmount.toString(),
+      },
+      afterData: {
+        estimateId: target.id,
+        estimateNumber: target.estimateNumber,
+        version: target.version,
+        totalAmount: target.totalAmount.toString(),
+        method: input.method,
+        notes: why,
+      },
+      metadata: { decidedBy: 'customer', recordedBy: 'staff', customerId: target.customerId },
+    });
+    return approval;
+  });
+}
+
 /** One additional-work request, for its own page. Scoped to the organization and the job. */
 export async function getAdditionalEstimate(
   user: AuthenticatedUser,
@@ -1212,12 +1334,6 @@ export async function getAdditionalEstimate(
   return estimate;
 }
 
-/**
- * Deletes a quotation that never left the workshop: a first draft, not sent,
- * not revised, not raised from a job card. Nothing outside it points at it,
- * so it is removed outright (its lines with it); the audit log keeps what it
- * was. Anything sent or on a job card is part of the record and stays.
- */
 /**
  * Opens a replaced version again, as an option the customer may choose —
  * while no version is approved yet and the current one is still a draft or
@@ -1257,6 +1373,12 @@ export async function reopenVersion(user: AuthenticatedUser, estimateId: string)
   });
 }
 
+/**
+ * Deletes a quotation that never left the workshop: a first draft, not sent,
+ * not revised, not raised from a job card. Nothing outside it points at it,
+ * so it is removed outright (its lines with it); the audit log keeps what it
+ * was. Anything sent or on a job card is part of the record and stays.
+ */
 export async function deleteDraftQuotation(user: AuthenticatedUser, estimateId: string) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT id FROM estimates WHERE id = ${estimateId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
