@@ -4,17 +4,23 @@
  *  - every invoice, payment, reversal, correction, void and expense books
  *    itself, balanced, to the accounts the rules name — or the account
  *    chosen on the line or the payment;
- *  - a correction is a reversal plus a new entry; nothing booked is ever
- *    changed or deleted (the database refuses);
+ *  - while the period is open a correction changes the entry where it
+ *    stands and a void removes it; nothing else may change or delete an
+ *    entry (the database refuses);
+ *  - entries are numbered without gaps in date order, whatever is added,
+ *    back-dated or deleted;
  *  - the trial balance and balance sheet balance, and the profit and loss
  *    agrees with them;
  *  - closing the books refuses anything dated in the closed period;
- *  - entries made by hand must balance, and are corrected by reversal;
+ *  - entries made by hand must balance; while open they can be edited and
+ *    deleted, any entry's narration can be corrected, and a reversal still
+ *    works;
  *  - booking existing records is safe to run twice;
  *  - a VAT return, once filed, moves the period's VAT to what is due to the
  *    FTA, closes the period, and its refund clears it against the bank.
  *
- * Needs the 20260928090000_general_ledger migration applied.
+ * Needs the 20260928090000_general_ledger and
+ * 20261103090000_journal_corrections_in_place migrations applied.
  *
  *   npm run test:integration
  */
@@ -32,7 +38,10 @@ import {
   bookExistingRecords,
   countUnbooked,
   createManualEntry,
+  deleteManualEntry,
   reverseManualEntry,
+  updateEntryNarration,
+  updateManualEntry,
 } from '@/lib/accounting/entries';
 import { closeBooks, reopenAllBooks } from '@/lib/accounting/periods';
 import { getBalanceSheet, getLedgerProfitAndLoss, getTrialBalance } from '@/lib/accounting/reports';
@@ -83,6 +92,32 @@ async function bookedFor(sourceId: string) {
     net.set(line.chartOfAccountId, (net.get(line.chartOfAccountId) ?? 0) + value);
   }
   return net;
+}
+
+/** One entry's lines, as { account: net debit } in fils. */
+async function bookedForEntry(journalEntryId: string) {
+  const lines = await prisma.journalEntryLine.findMany({
+    where: { journalEntryId },
+    select: { chartOfAccountId: true, debitAmount: true, creditAmount: true },
+  });
+  const net = new Map<string, number>();
+  for (const line of lines) {
+    const value = toFils(line.debitAmount.toString()) - toFils(line.creditAmount.toString());
+    net.set(line.chartOfAccountId, (net.get(line.chartOfAccountId) ?? 0) + value);
+  }
+  return net;
+}
+
+/** JV-000001, 2, 3… in date order, then in the order booked — no gaps. */
+async function assertNumberedInDateOrder() {
+  const entries = await prisma.journalEntry.findMany({
+    where: { organizationId: a.organizationId },
+    orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { entryNumber: true },
+  });
+  entries.forEach((entry, index) =>
+    assert.equal(entry.entryNumber, `JV-${String(index + 1).padStart(6, '0')}`),
+  );
 }
 
 /** Every entry balances: the database guarantees it; this checks it too. */
@@ -219,7 +254,7 @@ describe('invoices and payments book themselves', () => {
     assert.equal(back.get(roles.ACCOUNTS_RECEIVABLE), toFils('105.00'));
   });
 
-  test('a correction reverses the old entry and books the new; a void reverses it', async () => {
+  test('a correction changes the entry where it stands; a void removes it', async () => {
     const { id: customerId } = await customer('13');
     const { invoiceId } = await createDirectInvoice(a.owner, {
       customerId,
@@ -234,8 +269,17 @@ describe('invoices and payments book themselves', () => {
       where: { organizationId: a.organizationId, sourceId: invoiceId },
       orderBy: { createdAt: 'asc' },
     });
-    assert.equal(entries.length, 3, 'original, its reversal, the corrected one');
-    assert.equal(entries[1].reversalOfJournalEntryId, entries[0].id);
+    assert.equal(entries.length, 1, 'one entry, corrected in place — no reversal');
+    const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    assert.equal(invoice.journalEntryId, entries[0].id);
+    const corrected = await prisma.auditLog.findFirst({
+      where: {
+        organizationId: a.organizationId,
+        action: 'journal.corrected',
+        entityId: entries[0].id,
+      },
+    });
+    assert.ok(corrected, 'the audit log keeps what the entry said before');
     const net = await bookedFor(invoiceId);
     assert.equal(
       net.get(roles.ACCOUNTS_RECEIVABLE),
@@ -243,14 +287,7 @@ describe('invoices and payments book themselves', () => {
       'only the corrected figure stands',
     );
 
-    await voidInvoice(a.owner, invoiceId, { reason: 'Customer cancelled' });
-    const afterVoid = await bookedFor(invoiceId);
-    assert.ok(
-      [...afterVoid.values()].every((value) => value === 0),
-      'a void invoice leaves nothing',
-    );
-
-    // Booked entries are permanent.
+    // Outside the app's correction path, entries are still permanent.
     await assert.rejects(
       prisma.journalEntryLine.updateMany({
         where: { journalEntryId: entries[0].id },
@@ -258,6 +295,22 @@ describe('invoices and payments book themselves', () => {
       }),
       /permanent/,
     );
+    await assert.rejects(prisma.journalEntry.delete({ where: { id: entries[0].id } }), /permanent/);
+
+    await voidInvoice(a.owner, invoiceId, { reason: 'Customer cancelled' });
+    const afterVoid = await bookedFor(invoiceId);
+    assert.ok(
+      [...afterVoid.values()].every((value) => value === 0),
+      'a void invoice leaves nothing',
+    );
+    assert.equal(
+      await prisma.journalEntry.count({
+        where: { organizationId: a.organizationId, sourceId: invoiceId },
+      }),
+      0,
+      'its entry is removed, not reversed',
+    );
+    await assertNumberedInDateOrder();
   });
 });
 
@@ -328,6 +381,143 @@ describe('entries made by hand', () => {
       reverseManualEntry(a.owner, entry.id, { date: today(), reason: 'Again' }),
       /Already reversed/,
     );
+    // A reversed entry can't be edited; deleting it takes its reversal too.
+    await expectDomainError(
+      updateManualEntry(a.owner, entry.id, {
+        date: today(),
+        description: "Owner's capital",
+        lines: [
+          { accountId: roles.BANK, debit: '50' },
+          { accountId: roles.OPENING_BALANCE, credit: '50' },
+        ],
+      }),
+      /reversed by/,
+    );
+    const removed = await deleteManualEntry(a.owner, entry.id, { reason: 'Never happened' });
+    assert.equal(removed.deleted, 2);
+    assert.equal(
+      await prisma.journalEntry.count({ where: { id: { in: [entry.id, reversal.id] } } }),
+      0,
+    );
+    await assertNumberedInDateOrder();
+  });
+
+  test('are edited where they stand, deleted without a gap, and back-dated in order', async () => {
+    const entry = await createManualEntry(a.owner, {
+      date: today(),
+      description: `Bank charges ${RUN}`,
+      lines: [
+        { accountId: roles.BANK_CHARGES, debit: '25' },
+        { accountId: roles.BANK, credit: '25' },
+      ],
+    });
+    const edited = await updateManualEntry(a.owner, entry.id, {
+      date: today(),
+      description: `Bank charges for the month ${RUN}`,
+      reason: 'Charged 30, not 25',
+      lines: [
+        { accountId: roles.BANK_CHARGES, debit: '30' },
+        { accountId: roles.BANK, credit: '30' },
+      ],
+    });
+    assert.equal(edited.id, entry.id, 'the same entry');
+    assert.equal(edited.entryNumber, entry.entryNumber, 'the same number');
+    assert.equal((await bookedForEntry(entry.id)).get(roles.BANK_CHARGES), toFils('30.00'));
+
+    // Narration on an entry booked from a record: the words change, no figure does.
+    const { id: customerId } = await customer('31');
+    const { invoiceId } = await createDirectInvoice(a.owner, {
+      customerId,
+      items: [{ itemType: 'LABOUR', description: 'Check-up', quantity: '1', unitPrice: '100' }],
+    });
+    const invoiceEntry = await prisma.journalEntry.findFirstOrThrow({
+      where: { organizationId: a.organizationId, sourceId: invoiceId },
+      include: { lines: true },
+    });
+    await expectDomainError(
+      updateManualEntry(a.owner, invoiceEntry.id, {
+        date: today(),
+        description: 'Changed',
+        lines: [
+          { accountId: roles.BANK, debit: '1' },
+          { accountId: roles.OPENING_BALANCE, credit: '1' },
+        ],
+      }),
+      /booked from a record/,
+    );
+    const firstLine = invoiceEntry.lines[0].id;
+    await updateEntryNarration(a.owner, invoiceEntry.id, {
+      description: `Check-up invoice ${RUN}`,
+      notes: [{ lineId: firstLine, memo: 'Annual check-up' }],
+    });
+    const renamed = await prisma.journalEntry.findUniqueOrThrow({
+      where: { id: invoiceEntry.id },
+      include: { lines: true },
+    });
+    assert.equal(renamed.description, `Check-up invoice ${RUN}`);
+    assert.equal(
+      renamed.lines.find((line) => line.id === firstLine)?.description,
+      'Annual check-up',
+    );
+
+    // Back-dated: it takes its place in date order; every later entry moves down one.
+    const earlier = await createManualEntry(a.owner, {
+      date: daysAgo(400),
+      description: `Owner's capital, last year ${RUN}`,
+      lines: [
+        { accountId: roles.BANK, debit: '100' },
+        { accountId: roles.OPENING_BALANCE, credit: '100' },
+      ],
+    });
+    assert.equal(earlier.entryNumber, 'JV-000001', 'the oldest entry is the first');
+    await assertNumberedInDateOrder();
+
+    // Deleted: the entries after it move up, and the counter follows.
+    await deleteManualEntry(a.owner, earlier.id, { reason: 'Entered in the wrong workshop' });
+    await assertNumberedInDateOrder();
+    const count = await prisma.journalEntry.count({ where: { organizationId: a.organizationId } });
+    const counter = await prisma.documentNumberSequence.findFirstOrThrow({
+      where: { organizationId: a.organizationId, documentType: 'JOURNAL_ENTRY', branchId: null },
+    });
+    assert.equal(counter.nextNumber, count + 1, 'the next number follows the last: no gap');
+    const deleted = await prisma.auditLog.findFirst({
+      where: { organizationId: a.organizationId, action: 'journal.deleted', entityId: earlier.id },
+    });
+    assert.ok(deleted, 'the audit log keeps what was deleted');
+  });
+
+  test('in a closed period: only the narration changes, never the figures', async () => {
+    const entry = await createManualEntry(a.owner, {
+      date: daysAgo(3),
+      description: `Cash float ${RUN}`,
+      lines: [
+        { accountId: roles.CASH, debit: '200' },
+        { accountId: roles.BANK, credit: '200' },
+      ],
+    });
+    await closeBooks(a.owner, { through: daysAgo(2) });
+    try {
+      await expectDomainError(
+        updateManualEntry(a.owner, entry.id, {
+          date: daysAgo(3),
+          description: 'Changed',
+          lines: [
+            { accountId: roles.CASH, debit: '150' },
+            { accountId: roles.BANK, credit: '150' },
+          ],
+        }),
+        /period is closed/,
+      );
+      await expectDomainError(
+        deleteManualEntry(a.owner, entry.id, { reason: 'Try' }),
+        /period is closed/,
+      );
+      await updateEntryNarration(a.owner, entry.id, {
+        description: `Cash float drawn from the bank ${RUN}`,
+      });
+    } finally {
+      await reopenAllBooks(a.owner, { reason: 'Test finished' });
+    }
   });
 });
 
@@ -406,5 +596,6 @@ describe('VAT returns', () => {
 
     await reopenAllBooks(a.owner, { reason: 'Test finished' });
     await assertAllBalanced();
+    await assertNumberedInDateOrder();
   });
 });

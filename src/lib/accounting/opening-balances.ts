@@ -13,7 +13,15 @@ import { localDateString, parseCalendarDate } from '@/lib/format';
 import { allocateDocumentNumber } from '@/lib/numbering';
 import { emptyToNull } from '@/lib/normalize';
 import { ensureChart } from '@/lib/accounting/chart';
-import { bookEntry, reverseEntry, syncPosting } from '@/lib/accounting/journal';
+import {
+  amendEntry,
+  bookEntry,
+  deleteEntry,
+  renumberJournal,
+  reverseEntry,
+  syncPosting,
+  whyNotCorrectable,
+} from '@/lib/accounting/journal';
 import { voidInvoice } from '@/lib/billing/invoice-changes';
 
 /*
@@ -103,7 +111,15 @@ async function standingOpening(organizationId: string, client: typeof prisma | T
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     include: {
-      lines: { select: { chartOfAccountId: true, debitAmount: true, creditAmount: true } },
+      lines: {
+        select: {
+          chartOfAccountId: true,
+          debitAmount: true,
+          creditAmount: true,
+          customerId: true,
+          supplierId: true,
+        },
+      },
     },
   });
 }
@@ -342,7 +358,24 @@ export async function saveOpeningBalances(user: AuthenticatedUser, rawInput: unk
 
     let entryId = standing?.id ?? null;
     let entryNumber = standing?.entryNumber ?? null;
-    if (!same) {
+    // While the period is open the opening entry is corrected where it stands.
+    const correctable = standing && !same && !(await whyNotCorrectable(tx, standing, date));
+    if (standing && correctable && lines.length) {
+      await amendEntry(tx, standing, {
+        date,
+        description: `Opening balances as at ${input.date}`,
+        lines,
+        actorUserId: user.id,
+        reason: 'opening balances re-entered',
+      });
+      await renumberJournal(tx, user.organizationId);
+      entryNumber = (await tx.journalEntry.findUniqueOrThrow({ where: { id: standing.id } }))
+        .entryNumber;
+    } else if (standing && correctable) {
+      await deleteEntry(tx, standing, user.id, 'opening balances cleared');
+      entryId = null;
+      entryNumber = null;
+    } else if (!same) {
       if (standing) {
         await reverseEntry(
           tx,

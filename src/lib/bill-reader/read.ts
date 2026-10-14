@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/auth/authorize';
 import { DomainError } from '@/lib/errors';
 import { MAX_ATTACHMENT_BYTES } from '@/lib/documents/attachments';
 import { parseBill, type BillWarning } from '@/lib/bill-reader/parse';
+import { sameVendor } from '@/lib/finance/vendor-names';
 
 /*
  * "Scan bill": from the text of a supplier's bill to a draft the form opens
@@ -127,15 +128,18 @@ async function findDuplicate(
   }
   const vendor = supplier?.name ?? supplierName;
   if (!vendor) return null;
-  const expense = await prisma.expense.findFirst({
-    where: {
-      organizationId,
-      status: 'RECORDED',
-      billNumber: { equals: billNumber, mode: 'insensitive' },
-      vendorName: { equals: vendor, mode: 'insensitive' },
-    },
-    select: { expenseNumber: true, description: true },
-  });
+  // The vendor may have been spelt another way the first time.
+  const expense = (
+    await prisma.expense.findMany({
+      where: {
+        organizationId,
+        status: 'RECORDED',
+        billNumber: { equals: billNumber, mode: 'insensitive' },
+      },
+      select: { expenseNumber: true, description: true, vendorName: true },
+      take: 20,
+    })
+  ).find((other) => other.vendorName && sameVendor(vendor, other.vendorName));
   return expense
     ? {
         label: `Expense ${expense.expenseNumber ?? expense.description}`,

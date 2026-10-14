@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { AuthError, requireUser } from '@/lib/auth/authorize';
+import { AuthError, hasPermission, requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { getReconciliation } from '@/lib/accounting/reconciliation';
+import { getStatementView } from '@/lib/accounting/statement-import';
 import { formatCalendarDate, formatDateTime, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { StatusPill } from '@/components/shared/status-pill';
 import { PrintButton } from '@/components/shared/print-button';
 import { ReconciliationSheet } from '@/components/accounting/reconciliation-controls';
+import { StatementLines } from '@/components/accounting/statement-lines';
 
 const money = (value: string) =>
   value.startsWith('-') ? `−${formatMoney(value.slice(1))}` : formatMoney(value);
@@ -17,14 +19,19 @@ export default async function ReconciliationPage({ params }: { params: Promise<{
   const user = await requireUser();
   const { id } = await params;
   let detail;
+  let statement;
   try {
-    detail = await getReconciliation(user, id);
+    [detail, statement] = await Promise.all([
+      getReconciliation(user, id),
+      getStatementView(user, id),
+    ]);
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     if (error instanceof AuthError) return <AccessDenied what="bank reconciliation" />;
     throw error;
   }
   const completed = detail.status === 'COMPLETED';
+  const canEdit = hasPermission(user, 'accounting.edit');
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -56,7 +63,20 @@ export default async function ReconciliationPage({ params }: { params: Promise<{
         <p className="hidden text-base font-semibold print:block">
           {`Bank reconciliation — ${detail.account.accountCode} ${detail.account.accountName} — to ${formatCalendarDate(detail.statementDate)}`}
         </p>
-        <ReconciliationSheet key={`${detail.status}-${detail.rows.length}`} detail={detail} />
+        {statement ? (
+          <StatementLines
+            reconciliationId={detail.id}
+            editable={!completed && canEdit}
+            view={statement}
+            fileName={detail.statementFileName}
+            books={detail.rows}
+          />
+        ) : null}
+        {statement ? <p className="text-base font-semibold print:hidden">In the books</p> : null}
+        <ReconciliationSheet
+          key={`${detail.status}-${detail.rows.length}-${detail.tickVersion}`}
+          detail={detail}
+        />
 
         <Panel>
           <p className="mb-3 text-sm font-semibold">Reconciliation statement</p>

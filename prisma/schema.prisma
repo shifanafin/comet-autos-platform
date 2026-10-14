@@ -709,12 +709,14 @@ model Organization {
   bankReconciliations BankReconciliation[]
   moneyTransfers      MoneyTransfer[]
   ownerMoney          OwnerMoney[]
+  businessPurchasePayments BusinessPurchasePayment[]
   paymentVouchers     PaymentVoucher[]
   partners            Partner[]
   customerAdvances    CustomerAdvance[]
   advanceAllocations  CustomerAdvanceAllocation[]
   advanceRefunds      CustomerAdvanceRefund[]
   reconciledLines     ReconciledLine[]
+  bankStatementLines  BankStatementLine[]
   fixedAssets         FixedAsset[]
   assetDepreciations  AssetDepreciation[]
 
@@ -851,6 +853,7 @@ model User {
   moneyTransfersCreated    MoneyTransfer[]             @relation("MoneyTransferCreatedBy")
   ownerMoneyCreated        OwnerMoney[]                @relation("OwnerMoneyCreatedBy")
   ownerMoneyOwned          OwnerMoney[]                @relation("OwnerMoneyOwner")
+  businessPurchasesCreated BusinessPurchasePayment[]   @relation("BusinessPurchaseCreatedBy")
   paymentVouchersCreated   PaymentVoucher[]            @relation("PaymentVoucherCreatedBy")
   advancesReceived         CustomerAdvance[]           @relation("CustomerAdvanceReceivedBy")
   advancesCancelled        CustomerAdvance[]           @relation("CustomerAdvanceCancelledBy")
@@ -1840,6 +1843,8 @@ model InventoryTransaction {
   performedBy  User?                 @relation(fields: [organizationId, performedByUserId], references: [organizationId, id], onDelete: Restrict)
   reversalOf   InventoryTransaction? @relation("InventoryReversal", fields: [organizationId, reversalOfTransactionId], references: [organizationId, id], onDelete: Restrict)
   reversedBy   InventoryTransaction? @relation("InventoryReversal")
+  /// Old invoice lines costed at this write-off (InvoiceItem.costMovementId).
+  costedLines  InvoiceItem[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, reversalOfTransactionId])
@@ -2037,22 +2042,30 @@ model InvoiceItem {
   /// What the part cost the workshop, decided on the invoice line: the cost
   /// of sales booked for it. Never printed.
   unitCost       Decimal?          @map("unit_cost") @db.Decimal(14, 2)
+  /// A Parts line from before parts were tied to stock whose part had
+  /// already left stock on a write-off of its own (an ADJUSTMENT out, booked
+  /// to cost when it was made). The line is costed at it for the job's
+  /// profit; it takes nothing more out of stock and books no cost of its own
+  /// (lib/inventory/old-part-lines.ts).
+  costMovementId String?           @map("cost_movement_id") @db.Uuid
   labourId       String?           @map("labour_id") @db.Uuid
   createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  invoice      Invoice          @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Cascade)
-  partUsage    PartUsage?       @relation(fields: [organizationId, partUsageId], references: [organizationId, id], onDelete: Restrict)
-  labour       Labour?          @relation(fields: [organizationId, labourId], references: [organizationId, id], onDelete: Restrict)
-  part         Part?            @relation(fields: [organizationId, partId], references: [organizationId, id], onDelete: Restrict)
-  account      ChartOfAccount?  @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
-  taxCode      TaxCode?         @relation(fields: [organizationId, taxCodeId], references: [organizationId, id], onDelete: Restrict)
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoice      Invoice               @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Cascade)
+  partUsage    PartUsage?            @relation(fields: [organizationId, partUsageId], references: [organizationId, id], onDelete: Restrict)
+  labour       Labour?               @relation(fields: [organizationId, labourId], references: [organizationId, id], onDelete: Restrict)
+  part         Part?                 @relation(fields: [organizationId, partId], references: [organizationId, id], onDelete: Restrict)
+  costMovement InventoryTransaction? @relation(fields: [organizationId, costMovementId], references: [organizationId, id], onDelete: Restrict)
+  account      ChartOfAccount?       @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
+  taxCode      TaxCode?              @relation(fields: [organizationId, taxCodeId], references: [organizationId, id], onDelete: Restrict)
   credits      CreditNoteItem[]
 
   @@index([organizationId])
   @@index([organizationId, invoiceId])
   @@index([organizationId, partId])
+  @@index([organizationId, costMovementId])
   @@map("invoice_items")
 }
 
@@ -2234,6 +2247,9 @@ model ChartOfAccount {
   /// and it counts in that party's balance and statement. Trade receivables
   /// and trade payables are always kept this way (see lib/accounting/sub-ledger.ts).
   subLedger        PartyType?   @map("sub_ledger")
+  /// How this account's uploaded statements are read: which heading holds
+  /// the date, the amounts and the balance (lib/accounting/statement-file.ts).
+  statementColumns Json?        @map("statement_columns")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -2541,6 +2557,9 @@ model BankReconciliation {
   accountId         String               @map("account_id") @db.Uuid
   statementDate     DateTime             @map("statement_date") @db.Date
   statementBalance  Decimal              @map("statement_balance") @db.Decimal(14, 2)
+  /// From an uploaded statement: its balance before its first line, and the file.
+  statementOpening  Decimal?             @map("statement_opening") @db.Decimal(14, 2)
+  statementFileName String?              @map("statement_file_name")
   status            ReconciliationStatus @default(IN_PROGRESS)
   completedAt       DateTime?            @map("completed_at") @db.Timestamptz
   completedByUserId String?              @map("completed_by_user_id") @db.Uuid
@@ -2552,7 +2571,8 @@ model BankReconciliation {
   account      ChartOfAccount   @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
   createdBy    User             @relation("ReconciliationCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
   completedBy  User?            @relation("ReconciliationCompletedBy", fields: [organizationId, completedByUserId], references: [organizationId, id], onDelete: Restrict)
-  lines        ReconciledLine[]
+  lines          ReconciledLine[]
+  statementLines BankStatementLine[]
 
   @@unique([organizationId, id])
   @@index([organizationId, accountId, statementDate])
@@ -2560,19 +2580,54 @@ model BankReconciliation {
 }
 
 /// A journal line ticked as cleared on a bank statement. A line clears once.
+/// Ticked from an uploaded statement, it names the statement line it is.
 model ReconciledLine {
   id                 String   @id @default(uuid(7)) @db.Uuid
   organizationId     String   @map("organization_id") @db.Uuid
   reconciliationId   String   @map("reconciliation_id") @db.Uuid
   journalEntryLineId String   @unique @map("journal_entry_line_id") @db.Uuid
+  statementLineId    String?  @map("statement_line_id") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   reconciliation BankReconciliation @relation(fields: [organizationId, reconciliationId], references: [organizationId, id], onDelete: Cascade)
   line           JournalEntryLine   @relation(fields: [journalEntryLineId], references: [id], onDelete: Restrict)
+  // NO ACTION: checked after a discard's cascade has removed both sides.
+  statementLine  BankStatementLine? @relation(fields: [organizationId, statementLineId], references: [organizationId, id], onDelete: NoAction)
 
   @@index([organizationId, reconciliationId])
+  @@index([organizationId, statementLineId])
   @@map("reconciled_lines")
+}
+
+/// One line of a bank or card statement uploaded to a reconciliation, kept as
+/// the bank wrote it. It is matched to the book lines it clears; one that
+/// matches nothing is missing from the books.
+model BankStatementLine {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  reconciliationId String   @map("reconciliation_id") @db.Uuid
+  /// Its place on the statement, oldest first.
+  position         Int
+  lineDate         DateTime @map("line_date") @db.Date
+  description      String
+  reference        String?
+  /// Money in positive, money out negative.
+  amount           Decimal  @db.Decimal(14, 2)
+  /// The statement's running balance after it, when the statement shows one.
+  balance          Decimal? @db.Decimal(14, 2)
+  /// The first upload of an account only: the statement's opening balance,
+  /// which clears the book lines dated before its first line.
+  broughtForward   Boolean  @default(false) @map("brought_forward")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reconciliation BankReconciliation @relation(fields: [organizationId, reconciliationId], references: [organizationId, id], onDelete: Cascade)
+  matches        ReconciledLine[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, reconciliationId, position])
+  @@map("bank_statement_lines")
 }
 
 /// Equipment, vehicles, fittings the workshop owns and uses for years. Its
@@ -3325,12 +3380,47 @@ model Partner {
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  ownerMoney   OwnerMoney[]
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  ownerMoney        OwnerMoney[]
+  businessPurchases BusinessPurchasePayment[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
   @@map("partners")
+}
+
+/// Money a partner paid to buy the business itself — to its previous owner
+/// for the company, and the fees of transferring it — out of their own
+/// pocket. The partners bought the company; the company paid and received
+/// nothing. So it is NOT in the company's books (no journal entry, no profit
+/// effect, nothing for corporate tax): kept here so each partner's whole
+/// investment can be seen (lib/finance/business-purchase.ts).
+model BusinessPurchasePayment {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  partnerId       String    @map("partner_id") @db.Uuid
+  amount          Decimal   @db.Decimal(14, 2)
+  paidOn          DateTime  @map("paid_on") @db.Date
+  /// Who it was paid to: the previous owner, Tasheel, a typing centre.
+  paidTo          String    @map("paid_to")
+  description     String
+  /// A cheque, transfer or receipt number.
+  reference       String?
+  notes           String?
+  /// Withdrawn — entered in error. Kept on record.
+  voidedAt        DateTime? @map("voided_at") @db.Timestamptz
+  voidReason      String?   @map("void_reason")
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  partner      Partner      @relation(fields: [organizationId, partnerId], references: [organizationId, id], onDelete: Restrict)
+  createdBy    User         @relation("BusinessPurchaseCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, partnerId])
+  @@map("business_purchase_payments")
 }
 
 enum OwnerMoneyKind {

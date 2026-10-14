@@ -67,7 +67,13 @@ export function JobCostPanel({ cost }: { cost: JobCost }) {
         <p className="text-xs text-warning">
           {cost.uncostedLines} parts line{cost.uncostedLines === 1 ? ' has' : 's have'} no cost
           (typed before parts were tied to stock), so the profit shown is higher than it really
-          was.
+          was.{' '}
+          <Link
+            href={`/reports/job-profit/old-parts?invoice=${cost.invoiceId}`}
+            className="font-medium underline underline-offset-2"
+          >
+            Give {cost.uncostedLines === 1 ? 'it its' : 'them their'} cost
+          </Link>
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">

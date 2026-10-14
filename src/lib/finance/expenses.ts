@@ -17,6 +17,7 @@ import { listPersonalPayers, resolvePersonalPayer } from '@/lib/finance/owner-pa
 import { getTaxCodeOptions, resolveTaxCode } from '@/lib/accounting/tax-codes';
 import { getPaymentModeOptions } from '@/lib/accounting/payment-modes';
 import { getAccountChoices } from '@/lib/accounting/reports';
+import { sameVendor } from '@/lib/finance/vendor-names';
 import { allocateDocumentNumber } from '@/lib/numbering';
 import { listExpenseBills } from '@/lib/finance/expense-bills';
 import { listJobChoices } from '@/lib/finance/job-costing';
@@ -129,7 +130,10 @@ async function readJob(tx: Prisma.TransactionClient, organizationId: string, for
   if (!forJob) return { jobCardId: null, invoiceId: null };
   const [kind, id] = forJob.split(':');
   if (kind === 'card') {
-    const card = await tx.jobCard.findFirst({ where: { id, organizationId }, select: { id: true } });
+    const card = await tx.jobCard.findFirst({
+      where: { id, organizationId },
+      select: { id: true },
+    });
     if (!card) throw new DomainError('Choose the job from the list.', 'forJob');
     return { jobCardId: card.id, invoiceId: null };
   }
@@ -261,7 +265,10 @@ function readDetails(
 /**
  * One bill is entered once: the same vendor's bill number may not be on
  * another live expense, nor on a stock purchase from a supplier of that
- * name. Without a vendor the number alone proves nothing, so it isn't checked.
+ * name. The vendor may be spelt another way the second time ("ENOC" for
+ * "ENOC / EPPCO"), and a bill of the same number, date and total is the
+ * same bill whoever it is said to be from. Without a vendor or a date and
+ * total to compare, the number alone proves nothing.
  */
 async function assertBillFree(
   tx: Prisma.TransactionClient,
@@ -269,24 +276,40 @@ async function assertBillFree(
   vendorName: string | null,
   billNumber: string | null,
   exceptExpenseId?: string,
+  bill?: { date: string; total: string },
 ) {
-  if (!vendorName || !billNumber) return;
-  const expense = await tx.expense.findFirst({
+  if (!billNumber || (!vendorName && !bill)) return;
+  const sameNumber = await tx.expense.findMany({
     where: {
       organizationId,
       status: 'RECORDED',
       billNumber: { equals: billNumber, mode: 'insensitive' },
-      vendorName: { equals: vendorName, mode: 'insensitive' },
       ...(exceptExpenseId ? { id: { not: exceptExpenseId } } : {}),
     },
-    select: { expenseNumber: true },
+    select: {
+      expenseNumber: true,
+      vendorName: true,
+      expenseDate: true,
+      amount: true,
+      taxAmount: true,
+    },
+    take: 20,
+  });
+  const expense = sameNumber.find((other) => {
+    if (vendorName && other.vendorName && sameVendor(vendorName, other.vendorName)) return true;
+    if (!bill) return false;
+    const total = toFils(other.amount.toString()) + toFils(other.taxAmount?.toString() ?? '0');
+    return (
+      other.expenseDate.toISOString().slice(0, 10) === bill.date && total === toFils(bill.total)
+    );
   });
   if (expense) {
     throw new DomainError(
-      `Bill ${billNumber} from ${vendorName} is already entered as ${expense.expenseNumber ?? 'another expense'}.`,
+      `Bill ${billNumber}${vendorName ? ` from ${vendorName}` : ''} is already entered as ${expense.expenseNumber ?? 'another expense'}${expense.vendorName ? ` (${expense.vendorName})` : ''}. If it really is another bill, check the bill number.`,
       'billNumber',
     );
   }
+  if (!vendorName) return;
   const purchase = await tx.purchase.findFirst({
     where: {
       organizationId,
@@ -343,6 +366,8 @@ export async function recordExpenseInTransaction(
     user.organizationId,
     emptyToNull(input.vendorName),
     emptyToNull(input.billNumber),
+    undefined,
+    { date: input.expenseDate, total: money.total },
   );
   const { paidPersonallyBy, ...payer } = await readPayer(tx, user.organizationId, input);
   const details = readDetails(input, payer);
@@ -456,6 +481,7 @@ export async function updateExpense(user: AuthenticatedUser, expenseId: string, 
       emptyToNull(input.vendorName),
       emptyToNull(input.billNumber),
       before.id,
+      { date: input.expenseDate, total: money.total },
     );
     const { paidPersonallyBy, ...payer } = await readPayer(tx, user.organizationId, input);
 
@@ -566,6 +592,11 @@ export interface ExpenseFilters {
   to?: string;
   /** Voided expenses are hidden unless asked for. */
   show?: 'recorded' | 'all';
+  /**
+   * Outside work paid on a payment voucher is listed with the vouchers; it
+   * is shown among the expenses (it is booked as one) only when asked for.
+   */
+  outsideWork?: boolean;
 }
 
 function where(organizationId: string, filters: ExpenseFilters): Prisma.ExpenseWhereInput {
@@ -573,6 +604,7 @@ function where(organizationId: string, filters: ExpenseFilters): Prisma.ExpenseW
   return {
     organizationId,
     ...(filters.show === 'all' ? {} : { status: 'RECORDED' }),
+    ...(filters.outsideWork ? {} : { paymentVoucher: null }),
     ...(filters.categoryId ? { chartOfAccountId: filters.categoryId } : {}),
     ...(filters.from || filters.to
       ? {
@@ -607,7 +639,7 @@ export async function listExpenses(
 ) {
   requirePermission(user, 'expense.view');
   const clause = where(user.organizationId, filters);
-  const [expenses, total, recorded, categories] = await Promise.all([
+  const [expenses, total, recorded, categories, outsideWork] = await Promise.all([
     prisma.expense.findMany({
       where: clause,
       orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }],
@@ -618,6 +650,7 @@ export async function listExpenses(
         recordedBy: { select: { fullName: true } },
         branch: { select: { name: true } },
         paidByUser: { select: { id: true, fullName: true } },
+        paymentVoucher: { select: { id: true, voucherNumber: true } },
       },
     }),
     prisma.expense.count({ where: clause }),
@@ -628,6 +661,17 @@ export async function listExpenses(
       _count: { _all: true },
     }),
     listExpenseCategories(user),
+    // The outside work the same filters would show, kept on the vouchers.
+    filters.outsideWork
+      ? Promise.resolve(0)
+      : prisma.expense.count({
+          where: {
+            AND: [
+              where(user.organizationId, { ...filters, outsideWork: true }),
+              { paymentVoucher: { isNot: null } },
+            ],
+          },
+        }),
   ]);
 
   // Totalled in fils so the figures are exact.
@@ -645,6 +689,8 @@ export async function listExpenses(
       ),
     })),
     categories,
+    /** Outside-work payments left out of this list (they are on the vouchers). */
+    outsideWorkHidden: outsideWork,
     totals: {
       net: filsToString(netFils),
       tax: filsToString(taxFils),

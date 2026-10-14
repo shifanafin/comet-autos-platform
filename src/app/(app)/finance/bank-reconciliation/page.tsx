@@ -8,6 +8,8 @@ import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusPill } from '@/components/shared/status-pill';
 import { StartReconciliationForm } from '@/components/accounting/reconciliation-controls';
+import { StatementUpload } from '@/components/accounting/statement-upload';
+import { savedColumns } from '@/lib/accounting/statement-file';
 
 export const metadata = { title: 'Bank reconciliation' };
 
@@ -94,21 +96,61 @@ export default async function BankReconciliationPage() {
       )}
 
       {canEdit && startable.length > 0 ? (
-        <Section
-          title="Reconcile a statement"
-          description="Take the closing date and closing balance from the bank statement."
-        >
-          <Panel>
-            <StartReconciliationForm
-              today={localDateString()}
-              accounts={startable.map((account) => ({
-                id: account.id,
-                label: `${account.accountCode} ${account.accountName}`,
-              }))}
-            />
-          </Panel>
-        </Section>
+        <>
+          <Section
+            title="Upload a statement"
+            description="Download the statement from online banking (or the card company’s settlement report) as CSV and upload it. Its lines are matched to the books for you; you confirm the rest."
+          >
+            <Panel>
+              <StatementUpload
+                accounts={startable.map((account) => ({
+                  id: account.id,
+                  label: `${account.accountCode} ${account.accountName}`,
+                  columns: savedColumns(account.statementColumns),
+                }))}
+              />
+            </Panel>
+          </Section>
+
+          <Section
+            title="Or enter the balance by hand"
+            description="For the cash box — count the cash on the last day: that count is the balance — or a statement you have only on paper. Then tick each line yourself."
+          >
+            <Panel>
+              <StartReconciliationForm
+                today={localDateString()}
+                accounts={startable.map((account) => ({
+                  id: account.id,
+                  label: `${account.accountCode} ${account.accountName}`,
+                }))}
+              />
+            </Panel>
+          </Section>
+        </>
       ) : null}
+
+      <Section title="Each month">
+        <Panel>
+          <ol className="flex list-decimal flex-col gap-2 pl-5 text-sm">
+            <li>
+              In the first week of the month, reconcile last month for every account: upload the
+              bank statement and the card company’s report, and enter the cash count.
+            </li>
+            <li>
+              Only the closing balance on the last day is needed. The opening balance is always the
+              last reconciliation’s closing balance — never typed.
+            </li>
+            <li>
+              Anything on the statement but not in the books (bank charges, interest): record it,
+              then match it.
+            </li>
+            <li>
+              When the difference is nil, complete the reconciliation. Then close the month in
+              Accounting — and file VAT for the quarter once its last month is reconciled.
+            </li>
+          </ol>
+        </Panel>
+      </Section>
     </Stack>
   );
 }

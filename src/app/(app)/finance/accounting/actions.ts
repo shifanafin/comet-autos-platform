@@ -10,7 +10,10 @@ import {
   bookExistingRecords,
   completeStandardChart,
   createManualEntry,
+  deleteManualEntry,
   reverseManualEntry,
+  updateEntryNarration,
+  updateManualEntry,
 } from '@/lib/accounting/entries';
 import { closeBooks, reopenAllBooks } from '@/lib/accounting/periods';
 import { localDateString } from '@/lib/format';
@@ -77,6 +80,59 @@ export async function createManualEntryAction(
   });
   if (result.ok) refresh();
   return { ...toClientResult(result), data: result.data };
+}
+
+/** Corrects an entry made by hand, in an open period. Its lines arrive as one JSON field. */
+export async function updateManualEntryAction(
+  entryId: string,
+  _prev: ActionResult<{ entryNumber: string | null }>,
+  formData: FormData,
+): Promise<ActionResult<{ entryNumber: string | null }>> {
+  const user = await requireUser();
+  const input = formDataToObject(formData);
+  let lines: unknown = [];
+  try {
+    lines = input.lines ? JSON.parse(input.lines) : [];
+  } catch {
+    return { ok: false, error: 'The entry’s lines could not be read. Refresh and try again.' };
+  }
+  const result = await runAction(async () => {
+    const entry = await updateManualEntry(user, entryId, { ...input, lines });
+    return { entryNumber: entry.entryNumber };
+  });
+  if (result.ok) refresh();
+  return { ...toClientResult(result), data: result.data };
+}
+
+export async function deleteManualEntryAction(
+  entryId: string,
+  input: { reason: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => deleteManualEntry(user, entryId, input));
+  if (result.ok) refresh();
+  return toClientResult(result);
+}
+
+/** An entry's description and line notes. The notes arrive as one JSON field. */
+export async function updateEntryNarrationAction(
+  entryId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const input = formDataToObject(formData);
+  let notes: unknown = [];
+  try {
+    notes = input.notes ? JSON.parse(input.notes) : [];
+  } catch {
+    return { ok: false, error: 'The notes could not be read. Refresh and try again.' };
+  }
+  const result = await runAction(() =>
+    updateEntryNarration(user, entryId, { description: input.description, notes }),
+  );
+  if (result.ok) refresh();
+  return toClientResult(result);
 }
 
 export async function reverseManualEntryAction(

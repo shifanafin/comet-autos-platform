@@ -366,7 +366,7 @@ export default async function AccountingPage({
       ) : null}
       {journal ? (
         <Stack gap="xl">
-          <JournalView data={journal} canEdit={canReverse} />
+          <JournalView data={journal} canEdit={canReverse} canChange={canEdit} />
           {journalPage ? (
             <Pagination
               info={journalPage.info}

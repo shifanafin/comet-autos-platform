@@ -3,9 +3,16 @@ import { Suspense } from 'react';
 import {
   ArrowRight,
   CalendarPlus,
+  CircleAlert,
+  CircleCheck,
   ClipboardList,
   FileText,
+  Hourglass,
+  KeyRound,
+  PackageMinus,
+  PauseCircle,
   Receipt,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
@@ -18,16 +25,24 @@ import { FinancePeriodPicker } from '@/components/finance/period-picker';
 import { OwedToOwnerLine } from '@/components/finance/owed-to-owner-line';
 import { MyDayStrip } from '@/components/team/my-day-strip';
 import { RankedBars } from '@/components/reports/charts';
-import { AttentionChip, Kpi, KpiRow } from '@/components/overview/kpi';
+import { Kpi } from '@/components/overview/kpi';
+import { GarageNumbers } from '@/components/overview/garage-numbers';
+import { AttentionList, WorkshopNow, type AttentionItem } from '@/components/overview/workshop-now';
 import { RevenueCostTrend } from '@/components/overview/trend-chart';
 import { cn } from '@/lib/utils';
 
 /*
- * The dashboard: the whole garage at a glance. What it earned and kept, the
- * money in and owed, and how the workshop is doing — each against the period
- * before — then twelve months of revenue against costs, and what needs
- * attention now. Starting a job card, quotation or invoice is a small row of
- * buttons at the top; the detail lives in each section's own overview.
+ * The dashboard, in the order the day asks its questions:
+ *
+ *   1. where every car is right now, stage by stage;
+ *   2. what needs someone to act — overdue money, approvals, cars ready;
+ *   3. how the garage is doing in the period picked — earned, kept, owed,
+ *      in hand — each against the period before;
+ *   4. twelve months of revenue against costs, then the workshop and sales
+ *      for the period.
+ *
+ * Starting a job card, quotation or invoice is a small row of buttons at
+ * the top; the detail lives in each section's own overview.
  */
 
 export const dynamic = 'force-dynamic';
@@ -94,7 +109,9 @@ export default async function DashboardPage({
             {greeting()}, {user.fullName.split(' ')[0]}
           </h1>
           <p className="text-sm text-muted-foreground">
-            How the garage is doing — {summary.period.label.toLowerCase()}.
+            {summary.workshopNow
+              ? `${plural(summary.workshopNow.inNow, 'car')} in the workshop · ${plural(summary.workshopNow.appointmentsToday, 'appointment')} today`
+              : `How the garage is doing — ${summary.period.label.toLowerCase()}.`}
           </p>
         </div>
         {actions.length ? (
@@ -125,18 +142,45 @@ export default async function DashboardPage({
         <MyDayStrip user={user} />
       </Suspense>
 
-      {anything ? (
-        <FinancePeriodPicker period={summary.period} basePath="/" presets={[...PRESETS]} />
+      {summary.workshopNow ? (
+        <Section
+          title="In the workshop now"
+          description={
+            summary.workshopNow.onHold
+              ? `Every open job card by stage — ${summary.workshopNow.onHold} on hold besides.`
+              : 'Every open job card by stage. Tap one to see the cars in it.'
+          }
+          action={<SectionLink href="/live">Workshop today</SectionLink>}
+        >
+          <WorkshopNow
+            stages={summary.workshopNow.stages}
+            detailed={preferences.detailedJobCards}
+          />
+        </Section>
       ) : null}
 
-      {hasPermission(user, 'accounting.view') ? (
-        <Suspense fallback={null}>
-          <OwedToOwnerLine organizationId={user.organizationId} />
-        </Suspense>
-      ) : null}
+      <Attention summary={summary} menu={menu} />
 
-      <Earnings summary={summary} />
-      <MoneyPosition summary={summary} />
+      {summary.profit || summary.money.invoiced !== null || summary.money.inHand !== null ? (
+        <Section
+          title="How the garage is doing"
+          description={`${summary.period.label} · ${
+            comparable(summary)
+              ? `changes are ${summary.compareLabel}`
+              : 'nothing earlier in the books to compare with yet'
+          }`}
+        >
+          <Stack gap="lg">
+            <FinancePeriodPicker period={summary.period} basePath="/" presets={[...PRESETS]} />
+            <GarageNumbers summary={summary} />
+            {hasPermission(user, 'accounting.view') ? (
+              <Suspense fallback={null}>
+                <OwedToOwnerLine organizationId={user.organizationId} />
+              </Suspense>
+            ) : null}
+          </Stack>
+        </Section>
+      ) : null}
 
       {summary.trend ? (
         <Section
@@ -151,8 +195,6 @@ export default async function DashboardPage({
           </Panel>
         </Section>
       ) : null}
-
-      <Attention summary={summary} menu={menu} />
 
       {summary.jobs || summary.sales ? (
         <Grid gap="xl" className="items-start lg:grid-cols-2">
@@ -172,6 +214,11 @@ export default async function DashboardPage({
   );
 }
 
+/** "1 car", "3 cars". */
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
 function SectionLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
@@ -184,205 +231,100 @@ function SectionLink({ href, children }: { href: string; children: React.ReactNo
   );
 }
 
-/** What the garage earned and kept, from the books — or, without reports, what it invoiced. */
-function Earnings({ summary }: { summary: GarageSummary }) {
-  const { profit, money, compareLabel } = summary;
-  if (profit) {
-    return (
-      <KpiRow>
-        <Kpi
-          label="Revenue"
-          value={formatMoney(profit.revenue)}
-          change={profit.revenueGrowth}
-          compareLabel={compareLabel}
-          hint="Sales booked, excl. VAT"
-          href="/finance/accounting?view=profit"
-        />
-        <Kpi
-          label="Gross profit"
-          value={formatMoney(profit.grossProfit)}
-          change={profit.grossGrowth}
-          compareLabel={compareLabel}
-          hint={
-            profit.grossMargin !== null
-              ? `${profit.grossMargin}% of revenue, after the cost of parts`
-              : 'Revenue less the cost of parts'
-          }
-        />
-        <Kpi
-          label="Costs and expenses"
-          value={formatMoney(profit.costs)}
-          change={profit.costsGrowth}
-          compareLabel={compareLabel}
-          lowerIsBetter
-          hint="Cost of parts sold and every expense"
-          href="/finance/expenses"
-        />
-        <Kpi
-          label="Net profit"
-          value={formatMoney(profit.netProfit)}
-          change={profit.netGrowth}
-          compareLabel={compareLabel}
-          tone={profit.netFils < 0 ? 'bad' : profit.netFils > 0 ? 'good' : 'default'}
-          hint={
-            profit.netMargin !== null
-              ? `${profit.netMargin}% of revenue kept`
-              : 'What is left after everything'
-          }
-        />
-      </KpiRow>
-    );
-  }
-  if (money.invoiced === null) return null;
-  return (
-    <KpiRow>
-      <Kpi
-        label="Invoiced"
-        value={formatMoney(money.invoiced)}
-        change={money.invoicedGrowth}
-        compareLabel={compareLabel}
-        hint="Excl. VAT"
-        href="/finance/invoices"
-      />
-      <Kpi
-        label="Collected"
-        value={formatMoney(money.collected ?? '0')}
-        change={money.collectedGrowth}
-        compareLabel={compareLabel}
-        hint="Payments received, incl. VAT"
-        href="/finance/payments"
-      />
-    </KpiRow>
-  );
+/** Whether any figure has an earlier period to be compared with. */
+function comparable(summary: GarageSummary) {
+  const { profit, money } = summary;
+  return [
+    profit?.revenueGrowth,
+    profit?.netGrowth,
+    money.collectedGrowth,
+    money.invoicedGrowth,
+  ].some((change) => change !== null && change !== undefined);
 }
 
-/** Money in, money owed both ways, money in hand. */
-function MoneyPosition({ summary }: { summary: GarageSummary }) {
-  const { money, compareLabel } = summary;
-  const tiles = [
-    money.collected !== null && summary.profit
-      ? {
-          key: 'collected',
-          node: (
-            <Kpi
-              key="collected"
-              label="Collected"
-              value={formatMoney(money.collected)}
-              change={money.collectedGrowth}
-              compareLabel={compareLabel}
-              hint="Payments received in the period, incl. VAT"
-              href="/finance/payments"
-            />
-          ),
-        }
-      : null,
-    money.receivables
-      ? {
-          key: 'owe',
-          node: (
-            <Kpi
-              key="owe"
-              label="Customers owe"
-              value={formatMoney(money.receivables.balance)}
-              hint={
-                Number(money.receivables.overdue) > 0
-                  ? `${formatMoney(money.receivables.overdue)} overdue on ${money.receivables.overdueCount} invoice${money.receivables.overdueCount === 1 ? '' : 's'}`
-                  : `${money.receivables.count} unpaid invoice${money.receivables.count === 1 ? '' : 's'}, none overdue`
-              }
-              tone={Number(money.receivables.overdue) > 0 ? 'bad' : 'default'}
-              href="/finance/outstanding"
-            />
-          ),
-        }
-      : null,
-    money.payables
-      ? {
-          key: 'owed',
-          node: (
-            <Kpi
-              key="owed"
-              label="We owe suppliers"
-              value={formatMoney(money.payables.balance)}
-              hint={`${money.payables.parties} supplier${money.payables.parties === 1 ? '' : 's'} · ${money.payables.count} bill${money.payables.count === 1 ? '' : 's'}`}
-              href="/finance/payables"
-            />
-          ),
-        }
-      : null,
-    money.inHand !== null
-      ? {
-          key: 'cash',
-          node: (
-            <Kpi
-              key="cash"
-              label="Cash and bank now"
-              value={formatMoney(money.inHand)}
-              hint="Cash on hand, petty cash and bank"
-              href="/finance/money"
-            />
-          ),
-        }
-      : null,
-  ].filter((tile) => tile !== null);
-  if (tiles.length === 0) return null;
-  return <KpiRow>{tiles.map((tile) => tile.node)}</KpiRow>;
-}
-
-/** The few things worth acting on now, each a tap from its list. */
+/** The few things worth acting on now, most urgent first, each a tap from its list. */
 function Attention({ summary, menu }: { summary: GarageSummary; menu: (href: string) => boolean }) {
   const actions = summary.jobs?.actions;
   const receivables = summary.money.receivables;
-  const chips = [
+  const candidates: (AttentionItem | null)[] = [
     receivables && receivables.overdueCount > 0
       ? {
           href: '/finance/outstanding',
-          count: formatMoney(receivables.overdue),
-          label: `overdue from customers`,
-          tone: 'danger' as const,
-        }
-      : null,
-    actions && actions.waitingApproval > 0
-      ? {
-          href: '/approvals',
-          count: actions.waitingApproval,
-          label: 'waiting for customer approval',
-          tone: 'warning' as const,
+          icon: CircleAlert,
+          value: formatMoney(receivables.overdue),
+          label: `overdue from customers · ${plural(receivables.overdueCount, 'invoice')}`,
+          tone: 'danger',
         }
       : null,
     actions && actions.ready > 0
-      ? { href: '/job-cards?status=READY', count: actions.ready, label: 'ready — not invoiced' }
-      : null,
-    actions && actions.awaitingPayment > 0
       ? {
-          href: '/job-cards?status=INVOICED',
-          count: actions.awaitingPayment,
-          label: 'invoiced — awaiting payment',
+          href: '/job-cards?status=READY',
+          icon: Receipt,
+          value: plural(actions.ready, 'car'),
+          label: 'finished — not invoiced yet',
+          tone: 'warning',
         }
       : null,
     actions && actions.toDeliver > 0
       ? {
           href: '/job-cards?status=PAID',
-          count: actions.toDeliver,
+          icon: KeyRound,
+          value: plural(actions.toDeliver, 'car'),
           label: 'paid — ready to hand over',
+          tone: 'warning',
+        }
+      : null,
+    actions && actions.waitingApproval > 0 && menu('/approvals')
+      ? {
+          href: '/approvals',
+          icon: Hourglass,
+          value: plural(actions.waitingApproval, 'quotation'),
+          label: 'waiting for the customer to approve',
+          tone: 'info',
+        }
+      : null,
+    actions && actions.awaitingPayment > 0
+      ? {
+          href: '/job-cards?status=INVOICED',
+          icon: Wallet,
+          value: plural(actions.awaitingPayment, 'car'),
+          label: 'invoiced — awaiting payment',
+          tone: 'info',
+        }
+      : null,
+    actions && actions.onHold > 0
+      ? {
+          href: '/job-cards?status=ON_HOLD',
+          icon: PauseCircle,
+          value: plural(actions.onHold, 'job'),
+          label: 'on hold',
+          tone: 'warning',
         }
       : null,
     summary.lowStock && menu('/inventory/parts')
       ? {
           href: '/inventory/parts?stock=low',
-          count: summary.lowStock,
-          label: `part${summary.lowStock === 1 ? '' : 's'} low on stock`,
-          tone: 'warning' as const,
+          icon: PackageMinus,
+          value: plural(summary.lowStock, 'part'),
+          label: 'low on stock — time to reorder',
+          tone: 'warning',
         }
       : null,
-  ].filter((chip) => chip !== null);
-  if (chips.length === 0) return null;
+  ];
+  const items = candidates.filter((item) => item !== null);
+  if (items.length === 0) {
+    // Only worth saying to someone who would otherwise see items here.
+    if (!actions && !receivables) return null;
+    return (
+      <p className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm">
+        <CircleCheck className="size-4 shrink-0 text-success" />
+        Nothing needs attention — every job is moving and nothing is overdue.
+      </p>
+    );
+  }
   return (
-    <Section title="Needs attention" description="Open the list behind each to act on it.">
-      <div className="flex flex-wrap gap-2">
-        {chips.map((chip) => (
-          <AttentionChip key={chip.href} {...chip} />
-        ))}
-      </div>
+    <Section title="Needs attention" description="Most urgent first. Open one to act on it.">
+      <AttentionList items={items} />
     </Section>
   );
 }
@@ -390,7 +332,6 @@ function Attention({ summary, menu }: { summary: GarageSummary; menu: (href: str
 function WorkshopSummary({ summary }: { summary: GarageSummary }) {
   const jobs = summary.jobs!;
   const figures = [
-    { label: 'In the workshop now', value: String(jobs.openNow) },
     { label: 'Average days in', value: jobs.averageDays !== null ? `${jobs.averageDays}` : '—' },
     { label: 'Technician hours', value: jobs.totalHours || '0' },
     { label: 'Cancelled', value: String(jobs.cancelled) },
@@ -421,7 +362,7 @@ function WorkshopSummary({ summary }: { summary: GarageSummary }) {
             />
           </div>
         </div>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border px-4 py-4 sm:px-5">
+        <dl className="grid grid-cols-3 gap-x-6 gap-y-3 border-t border-border px-4 py-4 sm:px-5">
           {figures.map((figure) => (
             <div key={figure.label} className="flex flex-col">
               <dt className="text-xs text-muted-foreground">{figure.label}</dt>

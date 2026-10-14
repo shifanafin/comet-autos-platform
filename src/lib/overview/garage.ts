@@ -126,6 +126,15 @@ export async function getGarageSummary(user: AuthenticatedUser, input: FinanceDa
           actions: flow?.actions ?? null,
         }
       : null,
+    /** Where every car is right now — not tied to the period. */
+    workshopNow: flow
+      ? {
+          inNow: flow.vehiclesCurrentlyIn,
+          appointmentsToday: flow.todaysAppointments,
+          onHold: flow.onHold,
+          stages: flow.workflowStages,
+        }
+      : null,
     sales,
     lowStock: lowStock ? lowStock.length : null,
   };

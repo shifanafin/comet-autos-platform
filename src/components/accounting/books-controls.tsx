@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { BookCheck, Loader2, Lock, LockOpen, Undo2 } from 'lucide-react';
+import { BookCheck, Loader2, Lock, LockOpen, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,7 @@ import {
   addStandardAccountsAction,
   bookExistingRecordsAction,
   closeBooksAction,
+  deleteManualEntryAction,
   reopenBooksAction,
   reverseManualEntryAction,
 } from '@/app/(app)/finance/accounting/actions';
@@ -37,11 +38,52 @@ export function ReverseEntryButton({
         </Button>
       }
       title={`Reverse ${entryNumber}?`}
-      description="An equal and opposite entry is booked today. The original stays on record, marked reversed — nothing is deleted."
+      description="An equal and opposite entry is booked today. The original stays on record, marked reversed — nothing is deleted. Use this once the books are closed; while they are open, editing or deleting the entry is cleaner."
       confirmLabel="Reverse entry"
       placeholder="e.g. Posted to the wrong account"
       successMessage="Entry reversed"
       onConfirm={({ reason }) => reverseManualEntryAction(entryId, { reason })}
+    />
+  );
+}
+
+/**
+ * Deletes an entry made by hand from an open period, with a reason kept in
+ * the audit log; the entries after it move up a number.
+ */
+export function DeleteEntryButton({
+  entryId,
+  entryNumber,
+  withReversal,
+}: {
+  entryId: string;
+  entryNumber: string;
+  /** The entry has been reversed: its reversal goes too. */
+  withReversal: boolean;
+}) {
+  const router = useRouter();
+  return (
+    <ReasonAction
+      trigger={
+        <Button variant="outline" size="sm">
+          <Trash2 />
+          Delete
+        </Button>
+      }
+      title={`Delete ${entryNumber}?`}
+      description={
+        withReversal
+          ? 'The entry and its reversal are removed together — they cancel out, so no balance moves. The entries after them move up, so the journal keeps no gap. What they said stays in the audit log.'
+          : 'The entry is removed from the books and the entries after it move up a number, so the journal keeps no gap. What it said stays in the audit log.'
+      }
+      confirmLabel="Delete entry"
+      placeholder="e.g. Booked twice by mistake"
+      successMessage="Entry deleted"
+      onConfirm={async ({ reason }) => {
+        const result = await deleteManualEntryAction(entryId, { reason });
+        if (result.ok) router.push('/finance/accounting?view=journal');
+        return result;
+      }}
     />
   );
 }

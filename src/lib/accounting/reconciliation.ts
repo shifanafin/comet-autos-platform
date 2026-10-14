@@ -55,7 +55,11 @@ const signedFils = (value: string) =>
 const signedString = (fils: number) => (fils < 0 ? `-${filsToString(-fils)}` : filsToString(fils));
 
 /** The statement balance the next reconciliation starts from, and from when. */
-async function lastCompleted(tx: Tx | typeof prisma, organizationId: string, accountId: string) {
+export async function lastCompleted(
+  tx: Tx | typeof prisma,
+  organizationId: string,
+  accountId: string,
+) {
   return tx.bankReconciliation.findFirst({
     where: { organizationId, accountId, status: 'COMPLETED' },
     orderBy: [{ statementDate: 'desc' }, { completedAt: 'desc' }],
@@ -74,6 +78,7 @@ export async function listReconciliationAccounts(user: AuthenticatedUser) {
       accountCode: true,
       accountName: true,
       isActive: true,
+      statementColumns: true,
       bankReconciliations: {
         orderBy: [{ statementDate: 'desc' }, { createdAt: 'desc' }],
         take: 12,
@@ -121,24 +126,7 @@ export async function startReconciliation(user: AuthenticatedUser, rawInput: unk
   }
 
   return prisma.$transaction(async (tx) => {
-    // One reconciliation at a time per account.
-    await tx.$executeRaw`SELECT id FROM chart_of_accounts WHERE id = ${input.accountId}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
-    const account = await tx.chartOfAccount.findFirst({
-      where: { id: input.accountId, organizationId: user.organizationId },
-      select: { id: true, accountName: true, isPaymentAccount: true },
-    });
-    if (!account?.isPaymentAccount) {
-      throw new DomainError('Choose a cash, bank or card account.', 'accountId');
-    }
-    const open = await tx.bankReconciliation.findFirst({
-      where: { organizationId: user.organizationId, accountId: account.id, status: 'IN_PROGRESS' },
-      select: { id: true },
-    });
-    if (open) {
-      throw new DomainError(
-        `A reconciliation of ${account.accountName} is already in progress. Finish or discard it first.`,
-      );
-    }
+    const account = await lockReconcilableAccount(tx, user.organizationId, input.accountId);
     const previous = await lastCompleted(tx, user.organizationId, account.id);
     if (previous && statementDate <= previous.statementDate) {
       throw new DomainError(
@@ -170,6 +158,31 @@ export async function startReconciliation(user: AuthenticatedUser, rawInput: unk
     });
     return { reconciliationId: reconciliation.id };
   });
+}
+
+/**
+ * The money account a new reconciliation is for, locked so only one starts
+ * at a time, and refused if one is already in progress.
+ */
+export async function lockReconcilableAccount(tx: Tx, organizationId: string, accountId: string) {
+  await tx.$executeRaw`SELECT id FROM chart_of_accounts WHERE id = ${accountId}::uuid AND organization_id = ${organizationId}::uuid FOR UPDATE`;
+  const account = await tx.chartOfAccount.findFirst({
+    where: { id: accountId, organizationId },
+    select: { id: true, accountName: true, isPaymentAccount: true },
+  });
+  if (!account?.isPaymentAccount) {
+    throw new DomainError('Choose a cash, bank or card account.', 'accountId');
+  }
+  const open = await tx.bankReconciliation.findFirst({
+    where: { organizationId, accountId: account.id, status: 'IN_PROGRESS' },
+    select: { id: true },
+  });
+  if (open) {
+    throw new DomainError(
+      `A reconciliation of ${account.accountName} is already in progress. Finish or discard it first.`,
+    );
+  }
+  return account;
 }
 
 /**
@@ -287,13 +300,28 @@ export async function getReconciliation(user: AuthenticatedUser, reconciliationI
     createdBy: reconciliation.createdBy.fullName,
     completedBy: reconciliation.completedBy?.fullName ?? null,
     completedAt: reconciliation.completedAt,
+    /** The uploaded statement's file, when one was uploaded. */
+    statementFileName: reconciliation.statementFileName,
+    statementOpening:
+      reconciliation.statementOpening === null
+        ? null
+        : signedString(signedFils(reconciliation.statementOpening.toString())),
+    /** Changes whenever the ticks do, so the sheet starts again from them. */
+    tickVersion: `${ticked.size}:${checksum([...ticked].sort().join(','))}`,
     rows,
   };
 }
 
+/** A short fingerprint of a string. */
+function checksum(text: string) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
 export type ReconciliationDetail = Awaited<ReturnType<typeof getReconciliation>>;
 
-async function lockOpen(tx: Tx, organizationId: string, reconciliationId: string) {
+export async function lockOpen(tx: Tx, organizationId: string, reconciliationId: string) {
   await tx.$executeRaw`SELECT id FROM bank_reconciliations WHERE id = ${reconciliationId}::uuid AND organization_id = ${organizationId}::uuid FOR UPDATE`;
   const reconciliation = await tx.bankReconciliation.findFirst({
     where: { id: reconciliationId, organizationId },

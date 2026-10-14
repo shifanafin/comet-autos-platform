@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Info, Scale } from 'lucide-react';
+import { Info, Pencil, Scale } from 'lucide-react';
 import type {
   AccountLedger,
   BalanceSheet,
@@ -11,6 +11,7 @@ import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { Panel, Section, Stack } from '@/components/layout/primitives';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusPill } from '@/components/shared/status-pill';
+import { LinkButton } from '@/components/shared/link-button';
 import { ReverseEntryButton } from '@/components/accounting/books-controls';
 import { cn } from '@/lib/utils';
 
@@ -413,7 +414,17 @@ export function AccountLedgerView({ data }: { data: AccountLedger }) {
 
 // ─── The journal ────────────────────────────────────────────────────────────
 
-export function JournalView({ data, canEdit }: { data: JournalList; canEdit: boolean }) {
+export function JournalView({
+  data,
+  canEdit,
+  canChange,
+}: {
+  data: JournalList;
+  /** May reverse entries made by hand. */
+  canEdit: boolean;
+  /** May edit entries: narration on any, everything on one made by hand. */
+  canChange: boolean;
+}) {
   if (data.entries.length === 0) {
     return (
       <EmptyState
@@ -455,9 +466,21 @@ export function JournalView({ data, canEdit }: { data: JournalList; canEdit: boo
                   · by {entry.createdBy.fullName}
                 </span>
               </div>
-              {canEdit && entry.sourceType === 'MANUAL' && !entry.reversalOf && !reversed ? (
-                <ReverseEntryButton entryId={entry.id} entryNumber={entry.entryNumber ?? ''} />
-              ) : null}
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {canChange ? (
+                  <LinkButton
+                    href={`/finance/accounting/journal/${entry.id}/edit`}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Pencil />
+                    Edit
+                  </LinkButton>
+                ) : null}
+                {canEdit && entry.sourceType === 'MANUAL' && !entry.reversalOf && !reversed ? (
+                  <ReverseEntryButton entryId={entry.id} entryNumber={entry.entryNumber ?? ''} />
+                ) : null}
+              </div>
             </div>
             <table className="w-full text-sm">
               <tbody className="divide-y divide-border">

@@ -83,7 +83,13 @@ export default async function JobProfitPage({
         <p className="rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 text-sm sm:px-5">
           {totals.uncostedJobs} job{totals.uncostedJobs === 1 ? ' has' : 's have'} parts lines with
           no cost — typed before parts were tied to stock — so their profit is shown higher than it
-          really was.
+          really was.{' '}
+          <Link
+            href="/reports/job-profit/old-parts"
+            className="font-medium underline underline-offset-2"
+          >
+            Give them their cost
+          </Link>
         </p>
       ) : null}
 

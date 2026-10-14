@@ -36,6 +36,7 @@ export default async function ExpensesPage({
     from?: string;
     to?: string;
     show?: string;
+    work?: string;
     page?: string;
   }>;
 }) {
@@ -49,9 +50,10 @@ export default async function ExpensesPage({
     from: params.from || undefined,
     to: params.to || undefined,
     show: params.show === 'all' ? ('all' as const) : ('recorded' as const),
+    outsideWork: params.work === '1',
   };
   const {
-    result: { expenses, totals },
+    result: { expenses, totals, outsideWorkHidden },
     info,
   } = await loadPage(pageFrom(params.page), (skip, take) =>
     listExpenses(user, filters, take, skip),
@@ -83,6 +85,25 @@ export default async function ExpensesPage({
         ? METHOD_LABEL[expense.paymentMethod]
         : 'Not settled';
   const filtered = Boolean(filters.query || filters.categoryId || filters.from || filters.to);
+  /** This list with outside work shown or hidden, the other filters kept. */
+  const withOutsideWork = (shown: boolean) => {
+    const next = new URLSearchParams(
+      Object.entries(params).filter(
+        (entry): entry is [string, string] =>
+          Boolean(entry[1]) && entry[0] !== 'page' && entry[0] !== 'work',
+      ),
+    );
+    if (shown) next.set('work', '1');
+    const query = next.toString();
+    return `/finance/expenses${query ? `?${query}` : ''}`;
+  };
+  /** Outside work is changed on its voucher, which the payee signed. */
+  const onVoucher = (expense: (typeof expenses)[number]) =>
+    expense.paymentVoucher ? (
+      <Link href={`/finance/payment-vouchers/${expense.paymentVoucher.id}`} className="inline-flex">
+        <StatusPill tone="info">{`Outside work · ${expense.paymentVoucher.voucherNumber}`}</StatusPill>
+      </Link>
+    ) : null;
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -148,6 +169,36 @@ export default async function ExpensesPage({
       >
         <Stack gap="base">
           <SearchField initialQuery={filters.query} placeholder="Description, payee or number" />
+          {filters.outsideWork ? (
+            <p className="text-sm text-muted-foreground">
+              Outside work paid on payment vouchers is shown here too, marked with its voucher.{' '}
+              <Link
+                href={withOutsideWork(false)}
+                className="font-medium text-primary hover:underline"
+              >
+                Hide outside work
+              </Link>
+            </p>
+          ) : outsideWorkHidden > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {`${outsideWorkHidden} outside-work payment${outsideWorkHidden === 1 ? ' is' : 's are'} not listed here: ${outsideWorkHidden === 1 ? 'it is' : 'they are'} on `}
+              <Link
+                href="/finance/payment-vouchers"
+                className="font-medium text-primary hover:underline"
+              >
+                Payment vouchers
+              </Link>
+              {', and '}
+              {outsideWorkHidden === 1 ? 'counts' : 'count'} in the books and the job’s cost all the
+              same.{' '}
+              <Link
+                href={withOutsideWork(true)}
+                className="font-medium text-primary hover:underline"
+              >
+                Show them here too
+              </Link>
+            </p>
+          ) : null}
 
           {expenses.length === 0 ? (
             <EmptyState
@@ -176,7 +227,9 @@ export default async function ExpensesPage({
                     status={
                       expense.status === 'VOID' ? (
                         <StatusPill tone="neutral">Void</StatusPill>
-                      ) : null
+                      ) : (
+                        onVoucher(expense)
+                      )
                     }
                     details={[
                       { label: 'Date', value: formatDate(expense.expenseDate) },
@@ -192,7 +245,7 @@ export default async function ExpensesPage({
                     footer={`${expense.vendorName ? `${expense.vendorName} · ` : ''}Recorded by ${expense.recordedBy.fullName}`}
                   >
                     {billsCell(expense)}
-                    {canChange && expense.status === 'RECORDED' ? (
+                    {canChange && expense.status === 'RECORDED' && !expense.paymentVoucher ? (
                       <span className="flex flex-wrap gap-2">
                         {canEdit && formOptions ? (
                           <EditExpenseButton
@@ -263,7 +316,9 @@ export default async function ExpensesPage({
                             ) : null}
                             {expense.status === 'VOID' ? (
                               <StatusPill tone="neutral">Void</StatusPill>
-                            ) : null}
+                            ) : (
+                              onVoucher(expense)
+                            )}
                           </span>
                         </td>
                         <td className="px-2 py-4 text-muted-foreground">{paidBy(expense)}</td>
@@ -279,7 +334,7 @@ export default async function ExpensesPage({
                         <td className="px-2 py-4">{billsCell(expense)}</td>
                         {canChange ? (
                           <td className="px-2 py-4 text-right">
-                            {expense.status === 'RECORDED' ? (
+                            {expense.status === 'RECORDED' && !expense.paymentVoucher ? (
                               <span className="inline-flex gap-1">
                                 {canEdit && formOptions ? (
                                   <EditExpenseButton

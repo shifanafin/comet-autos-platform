@@ -54,7 +54,11 @@ export async function listInvoices(
   const [invoices, total] = await Promise.all([
     prisma.invoice.findMany({
       where,
-      orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
+      // Newest number first, so the list follows the invoice sequence even when
+      // an invoice is back-dated. Each type is its own series (INV-, PRO-, OB-):
+      // tax invoices lead, opening balances — the oldest debts — come last.
+      // Numbers are zero-padded within a series, so text order is number order.
+      orderBy: [{ invoiceType: 'asc' }, { invoiceNumber: 'desc' }, { createdAt: 'desc' }],
       skip: offset,
       take: limit,
       select: {

@@ -13,6 +13,12 @@ import {
   setReconciledLines,
   startReconciliation,
 } from '@/lib/accounting/reconciliation';
+import {
+  matchStatementLine,
+  rematchStatement,
+  unmatchStatementLine,
+  uploadStatement,
+} from '@/lib/accounting/statement-import';
 
 function refresh(reconciliationId?: string) {
   revalidatePath('/finance/bank-reconciliation');
@@ -65,4 +71,47 @@ export async function discardReconciliationAction(reconciliationId: string): Pro
   if (!result.ok) return toClientResult(result);
   refresh();
   redirect('/finance/bank-reconciliation');
+}
+
+/** Uploads a statement onto a new reconciliation, then opens it. */
+export async function uploadStatementAction(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => uploadStatement(user, input));
+  if (!result.ok) return toClientResult(result);
+  refresh();
+  redirect(`/finance/bank-reconciliation/${result.data!.reconciliationId}`);
+}
+
+export async function matchStatementLineAction(
+  reconciliationId: string,
+  statementLineId: string,
+  bookLineIds: string[],
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    matchStatementLine(user, reconciliationId, { statementLineId, bookLineIds }),
+  );
+  if (result.ok) refresh(reconciliationId);
+  return toClientResult(result);
+}
+
+export async function unmatchStatementLineAction(
+  reconciliationId: string,
+  statementLineId: string,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    unmatchStatementLine(user, reconciliationId, statementLineId),
+  );
+  if (result.ok) refresh(reconciliationId);
+  return toClientResult(result);
+}
+
+export async function rematchStatementAction(
+  reconciliationId: string,
+): Promise<ActionResult<{ matched: number }>> {
+  const user = await requireUser();
+  const result = await runAction(() => rematchStatement(user, reconciliationId));
+  if (result.ok) refresh(reconciliationId);
+  return result;
 }

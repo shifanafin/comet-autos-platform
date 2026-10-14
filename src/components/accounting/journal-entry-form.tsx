@@ -13,7 +13,10 @@ import { useFormAction } from '@/components/forms/use-form-action';
 import { formatMoney } from '@/lib/format';
 import { filsToString, toFils } from '@/lib/money';
 import type { ActionResult } from '@/lib/errors';
-import { createManualEntryAction } from '@/app/(app)/finance/accounting/actions';
+import {
+  createManualEntryAction,
+  updateManualEntryAction,
+} from '@/app/(app)/finance/accounting/actions';
 import { cn } from '@/lib/utils';
 
 /*
@@ -26,6 +29,9 @@ import { cn } from '@/lib/utils';
  * A line on an account kept per customer or per supplier (trade receivables,
  * trade payables, or one the accountant set up that way) names who it is
  * for, so it counts in that party's balance and statement.
+ *
+ * Given an entry, the form edits it instead: same number, its lines
+ * replaced, the old version kept in the audit log.
  *
  * Each line is a small card laid out by the form's own width: account and
  * party side by side with the amounts beneath on a desk, everything stacked
@@ -48,6 +54,15 @@ export interface JournalAccount {
   type: string;
   /** Kept per customer or per supplier: the line must name one. */
   party: 'CUSTOMER' | 'SUPPLIER' | null;
+}
+
+/** An entry made by hand, opened for editing. */
+export interface EditableEntry {
+  id: string;
+  entryNumber: string | null;
+  date: string;
+  description: string;
+  lines: { accountId: string; partyId: string; debit: string; credit: string; memo: string }[];
 }
 
 export interface JournalParty {
@@ -86,19 +101,25 @@ export function JournalEntryForm({
   customers,
   suppliers,
   today,
+  entry,
 }: {
   accounts: JournalAccount[];
   customers: JournalParty[];
   suppliers: JournalParty[];
   today: string;
+  entry?: EditableEntry;
 }) {
   const router = useRouter();
-  const [lines, setLines] = useState<Line[]>([blankLine(), blankLine()]);
+  const [lines, setLines] = useState<Line[]>(() =>
+    entry ? entry.lines.map((line) => ({ ...line, key: next++ })) : [blankLine(), blankLine()],
+  );
   const [state, onSubmit, isPending] = useFormAction<ActionResult<{ entryNumber: string | null }>>(
     async (prev, formData) => {
-      const result = await createManualEntryAction(prev, formData);
+      const result = entry
+        ? await updateManualEntryAction(entry.id, prev, formData)
+        : await createManualEntryAction(prev, formData);
       if (result.ok) {
-        toast.success(`Entry ${result.data?.entryNumber ?? ''} booked`);
+        toast.success(`Entry ${result.data?.entryNumber ?? ''} ${entry ? 'saved' : 'booked'}`);
         router.push('/finance/accounting?view=journal');
       }
       return result;
@@ -147,7 +168,7 @@ export function JournalEntryForm({
               type="date"
               required
               max={today}
-              defaultValue={today}
+              defaultValue={entry?.date ?? today}
               className="h-11"
             />
           </Field>
@@ -157,6 +178,7 @@ export function JournalEntryForm({
             required
             error={errors.description}
             placeholder="e.g. Owner's capital paid into the bank"
+            defaultValue={entry?.description}
             className="[&_input]:h-11"
           />
         </div>
@@ -336,14 +358,29 @@ export function JournalEntryForm({
           Choose the customer or supplier on every line that asks for one.
         </p>
       ) : null}
+      {entry ? (
+        <TextField
+          label="Why the change? (optional)"
+          name="reason"
+          error={errors.reason}
+          placeholder="e.g. Wrong account chosen"
+          className="[&_input]:h-11"
+        />
+      ) : null}
       <FormError message={errors.lines ?? state.error} />
       <div className="border-t border-border pt-6">
-        <SubmitButton pending={isPending} disabled={!ready} size="lg" pendingLabel="Booking…">
+        <SubmitButton
+          pending={isPending}
+          disabled={!ready}
+          size="lg"
+          pendingLabel={entry ? 'Saving…' : 'Booking…'}
+        >
           <Save />
-          Book entry
+          {entry ? 'Save changes' : 'Book entry'}
         </SubmitButton>
         <p className="mt-3 text-sm text-muted-foreground">
-          A booked entry is permanent. If it turns out wrong, reverse it and book it again.
+          While its period is open an entry can be edited or deleted, and the audit log keeps every
+          version. Once the books are closed it can only be reversed.
         </p>
       </div>
     </form>

@@ -22,7 +22,8 @@ import { getStockOnHand, postMovement } from '@/lib/inventory/stock';
  * carry the quantity, and the same cost for the record.
  *
  * Lines billed from a job's repair records (part_usage_id) already left
- * stock when the part was fitted; they are not counted again here.
+ * stock when the part was fitted; old lines costed at a write-off
+ * (cost_movement_id) left with it. Neither is counted again here.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -38,7 +39,15 @@ export async function syncInvoiceStock(
       status: true,
       branchId: true,
       invoiceNumber: true,
-      items: { select: { partId: true, partUsageId: true, quantity: true, unitCost: true } },
+      items: {
+        select: {
+          partId: true,
+          partUsageId: true,
+          costMovementId: true,
+          quantity: true,
+          unitCost: true,
+        },
+      },
     },
   });
   const live =
@@ -49,7 +58,7 @@ export async function syncInvoiceStock(
   const wanted = new Map<string, { milli: number; unitCost: string | null }>();
   if (live) {
     for (const item of invoice.items) {
-      if (!item.partId || item.partUsageId) continue;
+      if (!item.partId || item.partUsageId || item.costMovementId) continue;
       const entry = wanted.get(item.partId) ?? { milli: 0, unitCost: null };
       entry.milli += signedToMilli(item.quantity);
       entry.unitCost = item.unitCost?.toString() ?? entry.unitCost;

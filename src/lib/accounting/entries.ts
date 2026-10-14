@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { purchaseBillDifferenceFils } from '@/lib/finance/supplier-balance';
+import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
@@ -10,7 +11,17 @@ import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { addStandardAccounts, ensureChart } from '@/lib/accounting/chart';
-import { bookEntry, reverseEntry, syncPosting, type PostedSource } from '@/lib/accounting/journal';
+import {
+  amendEntry,
+  bookEntry,
+  deleteEntry,
+  postingPending,
+  renumberJournal,
+  reverseEntry,
+  syncPosting,
+  whyNotCorrectable,
+  type PostedSource,
+} from '@/lib/accounting/journal';
 import { subLedgerOf } from '@/lib/accounting/sub-ledger';
 
 /*
@@ -19,8 +30,10 @@ import { subLedgerOf } from '@/lib/accounting/sub-ledger';
  * MANUAL ENTRIES are the accountant's: opening balances, owner's capital and
  * drawings, bank charges, depreciation, moving card takings to the bank, a
  * correction between accounts. Each must balance, use active accounts and
- * fall in an open period. Like every entry it is permanent; a mistake is
- * reversed, never edited.
+ * fall in an open period. While that period is open an entry can be edited
+ * or deleted (the audit log keeps what it said); once it is closed, a
+ * mistake is reversed. Narration — the description and line notes — can be
+ * corrected on any entry at any time: it moves no figure.
  *
  * BOOKING EXISTING RECORDS runs syncPosting over everything recorded before
  * the books existed, oldest first. It is safe to run any number of times:
@@ -60,9 +73,16 @@ const manualSchema = z.object({
   requestKey: z.string().optional(),
 });
 
-/** Books an entry made by hand. */
-export async function createManualEntry(user: AuthenticatedUser, rawInput: unknown) {
-  requirePermission(user, 'accounting.create');
+type ManualLine = {
+  accountId: string;
+  debit: number;
+  credit: number;
+  memo: string | null;
+  partyId: string | null;
+};
+
+/** A hand-made entry as typed: a valid date, and lines that balance. */
+function readManual(rawInput: unknown) {
   const input = parseInput(manualSchema, rawInput);
   const date = parseCalendarDate(input.date);
   if (!date) throw new DomainError('Choose a valid date.', 'date');
@@ -71,7 +91,7 @@ export async function createManualEntry(user: AuthenticatedUser, rawInput: unkno
   }
 
   const errors: Record<string, string> = {};
-  const lines = input.lines.map((line, index) => {
+  const lines: ManualLine[] = input.lines.map((line, index) => {
     const debit = line.debit ? toFils(line.debit) : 0;
     const credit = line.credit ? toFils(line.credit) : 0;
     if ((debit === 0) === (credit === 0)) {
@@ -94,73 +114,102 @@ export async function createManualEntry(user: AuthenticatedUser, rawInput: unkno
       'lines',
     );
   }
+  return { input, date, lines, debits };
+}
+
+/**
+ * The lines checked against the chart and the parties: every account this
+ * workshop's and active, and a customer or supplier named exactly where the
+ * account is kept per party.
+ */
+async function checkManualLines(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  lines: ManualLine[],
+) {
+  const accounts = await tx.chartOfAccount.findMany({
+    where: { organizationId, id: { in: lines.map((line) => line.accountId) } },
+    select: { id: true, isActive: true, accountName: true, role: true, subLedger: true },
+  });
+  const known = new Map(accounts.map((account) => [account.id, account]));
+  // The parties named, checked to be this workshop's and still in use.
+  const partyIds = [...new Set(lines.map((line) => line.partyId).filter(Boolean))] as string[];
+  const [customers, suppliers] = await Promise.all([
+    tx.customer.findMany({
+      where: { organizationId, id: { in: partyIds }, isActive: true },
+      select: { id: true },
+    }),
+    tx.supplier.findMany({
+      where: { organizationId, id: { in: partyIds }, isActive: true },
+      select: { id: true },
+    }),
+  ]);
+  const isCustomer = new Set(customers.map((c) => c.id));
+  const isSupplier = new Set(suppliers.map((s) => s.id));
+  return lines.map((line, index) => {
+    const account = known.get(line.accountId);
+    if (!account)
+      throw new DomainError(`Line ${index + 1}: that account was not found.`, `lines.${index}`);
+    if (!account.isActive) {
+      throw new DomainError(
+        `Line ${index + 1}: “${account.accountName}” is retired. Choose an active account.`,
+        `lines.${index}`,
+      );
+    }
+    // An account kept per party names the party; any other names none.
+    const kept = subLedgerOf(account);
+    const { partyId, ...rest } = line;
+    if (kept === 'CUSTOMER') {
+      if (!partyId || !isCustomer.has(partyId)) {
+        throw new DomainError(
+          `Line ${index + 1}: “${account.accountName}” is kept per customer — choose the customer.`,
+          `lines.${index}`,
+        );
+      }
+      return { ...rest, customerId: partyId };
+    }
+    if (kept === 'SUPPLIER') {
+      if (!partyId || !isSupplier.has(partyId)) {
+        throw new DomainError(
+          `Line ${index + 1}: “${account.accountName}” is kept per supplier — choose the supplier.`,
+          `lines.${index}`,
+        );
+      }
+      return { ...rest, supplierId: partyId };
+    }
+    if (partyId) {
+      throw new DomainError(
+        `Line ${index + 1}: “${account.accountName}” isn't kept per customer or supplier, so no one can be named on it.`,
+        `lines.${index}`,
+      );
+    }
+    return rest;
+  });
+}
+
+type CheckedLine = Awaited<ReturnType<typeof checkManualLines>>[number];
+
+function linesForLog(lines: CheckedLine[]) {
+  return lines.map((line) => ({
+    accountId: line.accountId,
+    debit: filsToString(line.debit),
+    credit: filsToString(line.credit),
+    customerId: 'customerId' in line ? line.customerId : undefined,
+    supplierId: 'supplierId' in line ? line.supplierId : undefined,
+  }));
+}
+
+/** Books an entry made by hand. */
+export async function createManualEntry(user: AuthenticatedUser, rawInput: unknown) {
+  requirePermission(user, 'accounting.create');
+  const { input, date, lines, debits } = readManual(rawInput);
 
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'journal.create');
     await ensureChart(tx, user.organizationId);
-    const accounts = await tx.chartOfAccount.findMany({
-      where: {
-        organizationId: user.organizationId,
-        id: { in: lines.map((line) => line.accountId) },
-      },
-      select: { id: true, isActive: true, accountName: true, role: true, subLedger: true },
-    });
-    const known = new Map(accounts.map((account) => [account.id, account]));
-    // The parties named, checked to be this workshop's and still in use.
-    const partyIds = [...new Set(lines.map((line) => line.partyId).filter(Boolean))] as string[];
-    const [customers, suppliers] = await Promise.all([
-      tx.customer.findMany({
-        where: { organizationId: user.organizationId, id: { in: partyIds }, isActive: true },
-        select: { id: true },
-      }),
-      tx.supplier.findMany({
-        where: { organizationId: user.organizationId, id: { in: partyIds }, isActive: true },
-        select: { id: true },
-      }),
-    ]);
-    const isCustomer = new Set(customers.map((c) => c.id));
-    const isSupplier = new Set(suppliers.map((s) => s.id));
-    const booked = lines.map((line, index) => {
-      const account = known.get(line.accountId);
-      if (!account)
-        throw new DomainError(`Line ${index + 1}: that account was not found.`, `lines.${index}`);
-      if (!account.isActive) {
-        throw new DomainError(
-          `Line ${index + 1}: “${account.accountName}” is retired. Choose an active account.`,
-          `lines.${index}`,
-        );
-      }
-      // An account kept per party names the party; any other names none.
-      const kept = subLedgerOf(account);
-      const { partyId, ...rest } = line;
-      if (kept === 'CUSTOMER') {
-        if (!partyId || !isCustomer.has(partyId)) {
-          throw new DomainError(
-            `Line ${index + 1}: “${account.accountName}” is kept per customer — choose the customer.`,
-            `lines.${index}`,
-          );
-        }
-        return { ...rest, customerId: partyId };
-      }
-      if (kept === 'SUPPLIER') {
-        if (!partyId || !isSupplier.has(partyId)) {
-          throw new DomainError(
-            `Line ${index + 1}: “${account.accountName}” is kept per supplier — choose the supplier.`,
-            `lines.${index}`,
-          );
-        }
-        return { ...rest, supplierId: partyId };
-      }
-      if (partyId) {
-        throw new DomainError(
-          `Line ${index + 1}: “${account.accountName}” isn't kept per customer or supplier, so no one can be named on it.`,
-          `lines.${index}`,
-        );
-      }
-      return rest;
-    });
+    const booked = await checkManualLines(tx, user.organizationId, lines);
 
-    const entry = await bookEntry(tx, {
+    const created = await bookEntry(tx, {
       organizationId: user.organizationId,
       branchId: null,
       date,
@@ -170,6 +219,9 @@ export async function createManualEntry(user: AuthenticatedUser, rawInput: unkno
       sourceId: null,
       actorUserId: user.id,
     });
+    // A back-dated entry takes its place in date order: report the number it ends with.
+    await renumberJournal(tx, user.organizationId);
+    const entry = await tx.journalEntry.findUniqueOrThrow({ where: { id: created.id } });
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
       actorUserId: user.id,
@@ -181,17 +233,240 @@ export async function createManualEntry(user: AuthenticatedUser, rawInput: unkno
         date: input.date,
         description: input.description,
         total: filsToString(debits),
-        lines: booked.map((line) => ({
-          accountId: line.accountId,
-          debit: filsToString(line.debit),
-          credit: filsToString(line.credit),
-          customerId: 'customerId' in line ? line.customerId : undefined,
-          supplierId: 'supplierId' in line ? line.supplierId : undefined,
-        })),
+        lines: linesForLog(booked),
       },
     });
     await settleRequestKey(tx, user, rawInput, entry.id);
     return entry;
+  });
+}
+
+/** An entry of this workshop's, with what decides whether it may change. */
+async function findEntry(tx: Prisma.TransactionClient, user: AuthenticatedUser, entryId: string) {
+  const entry = await tx.journalEntry.findFirst({
+    where: { id: entryId, organizationId: user.organizationId },
+    include: {
+      reversals: {
+        select: { id: true, organizationId: true, entryDate: true, entryNumber: true },
+      },
+    },
+  });
+  if (!entry) throw new NotFoundError('journal entry');
+  return entry;
+}
+
+/**
+ * One entry for its edit screen: its lines, and how far it may change —
+ * `figuresLocked` says why its accounts and amounts can't be edited (null
+ * when they can); `deletable` whether it can be deleted.
+ */
+export async function getEntryForEdit(user: AuthenticatedUser, entryId: string) {
+  requirePermission(user, 'accounting.edit');
+  return prisma.$transaction(async (tx) => {
+    const entry = await tx.journalEntry.findFirst({
+      where: { id: entryId, organizationId: user.organizationId },
+      include: {
+        lines: {
+          orderBy: { id: 'asc' },
+          include: {
+            chartOfAccount: { select: { accountCode: true, accountName: true } },
+            customer: { select: { name: true } },
+            supplier: { select: { name: true } },
+          },
+        },
+        reversalOf: { select: { entryNumber: true } },
+        reversals: {
+          select: { id: true, organizationId: true, entryDate: true, entryNumber: true },
+        },
+      },
+    });
+    if (!entry) throw new NotFoundError('journal entry');
+
+    const openReason = await whyNotCorrectable(tx, entry);
+    let figuresLocked: string | null = openReason;
+    if (entry.sourceType !== 'MANUAL') {
+      figuresLocked = 'it was booked from a record — change the record and its entry follows';
+    } else if (entry.reversalOf) {
+      figuresLocked = `it reverses ${entry.reversalOf.entryNumber ?? 'another entry'} — delete it to bring the original back`;
+    } else if (entry.reversals.length > 0) {
+      figuresLocked = `it has been reversed by ${entry.reversals[0].entryNumber ?? 'another entry'} — delete that reversal first`;
+    }
+    let deletable = entry.sourceType === 'MANUAL' && openReason === null;
+    for (const reversal of entry.reversals) {
+      if (deletable && (await whyNotCorrectable(tx, reversal))) deletable = false;
+    }
+    return { entry, figuresLocked, deletable };
+  });
+}
+
+const BOOKED_FROM_RECORD =
+  'This entry was booked from a record. Change the record itself and its entry follows; its description and line notes can be edited here.';
+
+const correctionSchema = z.object({
+  reason: z.string().trim().max(300).optional(),
+});
+
+/**
+ * Corrects an entry made by hand where it stands — date, description,
+ * accounts, amounts, parties — while its period is open. The audit log
+ * keeps what it said before. In a closed period it must be reversed instead.
+ */
+export async function updateManualEntry(
+  user: AuthenticatedUser,
+  entryId: string,
+  rawInput: unknown,
+) {
+  requirePermission(user, 'accounting.edit');
+  const { input, date, lines } = readManual(rawInput);
+  const { reason } = parseInput(correctionSchema, rawInput);
+
+  return prisma.$transaction(async (tx) => {
+    const entry = await findEntry(tx, user, entryId);
+    if (entry.sourceType !== 'MANUAL') throw new DomainError(BOOKED_FROM_RECORD);
+    if (entry.reversalOfJournalEntryId) {
+      throw new DomainError(
+        'This entry reverses another. Delete it to bring the original back, then edit the original.',
+      );
+    }
+    if (entry.reversals.length > 0) {
+      throw new DomainError(
+        `This entry has been reversed by ${entry.reversals[0].entryNumber ?? 'another entry'}. Delete that reversal first, then edit this entry.`,
+      );
+    }
+    const why = await whyNotCorrectable(tx, entry, date);
+    if (why) {
+      throw new DomainError(
+        `This entry can’t be changed: ${why}. Reverse it and book it again instead.`,
+      );
+    }
+    const booked = await checkManualLines(tx, user.organizationId, lines);
+    await amendEntry(tx, entry, {
+      date,
+      description: input.description,
+      lines: booked,
+      actorUserId: user.id,
+      reason,
+    });
+    await renumberJournal(tx, user.organizationId);
+    return tx.journalEntry.findUniqueOrThrow({ where: { id: entry.id } });
+  });
+}
+
+const deleteSchema = z.object({
+  reason: z.string({ error: 'Say why.' }).trim().min(3, 'Say why, in a few words.').max(300),
+});
+
+/**
+ * Deletes an entry made by hand from an open period; the entries after it
+ * move up a number, so the journal has no gap. An entry and its reversal
+ * cancel out, so deleting a reversed entry deletes its reversal too, and
+ * deleting a reversal alone brings the original back. Each is kept in the
+ * audit log.
+ */
+export async function deleteManualEntry(
+  user: AuthenticatedUser,
+  entryId: string,
+  rawInput: unknown,
+) {
+  requirePermission(user, 'accounting.delete');
+  const { reason } = parseInput(deleteSchema, rawInput);
+
+  return prisma.$transaction(async (tx) => {
+    const entry = await findEntry(tx, user, entryId);
+    if (entry.sourceType !== 'MANUAL') {
+      throw new DomainError(
+        'This entry was booked from a record. Void or delete the record itself and its entry goes with it.',
+      );
+    }
+    // The reversals first: each points at the entry it reverses.
+    const targets = [...entry.reversals, entry];
+    for (const target of targets) {
+      const why = await whyNotCorrectable(tx, target);
+      if (why) {
+        throw new DomainError(
+          `${target.entryNumber ?? 'This entry'} can’t be deleted: ${why}. Reverse it instead.`,
+        );
+      }
+    }
+    for (const target of targets) {
+      if (!(await deleteEntry(tx, target, user.id, reason))) {
+        throw new DomainError(
+          `${target.entryNumber ?? 'This entry'} is still linked to a record, so it can’t be deleted.`,
+        );
+      }
+    }
+    await renumberJournal(tx, user.organizationId);
+    return { deleted: targets.length };
+  });
+}
+
+const narrationSchema = z.object({
+  description: z
+    .string({ error: 'Describe the entry.' })
+    .trim()
+    .min(3, 'Describe the entry.')
+    .max(300, 'Keep the description under 300 characters.'),
+  notes: z
+    .array(z.object({ lineId: z.uuid(), memo: z.string().trim().max(200) }))
+    .max(MAX_LINES)
+    .optional(),
+});
+
+/**
+ * Corrects an entry's narration — its description and its lines' notes —
+ * on any entry, in any period: narration moves no figure. The audit log
+ * keeps the old wording.
+ */
+export async function updateEntryNarration(
+  user: AuthenticatedUser,
+  entryId: string,
+  rawInput: unknown,
+) {
+  requirePermission(user, 'accounting.edit');
+  const input = parseInput(narrationSchema, rawInput);
+
+  return prisma.$transaction(async (tx) => {
+    const entry = await tx.journalEntry.findFirst({
+      where: { id: entryId, organizationId: user.organizationId },
+      include: { lines: { select: { id: true, description: true } } },
+    });
+    if (!entry) throw new NotFoundError('journal entry');
+    const lineNotes = new Map(entry.lines.map((line) => [line.id, line.description ?? '']));
+    const changedNotes = (input.notes ?? []).filter(
+      (note) => lineNotes.has(note.lineId) && lineNotes.get(note.lineId) !== note.memo,
+    );
+    if (entry.description === input.description && changedNotes.length === 0) return entry;
+
+    const updated = await tx.journalEntry.update({
+      where: { id: entry.id },
+      data: { description: input.description },
+    });
+    for (const note of changedNotes) {
+      await tx.journalEntryLine.update({
+        where: { id: note.lineId },
+        data: { description: note.memo || null },
+      });
+    }
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'journal.narration_changed',
+      entityType: 'JournalEntry',
+      entityId: entry.id,
+      beforeData: {
+        entryNumber: entry.entryNumber,
+        description: entry.description,
+        notes: changedNotes.map((note) => ({
+          lineId: note.lineId,
+          memo: lineNotes.get(note.lineId) || null,
+        })),
+      },
+      afterData: {
+        description: input.description,
+        notes: changedNotes.map((note) => ({ lineId: note.lineId, memo: note.memo || null })),
+      },
+    });
+    return updated;
   });
 }
 
@@ -494,7 +769,8 @@ async function unbooked(organizationId: string) {
       .then((rows) =>
         rows.filter(
           (row) =>
-            (row.taxAmount !== null && row.taxAmount.gt(0)) || purchaseBillDifferenceFils(row) !== 0,
+            (row.taxAmount !== null && row.taxAmount.gt(0)) ||
+            purchaseBillDifferenceFils(row) !== 0,
         ),
       ),
     // Card money collected for others on payment vouchers, and paid over.
@@ -576,11 +852,28 @@ async function unbooked(organizationId: string) {
   } satisfies Record<PostedSource, string[]>;
 }
 
-/** How many records are not yet in the books, for the accounting screen. */
+/** Past this many, every one is counted as waiting rather than checked. */
+const CHECK_LIMIT = 50;
+
+/**
+ * How many records are not yet in the books, for the accounting screen.
+ * Each is put through the posting rules, so a record with nothing to book
+ * (which booking would leave as it is) is never counted. Many waiting is
+ * a workshop's first booking: those are counted without the check.
+ */
 export async function countUnbooked(user: AuthenticatedUser) {
   requirePermission(user, 'accounting.view');
-  const waiting = await unbooked(user.organizationId);
-  return Object.values(waiting).reduce((sum, ids) => sum + ids.length, 0);
+  const waiting = Object.entries(await unbooked(user.organizationId)).flatMap(([source, ids]) =>
+    ids.map((id) => ({ source: source as PostedSource, id })),
+  );
+  if (waiting.length === 0 || waiting.length > CHECK_LIMIT) return waiting.length;
+  return prisma.$transaction(async (tx) => {
+    let count = 0;
+    for (const { source, id } of waiting) {
+      if (await postingPending(tx, user.organizationId, source, id)) count += 1;
+    }
+    return count;
+  });
 }
 
 /**

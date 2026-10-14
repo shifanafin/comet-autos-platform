@@ -284,6 +284,18 @@ export async function addStandardAccounts(tx: Tx, organizationId: string): Promi
   return count;
 }
 
+/** The system accounts' ids by role, or null while one is missing. Reads only. */
+export async function readChart(tx: Tx, organizationId: string): Promise<RoleAccounts | null> {
+  const accounts = await tx.chartOfAccount.findMany({
+    where: { organizationId, role: { not: null } },
+    select: { id: true, role: true },
+  });
+  const roles = new Map(accounts.map((account) => [account.role!, account.id]));
+  return SYSTEM_ACCOUNTS.every((spec) => roles.has(spec.role))
+    ? (Object.fromEntries(roles) as RoleAccounts)
+    : null;
+}
+
 /**
  * Makes sure the workshop has every system account, and returns their ids by
  * role. Cheap once they exist (one query), so every posting calls it. The

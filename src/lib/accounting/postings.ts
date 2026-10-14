@@ -300,6 +300,7 @@ const postInvoice: Poster = async (tx, organizationId, invoiceId, accounts) => {
           partId: true,
           unitCost: true,
           partUsageId: true,
+          costMovementId: true,
         },
       },
       customer: { select: { name: true } },
@@ -389,9 +390,10 @@ const postInvoice: Poster = async (tx, organizationId, invoiceId, accounts) => {
 
   // Parts sold from stock on its own lines (not through a job's repair
   // records), at the cost decided on each line — the same quantity the
-  // line's SALE movement took out of stock.
+  // line's SALE movement took out of stock. An old line costed at a
+  // write-off was costed by that write-off's own entry.
   const sold = invoice.items
-    .filter((item) => item.partId && !item.partUsageId && item.unitCost)
+    .filter((item) => item.partId && !item.partUsageId && !item.costMovementId && item.unitCost)
     .reduce(
       (sum, item) => sum + multiplyQuantity(item.quantity.toString(), item.unitCost!.toString()),
       0,

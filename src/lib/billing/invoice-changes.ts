@@ -7,7 +7,14 @@ import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
 import { parseInput } from '@/lib/form-data';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
-import { calculateDocument, calculateLine, filsToString, readDiscount, toFils } from '@/lib/money';
+import {
+  calculateDocument,
+  calculateLine,
+  filsToString,
+  readDiscount,
+  signedToMilli,
+  toFils,
+} from '@/lib/money';
 import { emptyToNull } from '@/lib/normalize';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { resolveDefaultVatRate } from '@/lib/tax';
@@ -262,13 +269,38 @@ export async function updateInvoice(user: AuthenticatedUser, invoiceId: string, 
       );
     }
     // Lines that came from the repair records keep their link to the labour
-    // or part they bill.
+    // or part they bill; an old line costed at the write-off that took its
+    // part out keeps that too (lib/inventory/old-part-lines.ts).
     const links = new Map(
       invoice.items.map((item) => [
         item.id,
-        { labourId: item.labourId, partUsageId: item.partUsageId },
+        {
+          labourId: item.labourId,
+          partUsageId: item.partUsageId,
+          costMovementId: item.costMovementId,
+          partId: item.partId,
+          unitCost: item.unitCost?.toString() ?? null,
+          quantityMilli: signedToMilli(item.quantity),
+        },
       ]),
     );
+    // Such a line was costed at what the write-off took out: the same part,
+    // the same quantity. Anything else would cost what never left stock.
+    lines.forEach((line, index) => {
+      const sourceId = input.items[index].sourceId;
+      const link = sourceId ? links.get(sourceId) : undefined;
+      if (!link?.costMovementId) return;
+      if (
+        line.itemType !== 'PART' ||
+        line.partId !== link.partId ||
+        signedToMilli(line.amounts.quantity) !== link.quantityMilli
+      ) {
+        throw new DomainError(
+          `Line ${index + 1} (“${line.description}”) is costed at old stock already written off. Keep its part and quantity — or undo that on Reports → Job profit → Old parts lines first.`,
+          `items.${index}`,
+        );
+      }
+    });
 
     await tx.invoiceItem.deleteMany({
       where: { organizationId: user.organizationId, invoiceId: invoice.id },
@@ -289,7 +321,12 @@ export async function updateInvoice(user: AuthenticatedUser, invoiceId: string, 
           taxCodeId: line.taxCodeId ?? null,
           // A line billing a fitted part left stock with the job, not here.
           partId: link?.partUsageId ? null : (line.partId ?? null),
-          unitCost: link?.partUsageId ? null : (line.unitCost ?? null),
+          unitCost: link?.partUsageId
+            ? null
+            : link?.costMovementId
+              ? link.unitCost
+              : (line.unitCost ?? null),
+          costMovementId: link?.costMovementId ?? null,
           ...lineData(line.amounts),
         },
       });
