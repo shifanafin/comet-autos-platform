@@ -55,6 +55,8 @@ import {
   sendEstimate,
 } from '@/lib/workshop/estimates';
 import { filsToString, toFils } from '@/lib/money';
+import { advanceVatReleases } from '@/lib/billing/advance-vat';
+import { getVatReturn } from '@/lib/finance/vat';
 import { localDateString, toLocalDateTimeInput } from '@/lib/format';
 import { createTestOrg, expectDomainError, RUN, type TestOrg } from './support';
 
@@ -142,7 +144,7 @@ async function labourInvoice(amount: string, extra: Record<string, unknown> = {}
 describe('receiving an advance', () => {
   let advanceId: string;
 
-  test('AED 2,000 towards the Patrol on its job card: Dr cash, Cr Customer advances (2030)', async () => {
+  test('AED 2,000 towards the Patrol on its job card: Dr cash, Cr Customer advances (2030) and output VAT', async () => {
     const advance = await receiveCustomerAdvance(a.owner, {
       customerId,
       jobCardId,
@@ -156,8 +158,9 @@ describe('receiving an advance', () => {
     const row = await prisma.customerAdvance.findUniqueOrThrow({ where: { id: advance.id } });
     assert.equal(row.vehicleId, vehicleId, 'the job card’s vehicle is filled in');
     assert.equal(row.status, 'OPEN');
-    assert.equal(row.vatTreatment, 'PENDING_ACCOUNTANT_CONFIRMATION');
-    assert.equal(row.vatAmount.toString(), '0');
+    // VAT is due the day an advance is received: 2,000 = 1,904.76 + 95.24 VAT.
+    assert.equal(row.vatTreatment, 'VAT_ON_RECEIPT');
+    assert.equal(row.vatAmount.toString(), '95.24');
 
     const account = await prisma.chartOfAccount.findUniqueOrThrow({
       where: { id: roles.CUSTOMER_ADVANCES },
@@ -167,21 +170,33 @@ describe('receiving an advance', () => {
 
     const booked = await bookedFor(advance.id);
     assert.equal(booked.get(roles.CASH), toFils('2000.00'));
-    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), -toFils('2000.00'));
-    assert.equal(booked.size, 2, 'no VAT, no income');
+    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), -toFils('1904.76'));
+    assert.equal(booked.get(roles.VAT_OUTPUT), -toFils('95.24'));
+    assert.equal(booked.size, 3, 'VAT, but no income');
     assert.equal(await customerAdvanceHeld(prisma, a.organizationId, customerId), toFils('2000'));
   });
 
-  test('only the customer’s own vehicle and job card; an amount; not in the future', async () => {
+  test('always for one of the customer’s own job cards; an amount; not in the future', async () => {
     await expectDomainError(
       receiveCustomerAdvance(a.owner, {
         customerId,
+        vehicleId,
+        amount: '100',
+        receivedOn: today(),
+        method: 'CASH',
+      }),
+      /job card/,
+    );
+    await expectDomainError(
+      receiveCustomerAdvance(a.owner, {
+        customerId,
+        jobCardId,
         vehicleId: strangerVehicleId,
         amount: '100',
         receivedOn: today(),
         method: 'CASH',
       }),
-      /this customer’s vehicles/,
+      /different vehicle/,
     );
     await expectDomainError(
       receiveCustomerAdvance(a.owner, {
@@ -196,6 +211,7 @@ describe('receiving an advance', () => {
     await expectDomainError(
       receiveCustomerAdvance(a.owner, {
         customerId,
+        jobCardId,
         amount: '0',
         receivedOn: today(),
         method: 'CASH',
@@ -205,6 +221,7 @@ describe('receiving an advance', () => {
     await expectDomainError(
       receiveCustomerAdvance(a.owner, {
         customerId,
+        jobCardId,
         amount: '10',
         receivedOn: '2999-01-01',
         method: 'CASH',
@@ -217,6 +234,7 @@ describe('receiving an advance', () => {
     await assert.rejects(
       receiveCustomerAdvance(a.viewer, {
         customerId,
+        jobCardId,
         amount: '10',
         receivedOn: today(),
         method: 'CASH',
@@ -243,7 +261,7 @@ describe('applying advances to invoices', () => {
     invoiceId = await labourInvoice('1000', { jobCardId });
   });
 
-  test('part applied: Dr Customer advances, Cr receivables — revenue and VAT untouched', async () => {
+  test('part applied: Dr Customer advances and its VAT released, Cr receivables — the invoice untouched', async () => {
     const before = await bookedFor(invoiceId);
     const { allocationId } = await applyCustomerAdvance(a.owner, advanceId, {
       invoiceId,
@@ -251,9 +269,11 @@ describe('applying advances to invoices', () => {
     });
     firstApplication = allocationId;
     const booked = await bookedFor(allocationId);
-    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), toFils('600.00'));
+    // 600 of 2,000: 28.57 of its 95.24 VAT, accounted when received, comes off.
+    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), toFils('571.43'));
+    assert.equal(booked.get(roles.VAT_OUTPUT), toFils('28.57'));
     assert.equal(booked.get(roles.ACCOUNTS_RECEIVABLE), -toFils('600.00'));
-    assert.equal(booked.size, 2);
+    assert.equal(booked.size, 3);
     assert.deepEqual(await bookedFor(invoiceId), before, 'the invoice’s own entry is unchanged');
 
     const invoice = await invoiceOf(invoiceId);
@@ -360,6 +380,7 @@ describe('several advances, one invoice — and a credit note', () => {
     bankAdvance = (
       await receiveCustomerAdvance(a.owner, {
         customerId,
+        jobCardId,
         amount: '300',
         receivedOn: today(),
         method: 'BANK_TRANSFER',
@@ -420,7 +441,12 @@ describe('several advances, one invoice — and a credit note', () => {
     assert.equal(returned.amount.toString(), '-105');
     const booked = await bookedFor(returned.id);
     assert.equal(booked.get(roles.ACCOUNTS_RECEIVABLE), toFils('105.00'));
-    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), -toFils('105.00'));
+    // Held again as an advance: its VAT is accounted again, as on receipt.
+    assert.equal(
+      (booked.get(roles.CUSTOMER_ADVANCES) ?? 0) + (booked.get(roles.VAT_OUTPUT) ?? 0),
+      -toFils('105.00'),
+    );
+    assert.ok((booked.get(roles.VAT_OUTPUT) ?? 0) < 0, 'VAT accounted again');
   });
 
   test('voiding the credit note applies the money to the invoice again', async () => {
@@ -469,7 +495,12 @@ describe('refunds and cancelling', () => {
       method: 'BANK_TRANSFER',
     });
     const booked = await bookedFor(refundId);
-    assert.equal(booked.get(roles.CUSTOMER_ADVANCES), toFils('250.00'));
+    // Paid back: the advance (net) and the VAT on it both come off.
+    assert.equal(
+      (booked.get(roles.CUSTOMER_ADVANCES) ?? 0) + (booked.get(roles.VAT_OUTPUT) ?? 0),
+      toFils('250.00'),
+    );
+    assert.ok((booked.get(roles.VAT_OUTPUT) ?? 0) > 0, 'its VAT released');
     assert.equal(booked.get(roles.BANK), -toFils('250.00'));
     assert.equal(
       (await advanceOf(advanceId)).figures.left,
@@ -507,6 +538,7 @@ describe('refunds and cancelling', () => {
     );
     const spare = await receiveCustomerAdvance(a.owner, {
       customerId,
+      jobCardId,
       amount: '100',
       receivedOn: today(),
       method: 'CASH',
@@ -527,6 +559,7 @@ describe('the new invoice form', () => {
     const heldBefore = await customerAdvanceHeld(prisma, a.organizationId, customerId);
     await receiveCustomerAdvance(a.owner, {
       customerId,
+      jobCardId,
       amount: '100',
       receivedOn: today(),
       method: 'CASH',
@@ -601,6 +634,39 @@ describe('the new invoice form', () => {
   });
 });
 
+describe('VAT on an advance in the return', () => {
+  test('due when received, and counted once when applied to the job’s invoice', async () => {
+    const period = { period: 'custom', from: today(), to: today() };
+    const start = (await getVatReturn(a.owner, period)).boxes;
+    const advance = await receiveCustomerAdvance(a.owner, {
+      customerId,
+      jobCardId,
+      amount: '1050',
+      receivedOn: today(),
+      method: 'CASH',
+    });
+    const received = (await getVatReturn(a.owner, period)).boxes;
+    // 1,050 = 1,000 + 50 VAT, due today.
+    assert.equal(toFils(received.outputVat) - toFils(start.outputVat), toFils('50.00'));
+    assert.equal(
+      toFils(received.standardSupplies) - toFils(start.standardSupplies),
+      toFils('1000.00'),
+    );
+
+    // Invoiced (1,000 + 50 VAT) and the advance applied in full.
+    const invoiceId = await labourInvoice('1000');
+    await applyCustomerAdvance(a.owner, advance.id, { invoiceId, amount: '1050' });
+    const billed = await getVatReturn(a.owner, period);
+    // Only one supply of 1,000 and one 50 of VAT in all: not two.
+    assert.equal(toFils(billed.boxes.outputVat) - toFils(start.outputVat), toFils('50.00'));
+    assert.equal(
+      toFils(billed.boxes.standardSupplies) - toFils(start.standardSupplies),
+      toFils('1000.00'),
+    );
+    assert.ok(billed.advances.some((row) => row.number === advance.advanceNumber && row.sign < 0));
+  });
+});
+
 describe('everything agrees', () => {
   test('the statement shows each application, and what is still held', async () => {
     const statement = await getCustomerStatement(a.owner, customerId);
@@ -616,7 +682,7 @@ describe('everything agrees', () => {
     assert.equal((await getCustomerStatement(a.owner, strangerId)).advanceHeld, '0.00');
   });
 
-  test('Customer advances in the books equals what is held for customers', async () => {
+  test('Customer advances in the books, with the VAT still on them, equals what is held', async () => {
     const lines = await prisma.journalEntryLine.findMany({
       where: { organizationId: a.organizationId, chartOfAccountId: roles.CUSTOMER_ADVANCES },
       select: { debitAmount: true, creditAmount: true },
@@ -629,7 +695,19 @@ describe('everything agrees', () => {
     const held =
       (await customerAdvanceHeld(prisma, a.organizationId, customerId)) +
       (await customerAdvanceHeld(prisma, a.organizationId, strangerId));
-    assert.equal(credit, held);
+    // The VAT accounted on receipt and not yet released by an application or refund.
+    const advances = await prisma.customerAdvance.findMany({
+      where: { organizationId: a.organizationId, status: { not: 'CANCELLED' } },
+      select: { id: true, vatAmount: true },
+    });
+    let vatHeld = 0;
+    for (const advance of advances) {
+      const released = await advanceVatReleases(prisma, a.organizationId, advance.id);
+      vatHeld +=
+        toFils(advance.vatAmount.toString()) -
+        [...(released?.values() ?? [])].reduce((sum, value) => sum + value, 0);
+    }
+    assert.equal(credit + vatHeld, held);
   });
 
   test('the balance sheet balances and nothing is left unbooked', async () => {

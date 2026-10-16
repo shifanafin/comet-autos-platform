@@ -495,6 +495,35 @@ export async function postingPending(
   return (await comparePosting(tx, organizationId, source, sourceId, accounts)).changed;
 }
 
+export type PostingState = 'ok' | 'missing' | 'differs' | 'orphan';
+
+/**
+ * How one record's booking stands — the same comparison syncPosting makes,
+ * without writing: in step, not booked yet, booked but no longer what its
+ * record says, or still booked though its record no longer calls for it.
+ */
+export async function postingState(
+  tx: Tx,
+  organizationId: string,
+  source: PostedSource,
+  sourceId: string,
+): Promise<PostingState> {
+  const accounts = await txMemo(tx, `chart-read:${organizationId}`, () =>
+    readChart(tx, organizationId),
+  );
+  if (!accounts) return 'missing';
+  const { standing, wantedSignature, changed } = await comparePosting(
+    tx,
+    organizationId,
+    source,
+    sourceId,
+    accounts,
+  );
+  if (!changed) return 'ok';
+  if (!standing) return 'missing';
+  return wantedSignature ? 'differs' : 'orphan';
+}
+
 /**
  * Brings one record's booking up to date: books it if it isn't, corrects it
  * if it changed, removes it if it no longer counts (a void invoice). In a

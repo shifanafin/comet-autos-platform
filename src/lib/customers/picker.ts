@@ -22,6 +22,8 @@ export interface PickerVehicle {
 export interface PickerJobCard {
   id: string;
   jobNumber: string;
+  /** The vehicle in for it. */
+  vehicleId: string;
 }
 
 export interface CustomerOption {
@@ -65,7 +67,7 @@ export async function getCustomerOptions(
       jobCards: {
         where: { status: { in: OPEN_JOB_STATUSES } },
         orderBy: { openedAt: 'desc' },
-        select: { id: true, jobNumber: true },
+        select: { id: true, jobNumber: true, vehicleId: true },
       },
     },
   });

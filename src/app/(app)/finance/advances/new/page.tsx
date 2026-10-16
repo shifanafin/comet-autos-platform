@@ -12,8 +12,9 @@ import { ReceiveAdvanceForm } from '@/components/finance/advance-forms';
 export const metadata = { title: 'Receive advance' };
 
 /**
- * Taking a deposit before the invoice — opened from a quotation or a job
- * card, which fill in the customer, vehicle and job.
+ * Taking a deposit before the invoice — always for a job card: opened from
+ * one (which fills in the customer, vehicle and job), or from Customer
+ * advances, choosing the customer and then their job card.
  */
 export default async function ReceiveAdvancePage({
   searchParams,
@@ -62,6 +63,11 @@ export default async function ReceiveAdvancePage({
           initialCustomer={initialCustomer}
           initialVehicleId={prefill.vehicleId}
           initialJobCardId={prefill.jobCardId}
+          pinnedJobCard={
+            prefill.jobCardId
+              ? { id: prefill.jobCardId, jobNumber: prefill.jobNumber, vehicleId: prefill.vehicleId }
+              : null
+          }
           modes={modes}
           moneyAccounts={accounts.money}
           today={localDateString()}

@@ -54,6 +54,23 @@ next-env.d.ts
 /resp*.json
 /.responsive*.json
 
+# One-off corrections to the live workshop's books. They name its customers,
+# amounts and records, so they stay on the machine that ran them and never
+# reach the repository. New ones go in prisma/one-off/.
+/prisma/one-off/
+/prisma/fix-inv-000007.ts
+/prisma/fix-inv-000008.ts
+/prisma/set-company-dates.sql
+/prisma/record-job-costs.ts
+/prisma/record-partner-investments.ts
+/prisma/settle-old-part-lines.ts
+/prisma/tidy-journal-corrections.ts
+/prisma/fix-books-2026-10-15.ts
+/prisma/sublet-vouchers-2026-10-15.ts
+/prisma/tidy-books-2026-10-15.ts
+/prisma/advance-vat-adv-000002.ts
+/prisma/remove-cancelled-advance-adv-000003.ts
+
 # The OCR engine and language data for Scan bill: copied from node_modules by
 # `npm install` (scripts/copy-tesseract.mjs), never committed.
 public/tesseract/

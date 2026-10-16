@@ -16,6 +16,7 @@ import { isDiscountedLine, movementValue, receivedBefore } from '@/lib/inventory
 import { resolvePeriod, type ResolvedPeriod } from '@/lib/finance/dashboard';
 import { VAT_DUE_DAYS } from '@/lib/compliance/rules';
 import { priorPeriodsWithin } from '@/lib/accounting/prior-periods';
+import { advanceVatInPeriod } from '@/lib/billing/advance-vat';
 
 /*
  * The VAT return for a period — the figures a UAE VAT201 asks for, taken
@@ -34,6 +35,12 @@ import { priorPeriodsWithin } from '@/lib/accounting/prior-periods';
  *   Tax credit notes issued in the period reduce the same boxes and the
  *   output VAT: a supply is adjusted in the period the credit note is
  *   issued, not the invoice's.
+
+ *   Customer advances received in the period (VAT_ON_RECEIPT): VAT is due
+ *   the day an advance is received, so its net is in Box 1 and its VAT in
+ *   output VAT then. The parts applied to invoices or refunded in the period
+ *   come off again — the invoice carries the full supply and VAT — so a
+ *   sale is never counted twice (lib/billing/advance-vat.ts).
  *
  * INPUT TAX — what the workshop can recover
  *   Expenses dated in the period that carry VAT (voided ones never count),
@@ -344,6 +351,11 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       outOfScope: filsToString(split.OUT_OF_SCOPE),
     };
   });
+  // ── Customer advances: due when received, released as applied ─────────
+  const advances = await advanceVatInPeriod(organizationId, dates);
+  supplies.STANDARD += advances.netFils;
+  outputFils += advances.vatFils;
+
   const standardFils = supplies.STANDARD;
   const zeroFils = supplies.ZERO_RATED;
   const exemptFils = supplies.EXEMPT;
@@ -536,6 +548,12 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
     },
     sales,
     credits,
+    /** Advances received (+) and applied or refunded (−): part of Box 1 and output VAT. */
+    advances: advances.rows.map((row) => ({
+      ...row,
+      net: filsToString(row.net),
+      vat: filsToString(row.vat),
+    })),
     expenses: expenseRows,
     purchases: purchaseRows,
     bankCharges: bankChargeRows,

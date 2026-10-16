@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Ban, Info } from 'lucide-react';
+import { Ban, Download, Info, MessageCircle, Printer } from 'lucide-react';
 import { AuthError, requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import {
@@ -16,6 +16,7 @@ import { filsToString, toFils } from '@/lib/money';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { StatusPill } from '@/components/shared/status-pill';
+import { whatsAppUrl } from '@/lib/sharing/whatsapp';
 import {
   ApplyAdvanceForm,
   CancelAdvanceButton,
@@ -46,6 +47,27 @@ export default async function CustomerAdvancePage({ params }: { params: Promise<
   }
   const isCancelled = advance.status === 'CANCELLED';
   const today = localDateString();
+  // The receipt the customer is given — a tax invoice for the advance when it carries VAT.
+  const receiptPdf = `/documents/advance/${advance.id}`;
+  const vatFils =
+    advance.vatTreatment === 'VAT_ON_RECEIPT' ? toFils(advance.vatAmount.toString()) : 0;
+  const whatsApp = whatsAppUrl(
+    advance.customer.phone,
+    [
+      `Hello ${advance.customer.name} 👋`,
+      '',
+      `We have received your advance of *${formatMoney(advance.amount.toString())}*${vatFils > 0 ? ` (including VAT ${formatMoney(filsToString(vatFils))})` : ''}.`,
+      `• Receipt: ${advance.advanceNumber} · ${formatCalendarDate(advance.receivedOn)}`,
+      ...(advance.jobCard
+        ? [
+            `• For job: ${advance.jobCard.jobNumber}${advance.vehicle ? ` · ${advance.vehicle.plateNumber}` : ''}`,
+          ]
+        : []),
+      '',
+      'It will be applied to your invoice when the work is billed. Your receipt is attached.',
+      'Thank you!',
+    ].join('\n'),
+  );
   const [accounts, modes] = advance.can.refund
     ? await Promise.all([
         getAccountChoices(user),
@@ -85,9 +107,38 @@ export default async function CustomerAdvancePage({ params }: { params: Promise<
           .filter(Boolean)
           .join(' · ')}
         actions={
-          advance.can.cancel && !advance.cancelBlocker ? (
-            <CancelAdvanceButton advanceId={advance.id} label={advance.advanceNumber} />
-          ) : undefined
+          <span className="flex flex-wrap items-center gap-2">
+            <a
+              href={receiptPdf}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            >
+              <Printer className="size-4" />
+              Print receipt
+            </a>
+            <a
+              href={`${receiptPdf}?download=1`}
+              className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-muted"
+            >
+              <Download className="size-4" />
+              Download
+            </a>
+            {!isCancelled ? (
+              <a
+                href={whatsApp}
+                target="_blank"
+                rel="noopener"
+                className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-muted"
+              >
+                <MessageCircle className="size-4" />
+                WhatsApp
+              </a>
+            ) : null}
+            {advance.can.cancel && !advance.cancelBlocker ? (
+              <CancelAdvanceButton advanceId={advance.id} label={advance.advanceNumber} />
+            ) : null}
+          </span>
         }
       />
 

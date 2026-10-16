@@ -11,6 +11,8 @@ import { AccessDenied } from '@/components/shared/access-denied';
 import { JournalEntryForm } from '@/components/accounting/journal-entry-form';
 import { JournalNarrationForm } from '@/components/accounting/journal-narration-form';
 import { DeleteEntryButton } from '@/components/accounting/books-controls';
+import { ChangeEntryDateForm } from '@/components/accounting/change-entry-date-form';
+import { entryDateChange } from '@/lib/accounting/redate';
 
 export const metadata = { title: 'Edit journal entry' };
 
@@ -18,7 +20,9 @@ export const metadata = { title: 'Edit journal entry' };
  * One journal entry, opened for correction. An entry made by hand in an
  * open period can be changed in full or deleted; any other entry — one
  * booked from a record, or in a closed period — has its narration
- * corrected here and its figures through its record (or a reversal).
+ * corrected here and its figures through its record (or a reversal). Its
+ * date can be changed here too, through its record, while the period is
+ * open and its VAT return not filed (lib/accounting/redate.ts).
  */
 export default async function EditJournalEntryPage({
   params,
@@ -43,6 +47,8 @@ export default async function EditJournalEntryPage({
     entry.sourceId,
   );
   const canDelete = deletable && hasPermission(user, 'accounting.delete');
+  // Its date, when its figures can't be changed here: through its record.
+  const dateChange = figuresLocked ? await entryDateChange(user, entry.id) : null;
 
   let form;
   if (figuresLocked) {
@@ -147,6 +153,27 @@ export default async function EditJournalEntryPage({
         }
       />
       <Panel className="w-full p-4 sm:p-8">{form}</Panel>
+      {figuresLocked && dateChange ? (
+        <Panel className="flex w-full flex-col gap-4 p-4 sm:p-8">
+          <div>
+            <h2 className="text-base font-semibold">Change the date</h2>
+            <p className="text-sm text-muted-foreground">
+              {`Dated ${formatCalendarDate(entry.entryDate)}.`}{' '}
+              {dateChange.possible
+                ? 'Allowed while its period is open and its VAT return is not filed.'
+                : `It can’t be changed: ${dateChange.why}`}
+            </p>
+          </div>
+          {dateChange.possible ? (
+            <ChangeEntryDateForm
+              entryId={entry.id}
+              date={entry.entryDate.toISOString().slice(0, 10)}
+              what={dateChange.what}
+              today={localDateString()}
+            />
+          ) : null}
+        </Panel>
+      ) : null}
     </Stack>
   );
 }

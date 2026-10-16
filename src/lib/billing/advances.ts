@@ -17,6 +17,8 @@ import { checkMoneyAccount, refuseCardSettlementAccount } from '@/lib/accounting
 import { resolveInventoryBranch } from '@/lib/inventory/stock';
 import { dueFils, paidFils, settlementStatus } from '@/lib/billing/invoice';
 import { applyJobStatusChange, normalizeStatus } from '@/lib/workshop/job-status';
+import { getVatSettings } from '@/lib/tax';
+import { vatIncluded } from '@/lib/billing/advance-vat';
 
 /*
  * Customer advances — money a customer pays before their invoice exists:
@@ -48,10 +50,14 @@ import { applyJobStatusChange, normalizeStatus } from '@/lib/workshop/job-status
  * note — and only the rest is refunded in cash. Voiding the credit note
  * reverses that return.
  *
- * VAT on advances is pending the accountant's confirmation: every advance is
- * recorded PENDING_ACCOUNTANT_CONFIRMATION and no VAT is booked on it — VAT is
- * on the invoice, as for any sale. The VAT columns let a confirmed treatment
- * be switched on later without redesigning any of this.
+ * VAT, confirmed by the accountant (16 Oct 2026): in the UAE an advance is
+ * taxable the day it is received (the date of supply is the earlier of the
+ * work, the invoice or the payment). A VAT-registered workshop records each
+ * new advance VAT_ON_RECEIPT: the VAT included in it is booked to output VAT
+ * when received, and released as it is applied or refunded, so the invoice's
+ * VAT is never counted twice (lib/billing/advance-vat.ts). A workshop not
+ * registered records VAT_ON_INVOICE (no VAT on the advance). Advances taken
+ * before, recorded PENDING_ACCOUNTANT_CONFIRMATION, keep their booking.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -134,6 +140,38 @@ const STANDING_ROWS = {
   refunds: { where: { reversedAt: null }, select: { amount: true, reversedAt: true } },
 } satisfies Prisma.CustomerAdvanceInclude;
 
+/**
+ * Books every application and refund of an advance again. The VAT each one
+ * releases depends on the ones before it (lib/billing/advance-vat.ts), so
+ * when one is added or undone, the rest are put in step too. Unchanged
+ * entries are left as they are.
+ */
+async function syncAdvanceMovements(
+  tx: Tx,
+  organizationId: string,
+  advanceId: string,
+  userId: string,
+) {
+  const [allocations, refunds] = await Promise.all([
+    tx.customerAdvanceAllocation.findMany({
+      where: { organizationId, advanceId },
+      orderBy: [{ allocatedOn: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    }),
+    tx.customerAdvanceRefund.findMany({
+      where: { organizationId, advanceId },
+      orderBy: [{ refundedOn: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    }),
+  ]);
+  for (const row of allocations) {
+    await syncPosting(tx, organizationId, 'CUSTOMER_ADVANCE_ALLOCATION', row.id, userId);
+  }
+  for (const row of refunds) {
+    await syncPosting(tx, organizationId, 'CUSTOMER_ADVANCE_REFUND', row.id, userId);
+  }
+}
+
 /** Puts an advance's status in step with what is applied and refunded. */
 async function refreshAdvanceStatus(tx: Tx, advanceId: string) {
   const advance = await tx.customerAdvance.findUniqueOrThrow({
@@ -203,7 +241,8 @@ async function lockAdvance(tx: Tx, organizationId: string, advanceId: string) {
 const receiveSchema = z.object({
   customerId: z.uuid({ error: 'Choose the customer.' }),
   vehicleId: z.union([z.literal(''), z.uuid()]).optional(),
-  jobCardId: z.union([z.literal(''), z.uuid()]).optional(),
+  /** Required: an advance is always held for a job, and applied to its invoice. */
+  jobCardId: z.uuid({ error: 'Choose the job card this advance is for.' }),
   amount: AMOUNT,
   receivedOn: DATE('Enter the date it was received.'),
   method: METHOD,
@@ -215,8 +254,8 @@ const receiveSchema = z.object({
 });
 
 /**
- * Records money a customer paid in advance, optionally towards one of their
- * vehicles and job cards, and books it to Customer advances.
+ * Records money a customer paid in advance towards one of their job cards
+ * (and so its vehicle), and books it to Customer advances.
  */
 export async function receiveCustomerAdvance(user: AuthenticatedUser, rawInput: unknown) {
   const input = parseInput(receiveSchema, rawInput);
@@ -270,6 +309,11 @@ export async function receiveCustomerAdvance(user: AuthenticatedUser, rawInput: 
       branchId,
       'CUSTOMER_ADVANCE',
     );
+    // VAT is due the day it is received, on the VAT included in it.
+    const vatSettings = await getVatSettings(user.organizationId, tx);
+    const onReceipt = vatSettings.isVatRegistered;
+    const vatFils = onReceipt ? vatIncluded(amount, vatSettings.vatRate) : 0;
+    const vatTreatment = onReceipt ? ('VAT_ON_RECEIPT' as const) : ('VAT_ON_INVOICE' as const);
     const advance = await tx.customerAdvance.create({
       data: {
         organizationId: user.organizationId,
@@ -284,8 +328,9 @@ export async function receiveCustomerAdvance(user: AuthenticatedUser, rawInput: 
         accountId,
         reference: emptyToNull(input.reference),
         notes: emptyToNull(input.notes),
-        // Until the accountant confirms the treatment: no VAT on the advance.
-        vatTreatment: 'PENDING_ACCOUNTANT_CONFIRMATION',
+        vatTreatment,
+        vatRate: onReceipt ? vatSettings.vatRate : null,
+        vatAmount: filsToString(vatFils),
         receivedByUserId: user.id,
       },
       select: { id: true, advanceNumber: true },
@@ -308,7 +353,8 @@ export async function receiveCustomerAdvance(user: AuthenticatedUser, rawInput: 
         method: input.method,
         accountId,
         reference: emptyToNull(input.reference),
-        vatTreatment: 'PENDING_ACCOUNTANT_CONFIRMATION',
+        vatTreatment,
+        vatAmount: filsToString(vatFils),
       },
     });
     await settleRequestKey(tx, user, rawInput, advance.id);
@@ -426,7 +472,7 @@ async function applyAdvanceInTransaction(
   );
   const status = settlementStatus({ ...invoice, advanceAppliedAmount }, paid);
   await tx.invoice.update({ where: { id: invoice.id }, data: { advanceAppliedAmount, status } });
-  await syncPosting(tx, user.organizationId, 'CUSTOMER_ADVANCE_ALLOCATION', allocation.id, user.id);
+  await syncAdvanceMovements(tx, user.organizationId, advance.id, user.id);
   const advanceStatus = await refreshAdvanceStatus(tx, advance.id);
 
   if (
@@ -618,13 +664,7 @@ export async function undoAdvanceApplication(
     const paid = paidFils(invoice.payments);
     const status = settlementStatus({ ...invoice, advanceAppliedAmount }, paid);
     await tx.invoice.update({ where: { id: invoice.id }, data: { advanceAppliedAmount, status } });
-    await syncPosting(
-      tx,
-      user.organizationId,
-      'CUSTOMER_ADVANCE_ALLOCATION',
-      allocation.id,
-      user.id,
-    );
+    await syncAdvanceMovements(tx, user.organizationId, advance.id, user.id);
     const advanceStatus = await refreshAdvanceStatus(tx, advance.id);
 
     let jobReopened = false;
@@ -724,13 +764,7 @@ export async function returnToAdvances(
       },
       select: { id: true },
     });
-    await syncPosting(
-      tx,
-      user.organizationId,
-      'CUSTOMER_ADVANCE_ALLOCATION',
-      allocation.id,
-      user.id,
-    );
+    await syncAdvanceMovements(tx, user.organizationId, advanceId, user.id);
     const advanceStatus = await refreshAdvanceStatus(tx, advanceId);
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
@@ -783,7 +817,7 @@ export async function undoReturnsToAdvances(
       where: { id: row.id },
       data: { reversedAt: new Date(), reversalReason: reason, reversedByUserId: user.id },
     });
-    await syncPosting(tx, user.organizationId, 'CUSTOMER_ADVANCE_ALLOCATION', row.id, user.id);
+    await syncAdvanceMovements(tx, user.organizationId, row.advanceId, user.id);
     await refreshAdvanceStatus(tx, row.advanceId);
     restored += back;
   }
@@ -845,7 +879,7 @@ export async function refundCustomerAdvance(
       },
       select: { id: true },
     });
-    await syncPosting(tx, user.organizationId, 'CUSTOMER_ADVANCE_REFUND', refund.id, user.id);
+    await syncAdvanceMovements(tx, user.organizationId, advance.id, user.id);
     const advanceStatus = await refreshAdvanceStatus(tx, advance.id);
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
@@ -894,7 +928,7 @@ export async function reverseAdvanceRefund(
       where: { id: refund.id },
       data: { reversedAt: new Date(), reversalReason: input.reason, reversedByUserId: user.id },
     });
-    await syncPosting(tx, user.organizationId, 'CUSTOMER_ADVANCE_REFUND', refund.id, user.id);
+    await syncAdvanceMovements(tx, user.organizationId, advance.id, user.id);
     const advanceStatus = await refreshAdvanceStatus(tx, advance.id);
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
@@ -989,9 +1023,10 @@ export const ADVANCE_STATUS_LABEL: Record<CustomerAdvanceStatus, string> = {
 
 export const ADVANCE_VAT_LABEL = {
   PENDING_ACCOUNTANT_CONFIRMATION:
-    'VAT treatment pending accountant confirmation — no VAT booked on the advance; VAT is charged on the invoice.',
-  VAT_ON_INVOICE: 'VAT is charged on the invoice; none on the advance.',
-  VAT_ON_RECEIPT: 'VAT due when the advance was received.',
+    'Taken before VAT on advances was switched on: no VAT on the advance; its VAT is on the invoice.',
+  VAT_ON_INVOICE: 'Not VAT-registered when received: no VAT on the advance.',
+  VAT_ON_RECEIPT:
+    'VAT included, due the day it was received; taken off again as it is applied to the invoice or refunded.',
 } as const;
 
 /** One advance: who, what for, where it went, and what can be done with it now. */
@@ -1159,9 +1194,16 @@ export async function advancePrefill(
   if (prefill.jobCardId) {
     const job = await prisma.jobCard.findFirst({
       where: { id: prefill.jobCardId, organizationId: user.organizationId },
-      select: { id: true, customerId: true, vehicleId: true },
+      select: { id: true, customerId: true, vehicleId: true, jobNumber: true },
     });
-    if (job) return { customerId: job.customerId, jobCardId: job.id, vehicleId: job.vehicleId };
+    if (job) {
+      return {
+        customerId: job.customerId,
+        jobCardId: job.id,
+        vehicleId: job.vehicleId,
+        jobNumber: job.jobNumber,
+      };
+    }
   }
   if (prefill.customerId && prefill.vehicleId) {
     // Only the customer's own vehicle is offered.
@@ -1169,9 +1211,9 @@ export async function advancePrefill(
       where: { id: prefill.vehicleId, organizationId: user.organizationId, customerId: prefill.customerId },
       select: { id: true },
     });
-    return { customerId: prefill.customerId, jobCardId: '', vehicleId: vehicle?.id ?? '' };
+    return { customerId: prefill.customerId, jobCardId: '', vehicleId: vehicle?.id ?? '', jobNumber: '' };
   }
-  return { customerId: prefill.customerId ?? null, jobCardId: '', vehicleId: '' };
+  return { customerId: prefill.customerId ?? null, jobCardId: '', vehicleId: '', jobNumber: '' };
 }
 
 /** What advances are listed for: a job card, or — for a quotation without one — its customer and vehicle. */
@@ -1208,6 +1250,51 @@ export async function getAdvancesFor(user: AuthenticatedUser, target: AdvanceTar
   return {
     advances,
     canReceive: hasPermission(user, 'customer_advance.create', { branchId: target.branchId }),
+  };
+}
+
+/**
+ * Sales → Customer advances: every advance, however it was taken (from a job
+ * card, a quotation or this screen), newest first — with what is still held
+ * for each customer. `show: 'held'` keeps those with money left.
+ */
+export async function listCustomerAdvances(
+  user: AuthenticatedUser,
+  options: { show?: 'held' | 'all' } = {},
+) {
+  requirePermission(user, 'customer_advance.view');
+  const rows = await prisma.customerAdvance.findMany({
+    where: { organizationId: user.organizationId },
+    orderBy: [{ receivedOn: 'desc' }, { createdAt: 'desc' }],
+    include: {
+      ...STANDING_ROWS,
+      customer: { select: { id: true, name: true } },
+      vehicle: { select: { plateNumber: true } },
+      jobCard: { select: { id: true, jobNumber: true } },
+    },
+  });
+  const advances = rows.map((row) => {
+    const leftFils = row.status === 'CANCELLED' ? 0 : advanceFigures(row).left;
+    return {
+      id: row.id,
+      advanceNumber: row.advanceNumber,
+      receivedOn: row.receivedOn,
+      status: row.status,
+      amount: row.amount.toString(),
+      left: filsToString(leftFils),
+      leftFils,
+      customer: row.customer,
+      plate: row.vehicle?.plateNumber ?? null,
+      jobCard: row.jobCard,
+    };
+  });
+  const heldFils = advances.reduce((sum, row) => sum + row.leftFils, 0);
+  return {
+    advances: options.show === 'held' ? advances.filter((row) => row.leftFils > 0) : advances,
+    held: filsToString(heldFils),
+    heldCount: advances.filter((row) => row.leftFils > 0).length,
+    total: advances.length,
+    canReceive: hasPermission(user, 'customer_advance.create'),
   };
 }
 

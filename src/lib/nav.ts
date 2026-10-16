@@ -139,6 +139,12 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'Receipts', href: '/finance/payments', icon: Wallet, permission: 'payment.view' },
       {
+        label: 'Customer advances',
+        href: '/finance/advances',
+        icon: HandCoins,
+        permission: 'customer_advance.view',
+      },
+      {
         label: 'Credit notes',
         href: '/finance/credit-notes',
         icon: FileMinus,

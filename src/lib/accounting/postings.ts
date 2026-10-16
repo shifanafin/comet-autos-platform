@@ -9,6 +9,7 @@ import { getVatSettings, resolveDefaultVatRate } from '@/lib/tax';
 import { OWNER_MONEY_LABEL } from '@/lib/finance/owner-money-labels';
 import { METHOD_ACCOUNT_ROLE, type RoleAccounts } from '@/lib/accounting/chart';
 import { priorPostingAmounts, stockCarried } from '@/lib/accounting/prior-period-rules';
+import { advanceVatReleases } from '@/lib/billing/advance-vat';
 
 /*
  * What each record should have in the books — the posting rules, in one
@@ -156,16 +157,21 @@ import { priorPostingAmounts, stockCarried } from '@/lib/accounting/prior-period
  *
  * CUSTOMER ADVANCE (money paid before any invoice; nothing once cancelled)
  *   received                          Dr the cash, bank or card account
- *                                     Cr Customer advances
- *   applied to an invoice             Dr Customer advances
+ *                                     Cr Customer advances (net of VAT)
+ *                                     Cr Output VAT (VAT_ON_RECEIPT)
+ *   applied to an invoice             Dr Customer advances (net of VAT)
+ *                                     Dr Output VAT — its share released
  *                                     Cr Trade receivables — the invoice's
  *                                     revenue and VAT are untouched
- *   returned to it by a credit note   Dr Trade receivables
- *                                     Cr Customer advances
- *   refunded                          Dr Customer advances
+ *   returned to it by a credit note   the same, below zero
+ *   refunded                          Dr Customer advances (net of VAT)
+ *                                     Dr Output VAT — its share released
  *                                     Cr the account paid from
- *   VAT: none on the advance while its treatment awaits the accountant's
- *   confirmation; VAT is on the invoice, as for any sale.
+ *   VAT: due the day an advance is received (UAE date of supply), for
+ *   advances recorded VAT_ON_RECEIPT; released as each part is applied or
+ *   refunded, so it is never counted twice (lib/billing/advance-vat.ts).
+ *   Advances taken before that, or by a workshop not VAT-registered, carry
+ *   no VAT: their VAT is on the invoice.
  *
  * FIXED ASSET
  *   bought                            Dr the asset account    its cost
@@ -1428,15 +1434,14 @@ const postCustomerAdvance: Poster = async (tx, organizationId, advanceId, accoun
       method: true,
       accountId: true,
       vatTreatment: true,
+      vatAmount: true,
       customer: { select: { name: true } },
     },
   });
   if (!advance || advance.status === 'CANCELLED') return null;
-  if (advance.vatTreatment === 'VAT_ON_RECEIPT') {
-    // Not switched on until the accountant confirms it: never book a guess.
-    throw new Error('VAT on receipt of customer advances is not enabled.');
-  }
   const amount = fils(advance.amount);
+  // VAT is due the day an advance is received (lib/billing/advance-vat.ts).
+  const vat = advance.vatTreatment === 'VAT_ON_RECEIPT' ? fils(advance.vatAmount) : 0;
   const moneyAccount = advance.accountId ?? accounts[METHOD_ACCOUNT_ROLE[advance.method]];
   return {
     date: advance.receivedOn,
@@ -1444,7 +1449,8 @@ const postCustomerAdvance: Poster = async (tx, organizationId, advanceId, accoun
     description: `Customer advance ${advance.advanceNumber} received — ${advance.customer.name}`,
     lines: new Lines()
       .debit(moneyAccount, amount)
-      .credit(accounts.CUSTOMER_ADVANCES, amount)
+      .credit(accounts.CUSTOMER_ADVANCES, amount - vat)
+      .credit(accounts.VAT_OUTPUT, vat)
       .build(),
   };
 };
@@ -1456,6 +1462,7 @@ const postAdvanceAllocation: Poster = async (tx, organizationId, allocationId, a
       amount: true,
       allocatedOn: true,
       reversedAt: true,
+      advanceId: true,
       advance: { select: { advanceNumber: true, branchId: true } },
       invoice: { select: { invoiceNumber: true, customerName: true } },
       creditNote: { select: { creditNoteNumber: true } },
@@ -1464,6 +1471,11 @@ const postAdvanceAllocation: Poster = async (tx, organizationId, allocationId, a
   if (!allocation || allocation.reversedAt) return null;
   // Signed: above zero applies the advance, below zero returns money to it.
   const amount = fils(allocation.amount);
+  // The VAT already accounted on this part of the advance when it was
+  // received, released so the invoice's own VAT isn't counted twice
+  // (lib/billing/advance-vat.ts). Signed like the amount.
+  const vat =
+    (await advanceVatReleases(tx, organizationId, allocation.advanceId))?.get(allocationId) ?? 0;
   const who = allocation.invoice.customerName ? ` — ${allocation.invoice.customerName}` : '';
   return {
     date: allocation.allocatedOn,
@@ -1472,7 +1484,8 @@ const postAdvanceAllocation: Poster = async (tx, organizationId, allocationId, a
       ? `Returned to customer advance ${allocation.advance.advanceNumber} from ${allocation.invoice.invoiceNumber} by credit note ${allocation.creditNote.creditNoteNumber}${who}`
       : `Customer advance ${allocation.advance.advanceNumber} applied to ${allocation.invoice.invoiceNumber}${who}`,
     lines: new Lines()
-      .debit(accounts.CUSTOMER_ADVANCES, amount)
+      .debit(accounts.CUSTOMER_ADVANCES, amount - vat)
+      .debit(accounts.VAT_OUTPUT, vat)
       .credit(accounts.ACCOUNTS_RECEIVABLE, amount)
       .build(),
   };
@@ -1487,6 +1500,7 @@ const postAdvanceRefund: Poster = async (tx, organizationId, refundId, accounts)
       method: true,
       accountId: true,
       reversedAt: true,
+      advanceId: true,
       advance: {
         select: { advanceNumber: true, branchId: true, customer: { select: { name: true } } },
       },
@@ -1494,13 +1508,17 @@ const postAdvanceRefund: Poster = async (tx, organizationId, refundId, accounts)
   });
   if (!refund || refund.reversedAt) return null;
   const amount = fils(refund.amount);
+  // Paid back, the work never happened: the VAT accounted on that part of
+  // the advance comes off output VAT again (lib/billing/advance-vat.ts).
+  const vat = (await advanceVatReleases(tx, organizationId, refund.advanceId))?.get(refundId) ?? 0;
   const moneyAccount = refund.accountId ?? accounts[METHOD_ACCOUNT_ROLE[refund.method]];
   return {
     date: refund.refundedOn,
     branchId: refund.advance.branchId,
     description: `Customer advance ${refund.advance.advanceNumber} refunded — ${refund.advance.customer.name}`,
     lines: new Lines()
-      .debit(accounts.CUSTOMER_ADVANCES, amount)
+      .debit(accounts.CUSTOMER_ADVANCES, amount - vat)
+      .debit(accounts.VAT_OUTPUT, vat)
       .credit(moneyAccount, amount)
       .build(),
   };

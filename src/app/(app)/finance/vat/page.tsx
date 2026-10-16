@@ -546,6 +546,27 @@ export default async function VatPage({
         </Section>
       ) : null}
 
+      {data.advances.length > 0 ? (
+        <Section
+          title="Customer advances"
+          description="VAT on an advance is due the day it is received, so its net and VAT are in this return then. When it is applied to the job's invoice — which carries the whole sale and its VAT — or refunded, that part comes off again, so nothing is counted twice."
+        >
+          <DocumentTable
+            empty=""
+            rows={data.advances.map((row) => ({
+              key: row.id,
+              href: `/finance/advances/${row.advanceId}`,
+              number: row.number,
+              date: formatCalendarDate(row.date),
+              party: row.party,
+              detail: row.what,
+              net: row.sign < 0 ? `-${row.net}` : row.net,
+              vat: row.sign < 0 ? `-${row.vat}` : row.vat,
+            }))}
+          />
+        </Section>
+      ) : null}
+
       <Section
         title="Parts received and returned"
         description={`Deliveries booked into stock in the period, less parts returned to the supplier, with the VAT on them${data.registered ? ` (${formatMoney(boxes.purchaseVat)})` : ''}.`}

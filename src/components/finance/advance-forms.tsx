@@ -98,11 +98,12 @@ function HowPaid({
 
 // ─── Receive ────────────────────────────────────────────────────────────────
 
-/** Money a customer pays before their invoice — towards a vehicle and job card, when known. */
+/** Money a customer pays before their invoice — always towards one of their job cards. */
 export function ReceiveAdvanceForm({
   initialCustomer,
   initialVehicleId = '',
   initialJobCardId = '',
+  pinnedJobCard = null,
   modes,
   moneyAccounts,
   today,
@@ -110,6 +111,8 @@ export function ReceiveAdvanceForm({
   initialCustomer: CustomerOption | null;
   initialVehicleId?: string;
   initialJobCardId?: string;
+  /** Opened from a job card: offered even if it is no longer open. */
+  pinnedJobCard?: { id: string; jobNumber: string; vehicleId: string } | null;
   modes: PaymentModeOption[];
   moneyAccounts: AccountChoice[];
   today: string;
@@ -138,7 +141,13 @@ export function ReceiveAdvanceForm({
 
       <section className="flex flex-col gap-4">
         <h2 className="text-base font-semibold tracking-tight">Who paid it?</h2>
-        <CustomerPicker value={picked} onChange={setPicked} autoFocus={!initialCustomer} />
+        <CustomerPicker
+          value={picked}
+          onChange={setPicked}
+          requireJobCard
+          pinnedJobCard={pinnedJobCard}
+          autoFocus={!initialCustomer}
+        />
         <FormError message={errors.customerId ?? errors.vehicleId ?? errors.jobCardId} />
       </section>
 
@@ -187,8 +196,9 @@ export function ReceiveAdvanceForm({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          No VAT is charged on the advance itself while its VAT treatment awaits the
-          accountant&apos;s confirmation. VAT is charged on the invoice, as for any sale.
+          The amount includes VAT (AED 3,000 at 5% is 2,857.14 + 142.86 VAT). In the UAE, VAT on
+          an advance is due the day it is received; when the advance is applied to the job&apos;s
+          invoice, that VAT is taken off again so it is never counted twice.
         </p>
       </section>
 
@@ -199,6 +209,7 @@ export function ReceiveAdvanceForm({
           size="lg"
           className="h-12 w-full sm:h-11 sm:w-auto"
           pendingLabel="Recording…"
+          disabled={!picked?.jobCardId}
         >
           <HandCoins />
           Record advance

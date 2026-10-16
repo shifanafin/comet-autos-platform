@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import {
+  BookCheck,
   BookOpen,
   BookText,
   Info,
@@ -319,12 +320,20 @@ export default async function AccountingPage({
               : 'The accounts every amount is booked to.'
         }
         actions={
-          canPost ? (
-            <LinkButton href="/finance/accounting/journal/new" size="lg">
-              <Plus />
-              Journal entry
-            </LinkButton>
-          ) : undefined
+          <span className="flex flex-wrap items-center gap-2">
+            {canSeeAccounts ? (
+              <LinkButton href="/finance/accounting/books-check" size="lg" variant="outline">
+                <BookCheck />
+                Check the books
+              </LinkButton>
+            ) : null}
+            {canPost ? (
+              <LinkButton href="/finance/accounting/journal/new" size="lg">
+                <Plus />
+                Journal entry
+              </LinkButton>
+            ) : null}
+          </span>
         }
       />
 

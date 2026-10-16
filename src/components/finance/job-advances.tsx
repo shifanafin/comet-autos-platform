@@ -7,10 +7,10 @@ import { Panel, Section } from '@/components/layout/primitives';
 
 /**
  * Money the customer paid before their invoice, and a way to take more —
- * on the job card and on the quotation, where a deposit is agreed. There is
- * no separate advances screen: an advance belongs to its job (or, for a
- * quotation without a job card, to the customer and vehicle) and is applied
- * to the invoice when it is issued.
+ * on the job card and on the quotation, where a deposit is agreed. Every
+ * advance is also listed on Sales → Customer advances. A new advance is
+ * always taken for a job card: a quotation without one lists the advances
+ * the customer already has for that vehicle, and says to open the job card.
  */
 export async function JobAdvances({
   user,
@@ -37,9 +37,8 @@ export async function JobAdvances({
   const canReceive = data.canReceive && open;
   if (data.advances.length === 0 && !canReceive) return null;
 
-  const receiveHref = jobCard
-    ? `/finance/advances/new?jobCardId=${jobCard.id}`
-    : `/finance/advances/new?customerId=${quotation!.customerId}${quotation!.vehicleId ? `&vehicleId=${quotation!.vehicleId}` : ''}`;
+  // A new advance is always for a job card (lib/billing/advances.ts).
+  const receiveHref = jobCard ? `/finance/advances/new?jobCardId=${jobCard.id}` : null;
 
   return (
     <Section
@@ -82,13 +81,20 @@ export async function JobAdvances({
                 : 'px-4 py-3 sm:px-6'
             }
           >
-            <Link
-              href={receiveHref}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium hover:bg-muted"
-            >
-              <HandCoins className="size-4" />
-              Receive advance
-            </Link>
+            {receiveHref ? (
+              <Link
+                href={receiveHref}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium hover:bg-muted"
+              >
+                <HandCoins className="size-4" />
+                Receive advance
+              </Link>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                An advance is taken for a job card. Open the job card for this quotation, then
+                receive the advance there.
+              </p>
+            )}
           </div>
         ) : null}
       </Panel>

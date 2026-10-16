@@ -29,11 +29,17 @@ export function CustomerPicker({
   onChange,
   /** Offer to file the document against one of the customer's open job cards. */
   allowJobCard = true,
+  /** A job card must be chosen (a customer advance): no "not linked". */
+  requireJobCard = false,
+  /** A job card opened from its own page, offered even when it is no longer open. */
+  pinnedJobCard,
   autoFocus,
 }: {
   value: PickedParty | null;
   onChange: (picked: PickedParty | null) => void;
   allowJobCard?: boolean;
+  requireJobCard?: boolean;
+  pinnedJobCard?: { id: string; jobNumber: string; vehicleId: string } | null;
   autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
@@ -121,7 +127,19 @@ export function CustomerPicker({
           ) : null}
         </fieldset>
 
-        {allowJobCard && customer.openJobCards.length > 0 ? (
+        {requireJobCard ? (
+          <RequiredJobCard
+            value={value}
+            onChange={onChange}
+            jobs={
+              pinnedJobCard &&
+              pinnedJobCard.id &&
+              !customer.openJobCards.some((job) => job.id === pinnedJobCard.id)
+                ? [pinnedJobCard, ...customer.openJobCards]
+                : customer.openJobCards
+            }
+          />
+        ) : allowJobCard && customer.openJobCards.length > 0 ? (
           <fieldset className="flex flex-col gap-3">
             <legend className="text-sm font-medium">
               Job card <span className="font-normal text-muted-foreground">— optional</span>
@@ -245,6 +263,54 @@ export function CustomerPicker({
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The job a customer advance is towards — required: an advance is always
+ * held for a job, and applied to that job's invoice. Choosing it also picks
+ * the vehicle in for it.
+ */
+function RequiredJobCard({
+  value,
+  onChange,
+  jobs,
+}: {
+  value: PickedParty;
+  onChange: (picked: PickedParty | null) => void;
+  jobs: { id: string; jobNumber: string; vehicleId: string }[];
+}) {
+  return (
+    <fieldset className="flex flex-col gap-3">
+      <legend className="text-sm font-medium">
+        Job card <span className="text-destructive">*</span>
+      </legend>
+      {jobs.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+          {value.customer.name} has no open job card. An advance is taken for a job —{' '}
+          <Link href="/check-in" className="font-medium text-primary hover:underline">
+            check the car in
+          </Link>{' '}
+          first, then take the advance from its job card.
+        </p>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {jobs.map((job) => (
+            <ChoiceButton
+              key={job.id}
+              selected={value.jobCardId === job.id}
+              onClick={() => onChange({ ...value, jobCardId: job.id, vehicleId: job.vehicleId })}
+              icon={<ClipboardList className="size-4 text-muted-foreground" />}
+              title={job.jobNumber}
+              subtitle={
+                value.customer.vehicles.find((vehicle) => vehicle.id === job.vehicleId)?.plateNumber ??
+                'Job card'
+              }
+            />
+          ))}
+        </div>
+      )}
+    </fieldset>
   );
 }
 
