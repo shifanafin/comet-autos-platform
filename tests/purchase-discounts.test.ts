@@ -702,8 +702,11 @@ describe('merging a supplier entered twice', () => {
 describe('everything agrees', () => {
   test('no income from discounts; the balance sheet balances; nothing unbooked', async () => {
     const pnl = await getLedgerProfitAndLoss(a.owner);
-    assert.equal(pnl.income.total, '0.00', 'a purchase discount is never income');
-    assert.equal(pnl.netProfit, '0.00', 'buying stock is not an expense');
+    // A discount lowers the stock's cost and is never income; a supplier's
+    // round-off down is a small gain on Rounding adjustments (postings.ts).
+    const roundOffs = filsToString(-(await balanceOf(roles.ROUNDING)));
+    assert.equal(pnl.income.total, roundOffs, 'a purchase discount is never income');
+    assert.equal(pnl.netProfit, roundOffs, 'buying stock is not an expense');
     // Trade payables equals what Suppliers owed shows, across every supplier.
     const owedFils = (await getPayables(a.owner)).totals.balanceFils;
     assert.equal(-(await balanceOf(roles.ACCOUNTS_PAYABLE)), owedFils);

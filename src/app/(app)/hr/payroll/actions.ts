@@ -48,10 +48,16 @@ export async function approvePayrollAction(payrollId: string): Promise<ActionRes
   return toClientResult(result);
 }
 
-export async function markPayrollPaidAction(payrollId: string): Promise<ActionResult> {
+export async function markPayrollPaidAction(
+  payrollId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
   const user = await requireUser();
-  const result = await runAction(() => markPayrollPaid(user, payrollId));
-  if (result.ok) refresh();
+  const result = await runAction(() =>
+    markPayrollPaid(user, payrollId, formDataToObject(formData)),
+  );
+  if (result.ok || result.duplicate) refresh();
   return toClientResult(result);
 }
 

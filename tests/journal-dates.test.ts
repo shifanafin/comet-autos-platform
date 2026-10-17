@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import type { AccountRole } from '@/generated/prisma/enums';
 import { prisma } from '@/lib/prisma';
 import { ensureChart } from '@/lib/accounting/chart';
-import { createManualEntry } from '@/lib/accounting/entries';
+import { bookExistingRecords, createManualEntry } from '@/lib/accounting/entries';
 import { closeBooks } from '@/lib/accounting/periods';
 import { changeEntryDate, entryDateChange } from '@/lib/accounting/redate';
 import { checkBooks } from '@/lib/accounting/books-check';
@@ -41,9 +41,15 @@ before(async () => {
     { sku: `JD-OIL-${RUN}`, name: 'Engine oil', cost: '50.00', price: '90.00', stock: '5' },
   ]);
   roles = await prisma.$transaction((tx) => ensureChart(tx, a.organizationId));
+  // The fixture's opening stock is written straight to the ledger; book it as the app would.
+  await bookExistingRecords(a.owner);
   customerId = (
     await prisma.customer.create({
-      data: { organizationId: a.organizationId, name: `Dates customer ${RUN}`, phone: '0500000003' },
+      data: {
+        organizationId: a.organizationId,
+        name: `Dates customer ${RUN}`,
+        phone: '0500000003',
+      },
     })
   ).id;
 });
@@ -54,7 +60,12 @@ after(async () => {
 
 const entryOf = (source: 'INVOICE', sourceId: string) =>
   prisma.journalEntry.findFirstOrThrow({
-    where: { organizationId: a.organizationId, sourceType: source, sourceId, reversals: { none: {} } },
+    where: {
+      organizationId: a.organizationId,
+      sourceType: source,
+      sourceId,
+      reversals: { none: {} },
+    },
     orderBy: { createdAt: 'desc' },
   });
 
@@ -76,9 +87,17 @@ describe('changing a journal entry’s date', () => {
     assert.equal(moved.to, daysAgo(3));
     const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     assert.equal(dayOf(invoice.issueDate), daysAgo(3), 'the invoice moved');
-    assert.equal(dayOf((await entryOf('INVOICE', invoiceId)).entryDate), daysAgo(3), 'its entry followed');
+    assert.equal(
+      dayOf((await entryOf('INVOICE', invoiceId)).entryDate),
+      daysAgo(3),
+      'its entry followed',
+    );
     const audit = await prisma.auditLog.findFirst({
-      where: { organizationId: a.organizationId, action: 'journal.date_changed', entityId: entry.id },
+      where: {
+        organizationId: a.organizationId,
+        action: 'journal.date_changed',
+        entityId: entry.id,
+      },
     });
     assert.ok(audit, 'the audit log keeps it');
   });

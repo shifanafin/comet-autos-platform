@@ -39,7 +39,7 @@ import {
   voidPaymentVoucher,
 } from '@/lib/finance/payment-vouchers';
 import { getPaymentVoucherDocument } from '@/lib/documents/payment-voucher';
-import { toFils } from '@/lib/money';
+import { filsToString, toFils } from '@/lib/money';
 import { localDateString } from '@/lib/format';
 import { createTestOrg, expectDomainError, type TestOrg } from './support';
 
@@ -174,7 +174,8 @@ describe('card money collected for someone', () => {
 
     const vat = await getVatReturn(a.owner, { period: 'month' });
     const ledgerVat = await balanceOf(roles.VAT_INPUT);
-    assert.equal(toFils(vat.boxes.inputVat), ledgerVat, 'the VAT return agrees with the books');
+    // Signed: VAT recovered on bank fees can leave input VAT below zero.
+    assert.equal(vat.boxes.inputVat, filsToString(ledgerVat), 'the VAT return agrees with the books');
     assert.ok(vat.bankCharges.some((row) => row.vat === '1.00'));
     assert.ok(vat.bankCharges.some((row) => row.vat === '-1.00'));
   });

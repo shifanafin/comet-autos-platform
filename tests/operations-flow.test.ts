@@ -117,7 +117,8 @@ describe('employees', () => {
   });
 
   test('someone who leaves is marked inactive and keeps their work history', async () => {
-    const [employee] = await listEmployees(a.owner, { query: 'Omar' });
+    // Two test employees are called Omar Farooq; take the one with this code.
+    const [employee] = await listEmployees(a.owner, { query: `EMP-${RUN}` });
     assert.ok(employee);
     await updateEmployee(a.owner, employee.id, {
       ...employeeInput(),

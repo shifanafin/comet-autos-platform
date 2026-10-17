@@ -26,6 +26,16 @@ function words(text: string) {
     .filter((word) => word.length >= 3);
 }
 
+/** The one- and two-character tokens of a name, sorted: "Headlamp LH" → "lh", "Bulb H7" → "h7". */
+function marks(text: string) {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9؀-ۿ]+/)
+    .filter((word) => word.length > 0 && word.length < 3)
+    .sort()
+    .join(' ');
+}
+
 function pairs(text: string) {
   const list: string[] = [];
   for (let i = 0; i < text.length - 1; i += 1) list.push(text.slice(i, i + 2));
@@ -73,9 +83,12 @@ export function partSimilarity(typed: { name: string; sku?: string }, part: Matc
   const b = squeeze(part.name);
   if (!a || !b) return 0;
   if (a === b) return 1;
+  const whole = dice(a, b);
+  // LH/RH, H4/H7, A/B tell variants apart, and the word score can't see
+  // them: names whose short marks differ are compared whole only.
+  if (marks(typed.name) !== marks(part.name)) return whole;
   // One name inside the other: "brakepad" in "brakepads", "oilfilter" in "oilfiltertoyota".
   const contained = a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a));
-  const whole = dice(a, b);
   const byWord = Math.min(wordScore(typed.name, part.name), wordScore(part.name, typed.name));
   return Math.max(whole, byWord, contained ? 0.85 : 0);
 }

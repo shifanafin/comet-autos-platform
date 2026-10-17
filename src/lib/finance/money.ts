@@ -12,6 +12,12 @@ import { allocateDocumentNumber } from '@/lib/numbering';
 import { syncPosting } from '@/lib/accounting/journal';
 import { checkMoneyAccount } from '@/lib/accounting/chart';
 import { sourceLinks } from '@/lib/accounting/reports';
+import { resolvePeriod } from '@/lib/finance/dashboard';
+
+/** A period chosen on screen: ?period=month, or custom with from/to. */
+export type MoneyPeriodInput = { period?: string; from?: string; to?: string };
+
+const calendarDay = (day: string) => new Date(`${day}T00:00:00Z`);
 
 /*
  * Money — what the workshop has in each of its own accounts, in plain words,
@@ -106,10 +112,32 @@ async function moneyAccounts(organizationId: string) {
 
 const signed = (fils: number) => (fils < 0 ? `-${filsToString(-fils)}` : filsToString(fils));
 
-/** Every money account with what is in it, grouped, and the workshop's money in total. */
-export async function getMoneyOverview(user: AuthenticatedUser) {
+/**
+ * Every money account with what is in it, grouped, and the workshop's money in
+ * total. Given a period, each account also shows the money in and out in it.
+ */
+export async function getMoneyOverview(user: AuthenticatedUser, periodInput?: MoneyPeriodInput) {
   requirePermission(user, 'money.view');
   const accounts = await moneyAccounts(user.organizationId);
+  const period = periodInput ? resolvePeriod(periodInput) : null;
+  const moved = new Map<string, { in: number; out: number }>();
+  if (period) {
+    const sums = await prisma.journalEntryLine.groupBy({
+      by: ['chartOfAccountId'],
+      where: {
+        organizationId: user.organizationId,
+        chartOfAccountId: { in: accounts.map((account) => account.id) },
+        journalEntry: { entryDate: { gte: calendarDay(period.from), lte: calendarDay(period.to) } },
+      },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    for (const row of sums) {
+      moved.set(row.chartOfAccountId, {
+        in: toFils(row._sum.debitAmount?.toString() ?? '0'),
+        out: toFils(row._sum.creditAmount?.toString() ?? '0'),
+      });
+    }
+  }
   const shown = accounts.filter((account) => account.isActive || account.fils !== 0);
   const total = (kinds: MoneyKind[]) =>
     shown.filter((account) => kinds.includes(account.kind)).reduce((sum, a) => sum + a.fils, 0);
@@ -127,6 +155,9 @@ export async function getMoneyOverview(user: AuthenticatedUser) {
           code: account.accountCode,
           name: account.accountName,
           balance: account.balance,
+          /** In and out in the period chosen (a card: paid off, and spent). */
+          moneyIn: filsToString(moved.get(account.id)?.in ?? 0),
+          moneyOut: filsToString(moved.get(account.id)?.out ?? 0),
           /** Below zero: more was paid out of it than was ever recorded going in. */
           belowZero: kind !== 'company-card' && account.fils < 0,
         })),
@@ -141,6 +172,7 @@ export async function getMoneyOverview(user: AuthenticatedUser) {
     owedOnCards: signed(-total(['company-card'])),
     hasCompanyCard: shown.some((account) => account.kind === 'company-card'),
     canTransfer: hasPermission(user, 'money.create'),
+    period,
   };
 }
 
@@ -163,9 +195,14 @@ export async function getTransferAccounts(user: AuthenticatedUser) {
 /**
  * One money account: every movement in and out, newest first, with the
  * balance after each — each one linked to the invoice, expense or transfer
- * behind it.
+ * behind it. Given a period, only its movements, with the balance brought
+ * forward from before it and the balance at its end — a statement.
  */
-export async function getMoneyAccountActivity(user: AuthenticatedUser, accountId: string) {
+export async function getMoneyAccountActivity(
+  user: AuthenticatedUser,
+  accountId: string,
+  periodInput?: MoneyPeriodInput,
+) {
   requirePermission(user, 'money.view');
   const account = (await moneyAccounts(user.organizationId)).find((a) => a.id === accountId);
   if (!account) throw new NotFoundError('money account');
@@ -207,10 +244,30 @@ export async function getMoneyAccountActivity(user: AuthenticatedUser, accountId
       moneyIn: inFils ? filsToString(inFils) : '',
       moneyOut: outFils ? filsToString(outFils) : '',
       balance: signed(running),
+      runningFils: running,
+      inFils,
+      outFils,
       href: link(line.journalEntry.sourceType, line.journalEntry.sourceId).href,
     };
   });
+  const period = periodInput ? resolvePeriod(periodInput) : null;
+  const day = (date: Date) => date.toISOString().slice(0, 10);
+  const before = period ? rows.filter((row) => day(row.date) < period.from) : [];
+  const within = period
+    ? rows.filter((row) => day(row.date) >= period.from && day(row.date) <= period.to)
+    : rows;
+  const opening = before.length ? before[before.length - 1].runningFils : 0;
+  const totalIn = within.reduce((sum, row) => sum + row.inFils, 0);
+  const totalOut = within.reduce((sum, row) => sum + row.outFils, 0);
   return {
+    period,
+    statement: {
+      /** What it held when the period began (a card: owed). */
+      opening: signed(opening),
+      moneyIn: filsToString(totalIn),
+      moneyOut: filsToString(totalOut),
+      closing: signed(opening + sign * (totalIn - totalOut)),
+    },
     account: {
       id: account.id,
       code: account.accountCode,
@@ -220,7 +277,18 @@ export async function getMoneyAccountActivity(user: AuthenticatedUser, accountId
       balance: account.balance,
       belowZero: account.kind !== 'company-card' && account.fils < 0,
     },
-    rows: rows.reverse(),
+    rows: within
+      .map((row) => ({
+        id: row.id,
+        date: row.date,
+        entryNumber: row.entryNumber,
+        description: row.description,
+        moneyIn: row.moneyIn,
+        moneyOut: row.moneyOut,
+        balance: row.balance,
+        href: row.href,
+      }))
+      .reverse(),
   };
 }
 

@@ -56,7 +56,14 @@ import { getQuotation, listQuotations } from '@/lib/workshop/quotations';
 import { listInvoices } from '@/lib/billing/lists';
 import { calculateLine, calculateTotals } from '@/lib/money';
 import { localDateString, toLocalDateTimeInput } from '@/lib/format';
-import { createTestOrg, expectDomainError, historyStatuses, jobStatus, RUN, type TestOrg } from './support';
+import {
+  createTestOrg,
+  expectDomainError,
+  historyStatuses,
+  jobStatus,
+  RUN,
+  type TestOrg,
+} from './support';
 
 const ORIGIN = 'https://workshop.example';
 const now = () => toLocalDateTimeInput(new Date());
@@ -64,7 +71,8 @@ const validUntil = () => localDateString(new Date(Date.now() + 7 * 86400000));
 /** Money as stored: two decimals, whatever Decimal.toString() trims. */
 const money = (value: { toString(): string } | null | undefined) =>
   Number(value?.toString() ?? 'NaN').toFixed(2);
-const key = (label: string) => `${label}-${RUN}-${Math.random().toString(36).slice(2, 10)}`.padEnd(20, 'x');
+const key = (label: string) =>
+  `${label}-${RUN}-${Math.random().toString(36).slice(2, 10)}`.padEnd(20, 'x');
 
 function assertPdf(pdf: Buffer) {
   const text = pdf.toString('latin1');
@@ -76,7 +84,11 @@ function assertPdf(pdf: Buffer) {
 /** A customer with one vehicle, created directly — no job card involved. */
 async function customerWithVehicle(org: TestOrg, suffix: string) {
   const customer = await prisma.customer.create({
-    data: { organizationId: org.organizationId, name: `Simple Customer ${suffix}`, phone: `050 ${suffix.padStart(3, '0')} 4411` },
+    data: {
+      organizationId: org.organizationId,
+      name: `Simple Customer ${suffix}`,
+      phone: `050 ${suffix.padStart(3, '0')} 4411`,
+    },
   });
   const vehicle = await prisma.vehicle.create({
     data: {
@@ -92,6 +104,30 @@ async function customerWithVehicle(org: TestOrg, suffix: string) {
 
 let a: TestOrg;
 let b: TestOrg;
+
+/** The owner's own quotation sheet, line for line: 19 parts and one labour line. */
+const OWNER_SHEET = [
+  ['PART', 'IGNITION COIL', '4', '85'],
+  ['PART', 'GASKET', '1', '45'],
+  ['PART', 'AIR FILTER', '1', '25'],
+  ['PART', 'P/S HOSE', '1', '155'],
+  ['PART', 'COOLANT', '1', '25'],
+  ['PART', 'OIL SEAL', '1', '40'],
+  ['PART', 'OIL SEAL', '1', '80'],
+  ['PART', 'OIL SEAL', '1', '40'],
+  ['PART', 'A/T FILTER', '1', '140'],
+  ['PART', 'GEAR GASKET', '1', '35'],
+  ['PART', 'ATM FLUID W/S', '1', '120'],
+  ['PART', 'RACK END', '2', '50'],
+  ['PART', 'TIE ROD', '2', '45'],
+  ['PART', 'LOWER ARM SUB ASSY', '2', '90'],
+  ['PART', 'LINK ROD', '2', '40'],
+  ['PART', 'CUT BUSH', '2', '30'],
+  ['PART', 'WIPER BLADE', '1', '20'],
+  ['PART', 'AC FILTER', '1', '20'],
+  ['PART', 'POWER STEERING PUMP', '1', '290'],
+  ['LABOUR', 'LABOR AND CONSUMABLES', '1', '2000'],
+] as const;
 
 /** A catalogue part, by name: an invoice's Parts line names the part it sells. */
 const partId = (name: string) => a.parts[name].id;
@@ -155,23 +191,41 @@ describe('job card: created simply', () => {
     assert.equal(job.odometerReading, null);
     assert.equal(job.customerComplaint, 'Oil change and general check');
     // An unread odometer doesn't wipe the vehicle's last known reading.
-    assert.equal((await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicle.id } })).lastMileage, null);
+    assert.equal(
+      (await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicle.id } })).lastMileage,
+      null,
+    );
   });
 
   test('a mileage that is given is still checked', async () => {
     const { vehicle } = await customerWithVehicle(a, '11');
     await expectDomainError(
-      checkInVehicle(a.owner, { mode: 'existing', vehicleId: vehicle.id, visit: { complaint: 'Brakes', mileage: 'twelve' } }),
+      checkInVehicle(a.owner, {
+        mode: 'existing',
+        vehicleId: vehicle.id,
+        visit: { complaint: 'Brakes', mileage: 'twelve' },
+      }),
       /whole number of km/,
     );
-    await checkInVehicle(a.owner, { mode: 'existing', vehicleId: vehicle.id, visit: { complaint: 'Brakes', mileage: '45000' } });
-    assert.equal((await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicle.id } })).lastMileage, 45000);
+    await checkInVehicle(a.owner, {
+      mode: 'existing',
+      vehicleId: vehicle.id,
+      visit: { complaint: 'Brakes', mileage: '45000' },
+    });
+    assert.equal(
+      (await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicle.id } })).lastMileage,
+      45000,
+    );
   });
 
   test('the work requested is still required', async () => {
     const { vehicle } = await customerWithVehicle(a, '12');
     await expectDomainError(
-      checkInVehicle(a.owner, { mode: 'existing', vehicleId: vehicle.id, visit: { complaint: '' } }),
+      checkInVehicle(a.owner, {
+        mode: 'existing',
+        vehicleId: vehicle.id,
+        visit: { complaint: '' },
+      }),
       /Describe the work/,
     );
   });
@@ -218,15 +272,24 @@ describe('quotation without a job card', () => {
     const document = await getQuotationDocument(a.owner, quote.id);
     assert.equal(document.customer.name, party.customer.name);
     assert.equal(document.vehicle, null);
-    assert.equal(document.meta.some((m) => m.label === 'Job card'), false);
+    assert.equal(
+      document.meta.some((m) => m.label === 'Job card'),
+      false,
+    );
     assertPdf(renderDocumentPdf(document));
 
     // The link opens by itself, so a quotation with no car on file still sends —
     // and its WhatsApp message simply has no vehicle lines.
     const { rawToken } = await sendEstimate(a.owner, quote.id);
-    assert.equal((await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status, 'SENT');
+    assert.equal(
+      (await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status,
+      'SENT',
+    );
     assert.equal((await getQuoteAccess(rawToken)).state, 'open');
-    const shared = shareResult(await createShareLink(a.owner, { kind: 'quotation', id: quote.id }), ORIGIN);
+    const shared = shareResult(
+      await createShareLink(a.owner, { kind: 'quotation', id: quote.id }),
+      ORIGIN,
+    );
     assert.doesNotMatch(shared.message, /Vehicle:|Registration:/);
   });
 
@@ -239,9 +302,15 @@ describe('quotation without a job card', () => {
       items: [{ itemType: 'LABOUR', description: 'AC regas', quantity: '1', unitPrice: '250' }],
     });
     const { rawToken } = await sendEstimate(a.owner, quote.id);
-    assert.equal((await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status, 'SENT');
+    assert.equal(
+      (await prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } })).status,
+      'SENT',
+    );
 
-    const shared = shareResult(await createShareLink(a.owner, { kind: 'quotation', id: quote.id }), ORIGIN);
+    const shared = shareResult(
+      await createShareLink(a.owner, { kind: 'quotation', id: quote.id }),
+      ORIGIN,
+    );
     assert.match(shared.whatsappUrl, /^https:\/\/wa\.me\/971500204411\?text=/);
     assert.match(shared.message, /Quotation: EST-/);
     assert.match(shared.message, /Registration: S20/);
@@ -274,7 +343,10 @@ describe('quotation without a job card', () => {
     assert.equal((await getQuoteAccess(rawToken)).state, 'invalid', 'the old link stops working');
 
     const screen = await getQuotation(a.owner, revision.id);
-    assert.deepEqual(screen.versions.map((v) => v.version), [2, 1]);
+    assert.deepEqual(
+      screen.versions.map((v) => v.version),
+      [2, 1],
+    );
   });
 
   test('listed with the rest, whether or not it has a job card', async () => {
@@ -381,13 +453,28 @@ describe('invoice without a job card', () => {
 
   test('record payment → receipt → PDF → WhatsApp', async () => {
     await expectDomainError(
-      recordInvoicePayment(a.owner, invoiceId, { amount: '500', method: 'CASH', receivedAt: now() }),
+      recordInvoicePayment(a.owner, invoiceId, {
+        amount: '500',
+        method: 'CASH',
+        receivedAt: now(),
+      }),
       /more than the balance due \(211\.05\)/,
     );
-    const first = await recordInvoicePayment(a.owner, invoiceId, { amount: '100', method: 'CARD', receivedAt: now() });
+    const first = await recordInvoicePayment(a.owner, invoiceId, {
+      amount: '100',
+      method: 'CARD',
+      receivedAt: now(),
+    });
     assert.match(first.paymentNumber!, /^RCT-/);
-    assert.equal((await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } })).status, 'PARTIALLY_PAID');
-    await recordInvoicePayment(a.owner, invoiceId, { amount: '111.05', method: 'CASH', receivedAt: now() });
+    assert.equal(
+      (await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } })).status,
+      'PARTIALLY_PAID',
+    );
+    await recordInvoicePayment(a.owner, invoiceId, {
+      amount: '111.05',
+      method: 'CASH',
+      receivedAt: now(),
+    });
     const paid = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(paid.status, 'PAID');
     assert.equal(paid.balanceDue, '0.00');
@@ -398,13 +485,18 @@ describe('invoice without a job card', () => {
 
     const receipt = await getReceiptDocument(a.owner, first.id);
     assert.equal(money(receipt.highlight?.amount), '100.00');
-    assert.ok(receipt.details.some((d) => d.label === 'Remaining balance' && /111\.05/.test(d.value)));
+    assert.ok(
+      receipt.details.some((d) => d.label === 'Remaining balance' && /111\.05/.test(d.value)),
+    );
     assertPdf(renderDocumentPdf(receipt));
 
     const invoicePdf = assertPdf(renderDocumentPdf(await getInvoiceDocument(a.owner, invoiceId)));
     assert.ok(invoicePdf.length > 1000);
 
-    const shared = shareResult(await createShareLink(a.owner, { kind: 'receipt', id: first.id }), ORIGIN);
+    const shared = shareResult(
+      await createShareLink(a.owner, { kind: 'receipt', id: first.id }),
+      ORIGIN,
+    );
     assert.match(shared.message, /Receipt: RCT-/);
     assert.match(shared.message, /Registration: S40/);
     assert.match(shared.link, /^https:\/\/workshop\.example\/customer\/invoice\//);
@@ -419,7 +511,11 @@ describe('invoice without a job card', () => {
     assert.equal(invoice.vehicleId, null);
     assert.equal(money(invoice.totalAmount), '42.00');
     assertPdf(renderDocumentPdf(await getInvoiceDocument(a.owner, result.invoiceId)));
-    await recordInvoicePayment(a.owner, result.invoiceId, { amount: '42', method: 'CASH', receivedAt: now() });
+    await recordInvoicePayment(a.owner, result.invoiceId, {
+      amount: '42',
+      method: 'CASH',
+      receivedAt: now(),
+    });
     assert.equal((await getInvoiceDetail(a.owner, result.invoiceId)).status, 'PAID');
     const shared = shareResult(
       await createShareLink(a.owner, { kind: 'invoice', id: result.invoiceId }),
@@ -430,9 +526,15 @@ describe('invoice without a job card', () => {
   });
 
   test('refuses an invoice with nothing on it, and lines that do not add up', async () => {
-    await expectDomainError(createDirectInvoice(a.owner, { customerId, items: [] }), /at least one line/);
     await expectDomainError(
-      createDirectInvoice(a.owner, { customerId, items: [{ itemType: 'PART', description: 'Oil', quantity: '0', unitPrice: '10' }] }),
+      createDirectInvoice(a.owner, { customerId, items: [] }),
+      /at least one line/,
+    );
+    await expectDomainError(
+      createDirectInvoice(a.owner, {
+        customerId,
+        items: [{ itemType: 'PART', description: 'Oil', quantity: '0', unitPrice: '10' }],
+      }),
       /Line 1: Quantity must be greater than zero/,
     );
   });
@@ -448,12 +550,21 @@ describe('invoice without a job card', () => {
 describe('invoice from a quotation, and from a job card', () => {
   test('quotation → invoice bills exactly what was quoted', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '50');
-    const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
+    const quote = await createQuotation(a.owner, {
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+    });
     await saveEstimateDraft(a.owner, quote.id, {
       validUntil: validUntil(),
       items: [
         { itemType: 'LABOUR', description: 'Brake service', quantity: '2.25', unitPrice: '133.33' },
-        { itemType: 'PART', description: 'Pads', quantity: '1', unitPrice: '199.99', partId: partId('Pads') },
+        {
+          itemType: 'PART',
+          description: 'Pads',
+          quantity: '1',
+          unitPrice: '199.99',
+          partId: partId('Pads'),
+        },
       ],
     });
     // A draft can't be billed: the customer hasn't seen it.
@@ -464,7 +575,10 @@ describe('invoice from a quotation, and from a job card', () => {
     await sendEstimate(a.owner, quote.id);
     await recordCustomerDecision(a.owner, quote.id, { decision: 'APPROVED', method: 'PHONE' });
 
-    const { invoiceId } = await createDirectInvoice(a.owner, { customerId: customer.id, estimateId: quote.id });
+    const { invoiceId } = await createDirectInvoice(a.owner, {
+      customerId: customer.id,
+      estimateId: quote.id,
+    });
     const [invoice, estimate] = await Promise.all([
       getInvoiceDetail(a.owner, invoiceId),
       prisma.estimate.findUniqueOrThrow({ where: { id: quote.id } }),
@@ -485,7 +599,10 @@ describe('invoice from a quotation, and from a job card', () => {
 
   test('a rejected quotation is not billed', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '52');
-    const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
+    const quote = await createQuotation(a.owner, {
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+    });
     await saveEstimateDraft(a.owner, quote.id, {
       validUntil: validUntil(),
       items: [{ itemType: 'PART', description: 'Mirror', quantity: '1', unitPrice: '300' }],
@@ -511,11 +628,17 @@ describe('invoice from a quotation, and from a job card', () => {
       items: [{ itemType: 'LABOUR', description: 'Service', quantity: '1', unitPrice: '400' }],
     });
     await sendEstimate(a.owner, estimate.id);
-    await recordCustomerDecision(a.owner, estimate.id, { decision: 'APPROVED', method: 'IN_PERSON' });
+    await recordCustomerDecision(a.owner, estimate.id, {
+      decision: 'APPROVED',
+      method: 'IN_PERSON',
+    });
     assert.equal(await jobStatus(jobCardId), 'APPROVED');
 
     // Billed from the quotation: the job card it belongs to is billed with it.
-    const { invoiceId } = await createDirectInvoice(a.owner, { customerId: customer.id, estimateId: estimate.id });
+    const { invoiceId } = await createDirectInvoice(a.owner, {
+      customerId: customer.id,
+      estimateId: estimate.id,
+    });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(invoice.jobCardId, jobCardId);
     assert.equal(money(invoice.totalAmount), '420.00');
@@ -550,7 +673,9 @@ describe('invoice from a quotation, and from a job card', () => {
     const { invoiceId } = await createDirectInvoice(a.owner, {
       customerId: customer.id,
       jobCardId,
-      items: [{ itemType: 'LABOUR', description: 'Puncture repair', quantity: '1', unitPrice: '30' }],
+      items: [
+        { itemType: 'LABOUR', description: 'Puncture repair', quantity: '1', unitPrice: '30' },
+      ],
     });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(invoice.jobCardId, jobCardId);
@@ -578,7 +703,12 @@ describe('the detailed workflow is untouched', () => {
       visit: { complaint: 'Engine noise', mileage: '120000' },
     });
     const inspection = await startInspection(a.owner, jobCardId, a.technicianIds[0]);
-    await saveInspection(a.owner, inspection.id, { items: [{ itemType: 'PART', description: 'Engine', result: 'FAILED', notes: 'Belt' }] }, { complete: true });
+    await saveInspection(
+      a.owner,
+      inspection.id,
+      { items: [{ itemType: 'PART', description: 'Engine', result: 'FAILED', notes: 'Belt' }] },
+      { complete: true },
+    );
     await saveDiagnosis(a.owner, jobCardId, {
       employeeId: a.technicianIds[0],
       findings: 'Worn drive belt',
@@ -587,10 +717,15 @@ describe('the detailed workflow is untouched', () => {
     const estimate = await createEstimate(a.owner, jobCardId);
     await saveEstimateDraft(a.owner, estimate.id, {
       validUntil: validUntil(),
-      items: [{ itemType: 'LABOUR', description: 'Replace drive belt', quantity: '1', unitPrice: '200' }],
+      items: [
+        { itemType: 'LABOUR', description: 'Replace drive belt', quantity: '1', unitPrice: '200' },
+      ],
     });
     await sendEstimate(a.owner, estimate.id);
-    await recordCustomerDecision(a.owner, estimate.id, { decision: 'APPROVED', method: 'IN_PERSON' });
+    await recordCustomerDecision(a.owner, estimate.id, {
+      decision: 'APPROVED',
+      method: 'IN_PERSON',
+    });
     const line = await prisma.estimateItem.findFirstOrThrow({ where: { estimateId: estimate.id } });
     await startRepair(a.owner, jobCardId);
     await recordLabour(a.owner, jobCardId, {
@@ -600,7 +735,10 @@ describe('the detailed workflow is untouched', () => {
       rate: '200',
       estimateItemId: line.id,
     });
-    await recordQualityCheck(a.owner, jobCardId, { employeeId: a.technicianIds[1], result: 'PASSED' });
+    await recordQualityCheck(a.owner, jobCardId, {
+      employeeId: a.technicianIds[1],
+      result: 'PASSED',
+    });
     assert.equal(await jobStatus(jobCardId), 'READY');
 
     const invoice = await createInvoice(a.owner, jobCardId);
@@ -640,15 +778,24 @@ describe('the detailed workflow is untouched', () => {
 describe('isolation, permissions and duplicate protection', () => {
   test('another organization can see and use none of it', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '70');
-    const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
+    const quote = await createQuotation(a.owner, {
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+    });
     const { invoiceId } = await createDirectInvoice(a.owner, {
       customerId: customer.id,
       items: [{ itemType: 'LABOUR', description: 'Check', quantity: '1', unitPrice: '50' }],
     });
 
-    await expectDomainError(createQuotation(b.owner, { customerId: customer.id }), /Choose the customer/);
     await expectDomainError(
-      createDirectInvoice(b.owner, { customerId: customer.id, items: [{ itemType: 'PART', description: 'x', quantity: '1', unitPrice: '1' }] }),
+      createQuotation(b.owner, { customerId: customer.id }),
+      /Choose the customer/,
+    );
+    await expectDomainError(
+      createDirectInvoice(b.owner, {
+        customerId: customer.id,
+        items: [{ itemType: 'PART', description: 'x', quantity: '1', unitPrice: '1' }],
+      }),
       /Choose the customer/,
     );
     await expectDomainError(getQuotation(b.owner, quote.id), /could not be found/);
@@ -662,14 +809,20 @@ describe('isolation, permissions and duplicate protection', () => {
       /could not be found/,
     );
     const { quotations } = await listQuotations(b.owner, {});
-    assert.equal(quotations.some((q) => q.id === quote.id), false);
+    assert.equal(
+      quotations.some((q) => q.id === quote.id),
+      false,
+    );
   });
 
   test('permissions are checked on the server, not only hidden in the screen', async () => {
     const { customer } = await customerWithVehicle(a, '71');
     await assert.rejects(createQuotation(a.viewer, { customerId: customer.id }), AuthError);
     await assert.rejects(
-      createDirectInvoice(a.viewer, { customerId: customer.id, items: [{ itemType: 'PART', description: 'x', quantity: '1', unitPrice: '1' }] }),
+      createDirectInvoice(a.viewer, {
+        customerId: customer.id,
+        items: [{ itemType: 'PART', description: 'x', quantity: '1', unitPrice: '1' }],
+      }),
       AuthError,
     );
     const { invoiceId } = await createDirectInvoice(a.owner, {
@@ -712,9 +865,17 @@ describe('isolation, permissions and duplicate protection', () => {
     const invoices = await prisma.invoice.findMany({ where: { customerId: customer.id } });
     assert.equal(invoices.length, 1);
 
-    const paymentInput = { amount: '50', method: 'CASH', receivedAt: now(), requestKey: key('pay') };
+    const paymentInput = {
+      amount: '50',
+      method: 'CASH',
+      receivedAt: now(),
+      requestKey: key('pay'),
+    };
     await recordInvoicePayment(a.owner, invoices[0].id, paymentInput);
-    await assert.rejects(recordInvoicePayment(a.owner, invoices[0].id, paymentInput), DuplicateSubmissionError);
+    await assert.rejects(
+      recordInvoicePayment(a.owner, invoices[0].id, paymentInput),
+      DuplicateSubmissionError,
+    );
     assert.equal(await prisma.payment.count({ where: { invoiceId: invoices[0].id } }), 1);
   });
 
@@ -725,9 +886,19 @@ describe('isolation, permissions and duplicate protection', () => {
       items: [{ itemType: 'LABOUR', description: 'Service', quantity: '1', unitPrice: '100' }],
     });
     const results = await Promise.allSettled(
-      [1, 2, 3].map(() => recordInvoicePayment(a.owner, invoiceId, { amount: '60', method: 'CASH', receivedAt: now() })),
+      [1, 2, 3].map(() =>
+        recordInvoicePayment(a.owner, invoiceId, {
+          amount: '60',
+          method: 'CASH',
+          receivedAt: now(),
+        }),
+      ),
     );
-    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1, 'only one 60 fits in 105');
+    assert.equal(
+      results.filter((r) => r.status === 'fulfilled').length,
+      1,
+      'only one 60 fits in 105',
+    );
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(invoice.paidAmount, '60.00');
     assert.equal(invoice.balanceDue, '45.00');
@@ -736,37 +907,18 @@ describe('isolation, permissions and duplicate protection', () => {
 
 // ---------------------------------------------------------------------------
 
-/** The owner's own quotation sheet, line for line: 19 parts and one labour line. */
-const OWNER_SHEET = [
-  ['PART', 'IGNITION COIL', '4', '85'],
-  ['PART', 'GASKET', '1', '45'],
-  ['PART', 'AIR FILTER', '1', '25'],
-  ['PART', 'P/S HOSE', '1', '155'],
-  ['PART', 'COOLANT', '1', '25'],
-  ['PART', 'OIL SEAL', '1', '40'],
-  ['PART', 'OIL SEAL', '1', '80'],
-  ['PART', 'OIL SEAL', '1', '40'],
-  ['PART', 'A/T FILTER', '1', '140'],
-  ['PART', 'GEAR GASKET', '1', '35'],
-  ['PART', 'ATM FLUID W/S', '1', '120'],
-  ['PART', 'RACK END', '2', '50'],
-  ['PART', 'TIE ROD', '2', '45'],
-  ['PART', 'LOWER ARM SUB ASSY', '2', '90'],
-  ['PART', 'LINK ROD', '2', '40'],
-  ['PART', 'CUT BUSH', '2', '30'],
-  ['PART', 'WIPER BLADE', '1', '20'],
-  ['PART', 'AC FILTER', '1', '20'],
-  ['PART', 'POWER STEERING PUMP', '1', '290'],
-  ['LABOUR', 'LABOR AND CONSUMABLES', '1', '2000'],
-] as const;
-
 const pdfStrings = (pdf: Buffer) =>
-  [...pdf.toString('latin1').matchAll(/\((.*?)\) Tj/g)].map((m) => m[1].replace(/\\([()\\])/g, '$1'));
+  [...pdf.toString('latin1').matchAll(/\((.*?)\) Tj/g)].map((m) =>
+    m[1].replace(/\\([()\\])/g, '$1'),
+  );
 
 describe("the owner's quotation sheet", () => {
   test('entered as he writes it, it prices and prints exactly like his sheet', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '80');
-    const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
+    const quote = await createQuotation(a.owner, {
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+    });
     await saveEstimateDraft(a.owner, quote.id, {
       validUntil: validUntil(),
       items: OWNER_SHEET.map(([itemType, description, quantity, unitPrice]) => ({
@@ -812,12 +964,19 @@ describe("the owner's quotation sheet", () => {
     assert.ok(text.includes('AED 4,079.25'));
     // One rate on every line: the totals say "VAT 5%" and no line repeats it.
     assert.ok(text.includes('VAT 5%'));
-    assert.equal(text.some((t) => /^\d+(\.\d+)?%$/.test(t)), false, 'no per-line VAT column');
+    assert.equal(
+      text.some((t) => /^\d+(\.\d+)?%$/.test(t)),
+      false,
+      'no per-line VAT column',
+    );
   });
 
   test('billed from that quotation, the invoice keeps every line’s type', async () => {
     const { customer, vehicle } = await customerWithVehicle(a, '81');
-    const quote = await createQuotation(a.owner, { customerId: customer.id, vehicleId: vehicle.id });
+    const quote = await createQuotation(a.owner, {
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+    });
     await saveEstimateDraft(a.owner, quote.id, {
       validUntil: validUntil(),
       // Each part named from the list, so the invoice can take it out of stock.
@@ -831,7 +990,10 @@ describe("the owner's quotation sheet", () => {
     });
     await sendEstimate(a.owner, quote.id);
     await recordCustomerDecision(a.owner, quote.id, { decision: 'APPROVED', method: 'PHONE' });
-    const { invoiceId } = await createDirectInvoice(a.owner, { customerId: customer.id, estimateId: quote.id });
+    const { invoiceId } = await createDirectInvoice(a.owner, {
+      customerId: customer.id,
+      estimateId: quote.id,
+    });
 
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
     assert.equal(money(invoice.totalAmount), '4079.25');
@@ -858,12 +1020,21 @@ describe("the owner's quotation sheet", () => {
     const { invoiceId } = await createDirectInvoice(a.owner, {
       customerId: customer.id,
       items: [
-        { itemType: 'PART', description: 'Brake pads', quantity: '1', unitPrice: '180', partId: partId('Brake pads') },
+        {
+          itemType: 'PART',
+          description: 'Brake pads',
+          quantity: '1',
+          unitPrice: '180',
+          partId: partId('Brake pads'),
+        },
         { itemType: 'LABOUR', description: 'Fitting', quantity: '1', unitPrice: '100' },
       ],
     });
     const invoice = await getInvoiceDetail(a.owner, invoiceId);
-    assert.deepEqual(invoice.items.map((i) => i.itemType), ['PART', 'LABOUR']);
+    assert.deepEqual(
+      invoice.items.map((i) => i.itemType),
+      ['PART', 'LABOUR'],
+    );
   });
 });
 
@@ -872,11 +1043,20 @@ describe("the owner's quotation sheet", () => {
 describe('a renamed workshop', () => {
   test('an invoice issued before the rename names the old business throughout; new ones the new', async () => {
     const shop = await createTestOrg('Rename');
-    await prisma.organization.update({ where: { id: shop.organizationId }, data: { name: 'Old Name Garage', legalName: null } });
-    const customer = await prisma.customer.create({
-      data: { organizationId: shop.organizationId, name: 'Renamed Customer', phone: '050 123 9911' },
+    await prisma.organization.update({
+      where: { id: shop.organizationId },
+      data: { name: 'Old Name Garage', legalName: null },
     });
-    const line = [{ itemType: 'LABOUR' as const, description: 'Service', quantity: '1', unitPrice: '100' }];
+    const customer = await prisma.customer.create({
+      data: {
+        organizationId: shop.organizationId,
+        name: 'Renamed Customer',
+        phone: '050 123 9911',
+      },
+    });
+    const line = [
+      { itemType: 'LABOUR' as const, description: 'Service', quantity: '1', unitPrice: '100' },
+    ];
     const before = await createDirectInvoice(shop.owner, { customerId: customer.id, items: line });
 
     await prisma.organization.update({

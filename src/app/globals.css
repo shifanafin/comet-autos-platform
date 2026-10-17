@@ -257,6 +257,29 @@
     width: 0;
     height: 0;
   }
+
+  /*
+   * Date and time fields. The value starts where any other field's text
+   * starts: Safari on iPhone centres it, and WebKit/Chromium pad its inner
+   * edit box, so a date sat further right than the fields beside it. In the
+   * base layer, so a `text-right` utility still wins where one is wanted.
+   */
+  input:is([type='date'], [type='datetime-local'], [type='month'], [type='time'], [type='week']) {
+    text-align: left;
+  }
+  input::-webkit-date-and-time-value {
+    margin: 0;
+    text-align: inherit;
+  }
+  input::-webkit-datetime-edit,
+  input::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+  input::-webkit-calendar-picker-indicator {
+    margin-inline-start: 0.5rem;
+    cursor: pointer;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     background-image: radial-gradient(1200px 600px at 78% -8%, var(--ground-wash), transparent 70%);

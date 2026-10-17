@@ -74,3 +74,6 @@ next-env.d.ts
 # The OCR engine and language data for Scan bill: copied from node_modules by
 # `npm install` (scripts/copy-tesseract.mjs), never committed.
 public/tesseract/
+
+# A saved test run: may show test-organization logins and ids.
+/test-results.txt

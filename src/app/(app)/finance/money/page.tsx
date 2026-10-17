@@ -6,6 +6,7 @@ import { formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { LinkButton } from '@/components/shared/link-button';
+import { FinancePeriodPicker } from '@/components/finance/period-picker';
 
 export const metadata = { title: 'Money' };
 
@@ -24,16 +25,28 @@ const KIND_NOTE: Record<string, string> = {
   other: 'Not counted as money until it is banked (e.g. post-dated cheques received).',
 };
 
-/** How much money the workshop has, and where it is. */
-export default async function MoneyPage() {
+/** How much money the workshop has, and where it is — and what moved in a period. */
+export default async function MoneyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
+}) {
   const user = await requireUser();
+  const query = await searchParams;
   let overview;
   try {
-    overview = await getMoneyOverview(user);
+    overview = await getMoneyOverview(user, { ...query, period: query.period ?? 'month' });
   } catch (error) {
     if (error instanceof AuthError) return <AccessDenied what="money" />;
     throw error;
   }
+
+  // Opening an account keeps the period chosen here.
+  const periodQuery = new URLSearchParams(
+    overview.period!.key === 'custom'
+      ? { period: 'custom', from: overview.period!.from, to: overview.period!.to }
+      : { period: overview.period!.key },
+  ).toString();
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -75,6 +88,12 @@ export default async function MoneyPage() {
         </span>
       </Panel>
 
+      <FinancePeriodPicker
+        period={overview.period!}
+        basePath="/finance/money"
+        presets={['month', 'last-month', 'quarter', 'last-quarter', 'year']}
+      />
+
       {overview.groups.map((group) => (
         <Section
           key={group.kind}
@@ -91,12 +110,17 @@ export default async function MoneyPage() {
               {group.accounts.map((account) => (
                 <li key={account.id}>
                   <Link
-                    href={`/finance/money/${account.id}`}
+                    href={`/finance/money/${account.id}?${periodQuery}`}
                     className="flex min-h-14 items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50 sm:px-6"
                   >
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate font-medium">{account.name}</span>
-                      <span className="text-xs text-muted-foreground">{account.code}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {account.code} · {group.kind === 'company-card' ? 'paid off' : 'in'}{' '}
+                        {formatMoney(account.moneyIn)} ·{' '}
+                        {group.kind === 'company-card' ? 'spent' : 'out'}{' '}
+                        {formatMoney(account.moneyOut)}
+                      </span>
                     </span>
                     <span className="flex items-center gap-3">
                       <span

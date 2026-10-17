@@ -211,6 +211,88 @@ function StepButton({
   );
 }
 
+/** Records an approved run as paid: the day the money left, and from where. */
+function MarkPaidButton({
+  payrollId,
+  label,
+  net,
+  today,
+  accounts,
+}: {
+  payrollId: string;
+  label: string;
+  net: string;
+  today: string;
+  accounts: { id: string; code: string; name: string }[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [state, onSubmit, isPending] = useFormAction<ActionResult>(
+    async (prev, formData) => {
+      const result = await markPayrollPaidAction(payrollId, prev, formData);
+      if (result.ok) {
+        toast.success('Payroll recorded as paid');
+        setOpen(false);
+        router.refresh();
+      }
+      return result;
+    },
+    { ok: false },
+  );
+  const errors = state.fieldErrors ?? {};
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button size="lg" className="h-11" onClick={() => setOpen(true)}>
+        <Banknote />
+        Mark as paid
+      </Button>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {label} paid · {formatMoney(net)}
+          </DialogTitle>
+          <DialogDescription>
+            The day the salaries left the account — the WPS transfer date — and the account they
+            left. A paid payroll can’t be changed or cancelled.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={onSubmit} className="flex flex-col gap-5">
+          <TextField
+            label="Paid on"
+            name="paidOn"
+            type="date"
+            required
+            max={today}
+            defaultValue={today}
+            error={errors.paidOn}
+            className={`${INPUT} sm:w-56`}
+          />
+          <Field label="Paid from" htmlFor={`paidFrom-${payrollId}`} error={errors.accountId}>
+            <NativeSelect
+              id={`paidFrom-${payrollId}`}
+              name="accountId"
+              defaultValue=""
+              className="h-11 text-base md:text-sm"
+            >
+              <option value="">Bank (default)</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.code} · {account.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <FormError message={Object.keys(errors).length ? undefined : state.error} />
+          <SubmitButton pending={isPending} size="lg" className="h-11" pendingLabel="Recording…">
+            <Banknote />
+            Record as paid
+          </SubmitButton>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** The run's next step, and cancelling it, for whoever may take them. */
 export function PayrollRunActions({
   payrollId,
@@ -219,6 +301,8 @@ export function PayrollRunActions({
   net,
   canPrepare,
   canApprove,
+  today,
+  accounts,
 }: {
   payrollId: string;
   label: string;
@@ -226,6 +310,9 @@ export function PayrollRunActions({
   net: string;
   canPrepare: boolean;
   canApprove: boolean;
+  today: string;
+  /** Cash and bank accounts salaries can be paid from. */
+  accounts: { id: string; code: string; name: string }[];
 }) {
   const cancellable =
     (status === 'CALCULATED' || status === 'DRAFT' || status === 'APPROVED') &&
@@ -246,14 +333,12 @@ export function PayrollRunActions({
         />
       ) : null}
       {status === 'APPROVED' && canApprove ? (
-        <StepButton
-          label="Mark as paid"
-          icon={<Banknote />}
-          title={`Record ${label} as paid?`}
-          description={`Confirms ${formatMoney(net)} has been paid to the team. A paid payroll can’t be changed or cancelled.`}
-          confirmLabel="Mark as paid"
-          successMessage="Payroll recorded as paid"
-          run={() => markPayrollPaidAction(payrollId)}
+        <MarkPaidButton
+          payrollId={payrollId}
+          label={label}
+          net={net}
+          today={today}
+          accounts={accounts}
         />
       ) : null}
       {(status === 'CALCULATED' || status === 'DRAFT') && canPrepare ? (

@@ -284,6 +284,13 @@ export async function getComplianceCalendar(user: AuthenticatedUser) {
   );
 }
 
+/** Every VAT period from the certificate and where its return stands — for VAT returns. */
+export async function getVatPeriods(user: AuthenticatedUser) {
+  requirePermission(user, 'vat.view');
+  const { vat } = await buildCompliance(user.organizationId, localDateString());
+  return vat;
+}
+
 type ProfitOf = (
   from: string,
   to: string,

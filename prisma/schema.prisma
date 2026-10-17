@@ -2264,6 +2264,7 @@ model ChartOfAccount {
   supplierPayments  SupplierPayment[]
   vatFilings        VatFiling[]
   settlementsPaid   FinalSettlement[]
+  payrollsPaid      Payroll[]
   journalEntryLines JournalEntryLine[]
 
   creditNoteItems        CreditNoteItem[]
@@ -2968,6 +2969,11 @@ model Payroll {
   approvedAt       DateTime?     @map("approved_at") @db.Timestamptz
   paidByUserId     String?       @map("paid_by_user_id") @db.Uuid
   paidAt           DateTime?     @map("paid_at") @db.Timestamptz
+  /// The day the salaries left the account (the WPS transfer date) and the
+  /// cash or bank account they were paid from — empty: the default bank.
+  /// Runs paid before these existed fall back to `paidAt`.
+  paidOn            DateTime?    @map("paid_on") @db.Date
+  paidFromAccountId String?      @map("paid_from_account_id") @db.Uuid
   journalEntryId   String?       @map("journal_entry_id") @db.Uuid
   /// Who ran it — empty when the app calculated it by itself on the 1st
   /// (lib/hr/payroll.ts runPayrollAutomatically).
@@ -2981,6 +2987,7 @@ model Payroll {
   createdBy    User?         @relation("PayrollCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
   approvedBy   User?         @relation("PayrollApprovedBy", fields: [organizationId, approvedByUserId], references: [organizationId, id], onDelete: Restrict)
   paidBy       User?         @relation("PayrollPaidBy", fields: [organizationId, paidByUserId], references: [organizationId, id], onDelete: Restrict)
+  paidFrom     ChartOfAccount? @relation(fields: [organizationId, paidFromAccountId], references: [organizationId, id], onDelete: Restrict)
 
   items PayrollItem[]
 

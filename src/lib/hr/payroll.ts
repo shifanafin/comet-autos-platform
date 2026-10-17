@@ -12,6 +12,7 @@ import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { approvedLeaveDays, leaveDays, overlapDays } from '@/lib/hr/leave';
 import { syncPosting } from '@/lib/accounting/journal';
+import { checkMoneyAccount } from '@/lib/accounting/chart';
 import { gratuityForServiceDaysFils } from '@/lib/hr/gratuity';
 import {
   leaveDeductionFils,
@@ -30,7 +31,9 @@ import { automaticPayrollMonth } from '@/lib/hr/payroll-schedule';
  * SALARY. Each employee's pay is a history of rows (basic + allowances, from
  * a date). Setting a new salary closes the open row the day before the new
  * one starts, so there is always exactly one salary in force on any day.
- * History only moves forward; the same start date corrects that row.
+ * The same start date corrects that row. History only moves forward, except
+ * that a first salary's start date can be corrected earlier until a month it
+ * would change has been approved.
  *
  * PAYROLL. One run per calendar month for the whole organization — the
  * database holds that (`@@unique([organizationId, periodStart, periodEnd])`).
@@ -43,16 +46,17 @@ import { automaticPayrollMonth } from '@/lib/hr/payroll-schedule';
  * Each line snapshots what was paid, so changing someone's salary later
  * never rewrites a month already run. The rules for a line, in fils:
  *
- *   salary     the row in force on the last day of the month
- *   pro-rated  by calendar days employed in the month (joined or left
- *              mid-month); a full month is never pro-rated
+ *   salary     each day employed at the row in force that day, by calendar
+ *              days (a raise mid-month splits it); a full month under one
+ *              row is never pro-rated, and a day no row covers is not paid
+ *              but reported — never guessed
  *   deduction  approved UNPAID leave days × (basic + allowances) / days in
  *              the month; editable with a reason while CALCULATED
  *   net        basic + allowances − deductions, never below zero
  *
- * Absent days from attendance are shown beside each line but are not
- * deducted automatically — whether an absence is docked is the manager's
- * call, made with the deduction edit.
+ * Absence marked in attendance that no approved leave covers is deducted at
+ * a day's wage, like unpaid leave. A run can't be approved once the records
+ * behind it have changed — it is recalculated first.
  *
  * Who may see pay: Payroll → View ("Salaries and payroll runs") or the
  * authority that signs runs off (`payroll.approve`). Without either, the
@@ -175,17 +179,61 @@ export async function setSalary(user: AuthenticatedUser, employeeId: string, raw
       where: { organizationId: user.organizationId, employeeId },
       orderBy: { effectiveFrom: 'desc' },
     });
-    if (latest && from < latest.effectiveFrom) {
-      throw new DomainError(
-        `The current salary starts on ${latest.effectiveFrom.toISOString().slice(0, 10)}. A change has to start on or after that date.`,
-        'effectiveFrom',
-      );
-    }
-
     const data = {
       basicSalary: filsToString(basic),
       allowances: filsToString(allowances),
     };
+
+    // An earlier date than someone's FIRST salary corrects when it starts — a
+    // start date typed wrong — as long as no approved or paid month would
+    // change. Once there is a history, changes only move forward.
+    if (latest && from < latest.effectiveFrom) {
+      const previous = await tx.salary.findFirst({
+        where: { organizationId: user.organizationId, employeeId, id: { not: latest.id } },
+        select: { id: true },
+      });
+      if (previous) {
+        throw new DomainError(
+          `The current salary starts on ${isoDay(latest.effectiveFrom)}. A change has to start on or after that date.`,
+          'effectiveFrom',
+        );
+      }
+      const settled = await tx.payroll.findFirst({
+        where: {
+          organizationId: user.organizationId,
+          status: { in: ['APPROVED', 'PAID'] },
+          periodEnd: { gte: from },
+          items: { some: { employeeId } },
+        },
+        orderBy: { periodStart: 'asc' },
+        select: { periodStart: true },
+      });
+      if (settled) {
+        throw new DomainError(
+          `${monthLabel(settled.periodStart)} has been approved with this person's pay, so the start date can't move before it. Set a new salary from a later date instead.`,
+          'effectiveFrom',
+        );
+      }
+      const salary = await tx.salary.update({
+        where: { id: latest.id },
+        data: { ...data, effectiveFrom: from },
+      });
+      await audit(
+        tx,
+        user,
+        'salary.redated',
+        'Salary',
+        salary.id,
+        { employeeId, ...data, effectiveFrom: input.effectiveFrom },
+        {
+          basicSalary: latest.basicSalary.toString(),
+          allowances: latest.allowances.toString(),
+          effectiveFrom: isoDay(latest.effectiveFrom),
+        },
+      );
+      await settleRequestKey(tx, user, rawInput, salary.id);
+      return salary;
+    }
 
     if (latest && from.getTime() === latest.effectiveFrom.getTime()) {
       const salary = await tx.salary.update({ where: { id: latest.id }, data });
@@ -402,33 +450,68 @@ async function calculateLines(
   const booksStart = organization.openingBalanceDate;
   const dayBeforeBooks = booksStart ? isoDay(new Date(booksStart.getTime() - DAY_MS)) : null;
 
-  const salaryOf = new Map<string, (typeof salaries)[number]>();
+  // Each person's salary rows, newest first.
+  const salariesOf = new Map<string, (typeof salaries)[number][]>();
   for (const salary of salaries) {
-    if (!salaryOf.has(salary.employeeId)) salaryOf.set(salary.employeeId, salary);
+    const rows = salariesOf.get(salary.employeeId) ?? [];
+    rows.push(salary);
+    salariesOf.set(salary.employeeId, rows);
   }
 
   const days = leaveDays(start, end);
   const lines: CalculatedLine[] = [];
   const missingSalary: string[] = [];
+  const partSalary: { name: string; unpaidDays: number; salaryFrom: string }[] = [];
 
   for (const employee of employees) {
-    const salary = salaryOf.get(employee.id);
+    const employed = overlapDays(employee.hireDate, employee.terminationDate ?? end, start, end);
+    if (employed === 0) continue;
+    const fromDate = employee.hireDate > start ? employee.hireDate : start;
+    const toDate =
+      employee.terminationDate && employee.terminationDate < end ? employee.terminationDate : end;
+    const from = isoDay(fromDate);
+    const to = isoDay(toDate);
+
+    // Every day employed is paid at the salary in force that day: a raise or
+    // a first salary mid-month splits the month. A day no salary covers is
+    // not paid, and is reported — the app can't guess what was agreed.
+    let basic = 0;
+    let allowances = 0;
+    let salaryDays = 0;
+    let salary: (typeof salaries)[number] | null = null;
+    let nextStart: Date | null = null;
+    for (const row of salariesOf.get(employee.id) ?? []) {
+      const rowEnd = [
+        row.effectiveTo ?? end,
+        nextStart ? new Date(nextStart.getTime() - DAY_MS) : end,
+      ].reduce((a, b) => (a < b ? a : b));
+      nextStart = row.effectiveFrom;
+      const n = overlapDays(row.effectiveFrom, rowEnd, fromDate, toDate);
+      if (n === 0) continue;
+      // The rate for daily figures (leave, overtime, gratuity): the latest one worked under.
+      salary ??= row;
+      salaryDays += n;
+      basic += n === days ? fils(row.basicSalary) : divRound(fils(row.basicSalary) * n, days);
+      allowances += n === days ? fils(row.allowances) : divRound(fils(row.allowances) * n, days);
+    }
     if (!salary) {
       missingSalary.push(name(employee));
       continue;
     }
-    const employed = overlapDays(employee.hireDate, employee.terminationDate ?? end, start, end);
-    if (employed === 0) continue;
-    const from = isoDay(employee.hireDate > start ? employee.hireDate : start);
-    const to = isoDay(
-      employee.terminationDate && employee.terminationDate < end ? employee.terminationDate : end,
-    );
+    if (salaryDays < employed) {
+      partSalary.push({
+        name: name(employee),
+        unpaidDays: employed - salaryDays,
+        salaryFrom: isoDay(
+          (salariesOf.get(employee.id) ?? []).reduce((a, b) =>
+            a.effectiveFrom < b.effectiveFrom ? a : b,
+          ).effectiveFrom,
+        ),
+      });
+    }
 
     const monthlyBasic = fils(salary.basicSalary);
     const monthlyAllowances = fils(salary.allowances);
-    const basic = employed === days ? monthlyBasic : divRound(monthlyBasic * employed, days);
-    const allowances =
-      employed === days ? monthlyAllowances : divRound(monthlyAllowances * employed, days);
     const gross = basic + allowances;
 
     // Unpaid and half-pay leave, and absence no leave covers — only while employed.
@@ -518,7 +601,85 @@ async function calculateLines(
       leaveAccrual: signed(leaveLiability - before.leave),
     });
   }
-  return { lines, missingSalary };
+  return { lines, missingSalary, partSalary };
+}
+
+/** A line's figures as one comparable string — stored (Decimal) or fresh (string). */
+function lineFingerprint(item: { employeeId: string }) {
+  const line = item as unknown as Record<string, unknown>;
+  const money = (value: unknown) => signed(fils(value as { toString(): string } | null));
+  const count = (value: unknown) => Number(String(value ?? 0)).toFixed(2);
+  return [
+    item.employeeId,
+    ...[
+      'basicSalary',
+      'allowances',
+      'leaveDeduction',
+      'otherDeduction',
+      'overtimePay',
+      'netPay',
+      'gratuityLiability',
+      'gratuityAccrual',
+      'leaveLiability',
+      'leaveAccrual',
+    ].map((field) => money(line[field])),
+    ...['unpaidDays', 'halfPayDays', 'absentDays', 'overtimeHours'].map((field) =>
+      count(line[field]),
+    ),
+  ].join('|');
+}
+
+/**
+ * Whether a run's lines still match the records — salaries, leave, absence,
+ * overtime, joiners and leavers — as they stand now. Names the people whose
+ * pay would change, and anyone who would join or drop off the run.
+ */
+async function staleLines(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  payroll: { id: string; periodStart: Date; periodEnd: Date },
+) {
+  const stored = await tx.payrollItem.findMany({ where: { payrollId: payroll.id } });
+  const kept = new Map<string, KeptDeduction>(
+    stored
+      .filter((item) => fils(item.otherDeduction) > 0)
+      .map((item) => [
+        item.employeeId,
+        {
+          amountFils: fils(item.otherDeduction),
+          kind: item.otherDeductionKind,
+          reason: item.otherDeductionReason,
+        },
+      ]),
+  );
+  const fresh = await calculateLines(
+    tx,
+    organizationId,
+    payroll.periodStart,
+    payroll.periodEnd,
+    kept,
+  );
+  const was = new Map(stored.map((item) => [item.employeeId, item]));
+  const now = new Map(fresh.lines.map((line) => [line.employeeId, line]));
+  const ids = new Set([...was.keys(), ...now.keys()]);
+  const employees = await tx.employee.findMany({
+    where: { organizationId, id: { in: [...ids] } },
+    select: { id: true, firstName: true, lastName: true },
+  });
+  const nameOf = new Map(employees.map((employee) => [employee.id, name(employee)]));
+  const changed: string[] = [];
+  for (const id of ids) {
+    const before = was.get(id);
+    const after = now.get(id);
+    if (!before || !after || lineFingerprint(before) !== lineFingerprint(after)) {
+      changed.push(nameOf.get(id) ?? 'Someone');
+    }
+  }
+  return {
+    changed: changed.sort((a, b) => a.localeCompare(b)),
+    missingSalary: fresh.missingSalary,
+    partSalary: fresh.partSalary,
+  };
 }
 
 function totalsOf(
@@ -903,6 +1064,13 @@ export async function approvePayroll(user: AuthenticatedUser, payrollId: string)
     const payroll = await loadRun(tx, user, payrollId, ['CALCULATED'], 'approved');
     const items = await tx.payrollItem.findMany({ where: { payrollId: payroll.id } });
     if (items.length === 0) throw new DomainError('There is no one on this payroll to approve.');
+    // Approve only the figures the records give today, never a stale calculation.
+    const stale = await staleLines(tx, user.organizationId, payroll);
+    if (stale.changed.length) {
+      throw new DomainError(
+        `Salaries, leave, absence or overtime have changed since this was calculated (${stale.changed.join(', ')}). Recalculate it, check the figures, then approve.`,
+      );
+    }
     await transition(tx, payroll.id, 'CALCULATED', {
       status: 'APPROVED',
       approvedByUserId: user.id,
@@ -924,16 +1092,61 @@ export async function approvePayroll(user: AuthenticatedUser, payrollId: string)
   });
 }
 
-/** Records that an approved run has been paid out. */
-export async function markPayrollPaid(user: AuthenticatedUser, payrollId: string) {
+const paySchema = z.object({
+  paidOn: z
+    .string({ error: 'Enter the date paid.' })
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter the date paid.'),
+  accountId: z.union([z.literal(''), z.uuid()]).optional(),
+  requestKey: z.string().optional(),
+});
+
+/**
+ * Records that an approved run has been paid out: on the day the money left
+ * (the WPS transfer date), from the cash or bank account it left.
+ */
+export async function markPayrollPaid(
+  user: AuthenticatedUser,
+  payrollId: string,
+  rawInput: unknown = { paidOn: localDateString() },
+) {
+  const input = parseInput(paySchema, rawInput);
   requirePermission(user, 'payroll.approve');
+  const paidOn = parseCalendarDate(input.paidOn);
+  if (!paidOn) throw new DomainError('Enter the date paid.', 'paidOn');
+  if (input.paidOn > localDateString()) {
+    throw new DomainError('The date can’t be in the future.', 'paidOn');
+  }
   return prisma.$transaction(async (tx) => {
+    await claimRequestKey(tx, user, rawInput, 'payroll.pay');
     const payroll = await loadRun(tx, user, payrollId, ['APPROVED'], 'marked as paid');
+    if (paidOn < payroll.periodStart) {
+      throw new DomainError(
+        `${monthLabel(payroll.periodStart)} salaries can’t be paid before the month began. Money given earlier is a salary advance, recovered through the deduction.`,
+        'paidOn',
+      );
+    }
+    const accountId = await checkMoneyAccount(tx, user.organizationId, input.accountId || null);
+    if (accountId) {
+      // What the card company owes the garage is not money salaries can leave from.
+      const account = await tx.chartOfAccount.findFirst({
+        where: { id: accountId, organizationId: user.organizationId },
+        select: { role: true },
+      });
+      if (account?.role === 'CARD_CLEARING') {
+        throw new DomainError(
+          'Choose the cash or bank account the salaries were paid from.',
+          'accountId',
+        );
+      }
+    }
     const paidAt = new Date();
     await transition(tx, payroll.id, 'APPROVED', {
       status: 'PAID',
       paidByUserId: user.id,
       paidAt,
+      paidOn,
+      paidFromAccountId: accountId,
     });
     await syncPosting(tx, user.organizationId, 'PAYROLL', payroll.id, user.id);
     await syncPosting(tx, user.organizationId, 'PAYROLL_PAYMENT', payroll.id, user.id);
@@ -943,9 +1156,10 @@ export async function markPayrollPaid(user: AuthenticatedUser, payrollId: string
       'payroll.paid',
       'Payroll',
       payroll.id,
-      { status: 'PAID', paidAt: paidAt.toISOString() },
+      { status: 'PAID', paidOn: input.paidOn, accountId },
       { status: 'APPROVED' },
     );
+    await settleRequestKey(tx, user, rawInput, payroll.id);
     return { id: payroll.id };
   });
 }
@@ -1094,6 +1308,7 @@ export async function getPayrollRun(user: AuthenticatedUser, payrollId: string) 
       createdBy: { select: { fullName: true } },
       approvedBy: { select: { fullName: true } },
       paidBy: { select: { fullName: true } },
+      paidFrom: { select: { accountName: true } },
       items: {
         include: {
           employee: {
@@ -1113,6 +1328,11 @@ export async function getPayrollRun(user: AuthenticatedUser, payrollId: string) 
     },
   });
   if (!payroll) throw new NotFoundError('payroll run');
+  // Before approval: does it still match the records, and who is missing pay?
+  const checks =
+    payroll.status === 'CALCULATED' || payroll.status === 'DRAFT'
+      ? await staleLines(prisma, user.organizationId, payroll)
+      : null;
   // Who pays: the payslip's heading.
   const company = await prisma.organization.findUniqueOrThrow({
     where: { id: user.organizationId },
@@ -1191,6 +1411,10 @@ export async function getPayrollRun(user: AuthenticatedUser, payrollId: string) 
     approvedAt: payroll.approvedAt,
     paidBy: payroll.paidBy?.fullName ?? null,
     paidAt: payroll.paidAt,
+    /** The day the money left, and from where (empty: the default bank). */
+    paidOn: payroll.paidOn,
+    paidFrom: payroll.paidFrom?.accountName ?? null,
+    checks,
     lines,
     totals: totalsOf(payroll.items),
     /** The gratuity the whole team had earned by the period end. */

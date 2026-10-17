@@ -193,7 +193,11 @@ async function chooseVersion(
     },
     data: { isCurrent: false },
   });
-  await tx.estimate.update({ where: { id: chosen.id }, data: { isCurrent: true } });
+  // Chosen again after another was: it is no longer "not chosen".
+  await tx.estimate.update({
+    where: { id: chosen.id },
+    data: { isCurrent: true, replacedAt: null },
+  });
 }
 
 function defaultValidUntil(): Date {

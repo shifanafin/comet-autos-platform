@@ -78,12 +78,14 @@ async function nextEntryNumber(tx: Tx, organizationId: string): Promise<string> 
   if (!taken) return entryNumber;
 
   const prefix = entryNumber.replace(/\d+$/, '');
+  // The start position is cast: untyped, Postgres takes `substring(text FROM
+  // '4')` as a regular expression and finds nothing.
   const [{ highest }] = await tx.$queryRaw<{ highest: number | null }[]>`
-    SELECT max(substring(entry_number FROM ${prefix.length + 1})::int) AS highest
+    SELECT max(substring(entry_number FROM ${prefix.length + 1}::int)::int) AS highest
     FROM journal_entries
     WHERE organization_id = ${organizationId}::uuid
       AND entry_number LIKE ${`${prefix}%`}
-      AND substring(entry_number FROM ${prefix.length + 1}) ~ '^[0-9]+$'`;
+      AND substring(entry_number FROM ${prefix.length + 1}::int) ~ '^[0-9]+$'`;
   await tx.$executeRaw`
     UPDATE document_number_sequences
     SET next_number = GREATEST(next_number, ${Number(highest ?? 0) + 1}), updated_at = now()

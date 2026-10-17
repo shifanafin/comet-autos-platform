@@ -548,8 +548,19 @@ describe('roles', () => {
   test('the last role that can manage access keeps that permission', async () => {
     // adminRoleA is the only live route to user.edit in this workshop.
     const without = PERMISSION_CODES.filter((code) => code !== 'user.edit');
+    // Someone holding the role may not edit it at all.
     await expectDomainError(
       updateRolePermissions(a.owner, adminRoleA, { permissions: without }),
+      /You hold this role/i,
+    );
+    // Someone who may edit roles but doesn't hold this one reaches the lockout guard.
+    const roleEditor = {
+      ...a.owner,
+      id: a.viewer.id,
+      orgWidePermissions: new Set(['role.view', 'role.edit']),
+    };
+    await expectDomainError(
+      updateRolePermissions(roleEditor, adminRoleA, { permissions: without }),
       /only role that can manage access/i,
     );
     const detail = await getRoleDetail(a.owner, adminRoleA);

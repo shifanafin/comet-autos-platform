@@ -12,7 +12,6 @@ import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusPill, type PillTone } from '@/components/shared/status-pill';
 import { CompanyDatesForm } from '@/components/compliance/company-dates-form';
-import { RecordFiledElsewhereButton } from '@/components/compliance/record-filed-elsewhere';
 import { cn } from '@/lib/utils';
 
 export const metadata = { title: 'Tax & accounting calendar' };
@@ -89,7 +88,7 @@ const GUIDE: { title: string; body: string[] }[] = [
     body: [
       'You add 5% VAT to what you charge customers (output VAT) and pay 5% VAT on what you buy for the business (input VAT). Every period you pay the FTA the difference — or the FTA owes you, if you bought more than you sold.',
       'The FTA sets your periods on the VAT certificate, usually every three months. After each period ends you have 28 days to file the return (VAT201) in EmaraTax and pay. Missing either brings fines.',
-      'This app prepares the figures: open the period below, check the documents behind each box, copy the boxes into EmaraTax, submit, then record it here as filed with the FTA reference, and record the payment when it is made.',
+      'This app prepares the figures: open the period in VAT returns, check the documents behind each box, copy the boxes into EmaraTax, submit, then record it here as filed with the FTA reference, and record the payment when it is made.',
       'Keep the supplier tax invoices for everything you claim VAT back on — no tax invoice, no claim.',
     ],
   },
@@ -138,10 +137,12 @@ export default async function ComplianceCalendarPage() {
   }
   const calendar = await getComplianceCalendar(user);
   const canEdit = hasPermission(user, 'settings.edit');
-  const canRecordVat = hasPermission(user, 'vat.create');
   const missing = calendar.setup.filter((item) => item.state !== 'done').length;
   const ct = calendar.corporateTax;
-  const vatRows = [...calendar.vat.periods].reverse();
+  const canSeeVat = hasPermission(user, 'vat.view');
+  const vatOpen = calendar.vat.periods.filter(
+    (period) => period.state !== 'done' && period.state !== 'upcoming',
+  ).length;
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -178,68 +179,26 @@ export default async function ComplianceCalendarPage() {
 
       <Section
         title="VAT returns"
-        description={
-          calendar.vat.configured
-            ? 'Every period from the certificate. Open one to see its return.'
-            : 'Enter the first VAT period from the certificate below to list every return.'
-        }
+        description="Each period's return — its figures, filing and payment — is kept in VAT returns."
       >
-        {calendar.vat.configured ? (
-          <Panel padding="none" className="@container overflow-hidden">
-            <ul className="divide-y divide-border">
-              {vatRows.map((period) =>
-                // Before these books: the app has no figures for it, so the
-                // row offers to record the return as filed instead of a link.
-                period.beforeBooks ? (
-                  <li
-                    key={period.to}
-                    className="flex flex-col gap-3 px-4 py-3 @md:flex-row @md:items-center @md:justify-between sm:px-6"
-                  >
-                    <span className="flex flex-col gap-0.5">
-                      <span className="font-medium tabular-nums">
-                        {date(period.from)} – {date(period.to)}
-                      </span>
-                      <span className="text-sm text-muted-foreground">{period.status}</span>
-                    </span>
-                    <span className="flex flex-wrap items-center gap-3">
-                      <span className="text-sm tabular-nums text-muted-foreground">
-                        Due {date(period.due)}
-                      </span>
-                      <StatusPill tone={STATE[period.state].tone}>
-                        {STATE[period.state].label}
-                      </StatusPill>
-                      {period.netVat === null && canRecordVat ? (
-                        <RecordFiledElsewhereButton from={period.from} to={period.to} />
-                      ) : null}
-                    </span>
-                  </li>
-                ) : (
-                  <li key={period.to}>
-                    <Link
-                      href={period.href}
-                      className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/40 @md:flex-row @md:items-center @md:justify-between sm:px-6"
-                    >
-                      <span className="flex flex-col gap-0.5">
-                        <span className="font-medium tabular-nums">
-                          {date(period.from)} – {date(period.to)}
-                        </span>
-                        <span className="text-sm text-muted-foreground">{period.status}</span>
-                      </span>
-                      <span className="flex items-center gap-3">
-                        <span className="text-sm tabular-nums text-muted-foreground">
-                          Due {date(period.due)}
-                        </span>
-                        <StatusPill tone={STATE[period.state].tone}>
-                          {STATE[period.state].label}
-                        </StatusPill>
-                      </span>
-                    </Link>
-                  </li>
-                ),
-              )}
-            </ul>
-          </Panel>
-        ) : null}
+        <Panel className="flex flex-col gap-3 @md:flex-row @md:items-center @md:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {!calendar.vat.configured
+              ? 'Enter the first VAT period from the certificate below to list every return.'
+              : vatOpen
+                ? `${vatOpen} return${vatOpen === 1 ? '' : 's'} still to file or pay — the deadlines are above.`
+                : 'Every period that has ended is filed and settled.'}
+          </p>
+          {canSeeVat ? (
+            <Link
+              href="/finance/vat"
+              className="inline-flex h-11 shrink-0 items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              Open VAT returns
+              <ChevronRight className="size-4" />
+            </Link>
+          ) : null}
+        </Panel>
       </Section>
 
       <Section title="Corporate tax" description="Worked out on each financial year's profit.">

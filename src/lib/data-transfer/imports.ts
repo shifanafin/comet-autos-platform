@@ -336,7 +336,9 @@ export async function importCsv(
   const missing = required.filter(
     (column) => !sheet.records.some((record) => field(record, column.header) !== ''),
   );
-  if (missing.length === sheet.records.length && missing.length > 0) {
+  // None of the required headings at all: the wrong file, or not from the template.
+  // (One missing is reported row by row, so the file's own check can say more.)
+  if (missing.length > 0 && missing.length === required.length) {
     throw new DomainError(
       `This file has no ${missing.map((column) => column.header).join(', ')} column. Start from the template.`,
     );

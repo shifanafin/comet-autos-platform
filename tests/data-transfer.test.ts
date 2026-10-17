@@ -234,14 +234,16 @@ describe('import', () => {
   test('master data and document history are importable — payments on their own are not', () => {
     assert.deepEqual(Object.keys(IMPORTS).sort(), [
       'customers',
+      'expenses',
       'invoices',
       'parts',
+      'purchases',
       'quotations',
       'suppliers',
       'vehicles',
       'work-orders',
     ]);
-    for (const entity of ['payments', 'purchases', 'stock-movements']) {
+    for (const entity of ['payments', 'stock-movements']) {
       assert.equal(isImportable(entity), false, `${entity} cannot be imported`);
     }
   });

@@ -37,7 +37,8 @@ import {
   runPayrollAutomatically,
   setSalary,
 } from '@/lib/hr/payroll';
-import { gratuityEarnedFils } from '@/lib/hr/gratuity';
+import { gratuityForServiceDaysFils } from '@/lib/hr/gratuity';
+import { countedServiceDays } from '@/lib/hr/leave-rules';
 import { toFils } from '@/lib/money';
 import { createTestOrg, expectDomainError, RUN, type TestOrg } from './support';
 
@@ -301,17 +302,33 @@ describe('payroll run', () => {
     await expectDomainError(runPayroll(a.owner, { month: '2999-01' }), /hasn’t started/);
   });
 
-  test('a deduction can be changed by hand, never above gross pay', async () => {
+  test('a deduction is added by hand, on top of the leave deduction, never above half the wage', async () => {
     const detail = await getPayrollRun(a.owner, runId);
     const [line] = detail.lines;
+    // UAE Labour Law (Art. 25): a deduction never takes more than half the month's wage.
     await expectDomainError(
-      adjustDeduction(a.owner, runId, line.id, { deductions: '99999.00', reason: 'Oops' }),
-      /more than the gross pay/,
+      adjustDeduction(a.owner, runId, line.id, {
+        deductions: '99999.00',
+        kind: 'ADVANCE',
+        reason: 'Oops',
+      }),
+      /half the month's wage/,
     );
-    await adjustDeduction(a.owner, runId, line.id, { deductions: '100.00', reason: 'Advance' });
+    await expectDomainError(
+      adjustDeduction(a.owner, runId, line.id, { deductions: '100.00', reason: 'No kind' }),
+      /what the deduction is for/,
+    );
+    await adjustDeduction(a.owner, runId, line.id, {
+      deductions: '100.00',
+      kind: 'ADVANCE',
+      reason: 'Advance',
+    });
     const after = await getPayrollRun(a.owner, runId);
-    assert.equal(after.lines[0].netPay, '3600.00');
-    assert.equal(after.totals.net, '3600.00');
+    const net = ((toFils(line.netPay) - 10000) / 100).toFixed(2);
+    assert.equal(after.lines[0].otherDeduction, '100.00');
+    assert.equal(after.lines[0].leaveDeduction, line.leaveDeduction, 'the leave deduction stays');
+    assert.equal(after.lines[0].netPay, net);
+    assert.equal(after.totals.net, net);
   });
 
   test('approving fixes the figures; paying needs the approver too', async () => {
@@ -328,14 +345,18 @@ describe('payroll run', () => {
       /can’t be changed/,
     );
     // End-of-service gratuity: earned to the month end on the basic salary,
-    // booked with the salaries — Dr 5165 expense, Cr 2500 provision.
+    // booked with the salaries — Dr 5165 expense, Cr 2500 provision. The two
+    // unpaid leave days don't count as service.
     const employee = await prisma.employee.findUniqueOrThrow({
       where: { id: tech },
       select: { hireDate: true },
     });
-    const earned = gratuityEarnedFils(
-      employee.hireDate.toISOString().slice(0, 10),
-      monthPeriod(lastMonth).end.toISOString().slice(0, 10),
+    const earned = gratuityForServiceDaysFils(
+      countedServiceDays(
+        employee.hireDate.toISOString().slice(0, 10),
+        monthPeriod(lastMonth).end.toISOString().slice(0, 10),
+        2,
+      ),
       310000,
     );
     assert.equal(detail.lines[0].gratuityLiability, (earned / 100).toFixed(2));
@@ -361,7 +382,13 @@ describe('payroll run', () => {
         );
     assert.equal(byRole('GRATUITY_EXPENSE'), earned);
     assert.equal(byRole('GRATUITY_PROVISION'), -earned);
-    assert.equal(byRole('SALARIES_EXPENSE'), 360000);
+    // The wage cost is the pay less the unpaid days; the advance recovered
+    // clears Staff advances rather than reducing the cost.
+    assert.equal(
+      byRole('SALARIES_EXPENSE'),
+      toFils(detail.lines[0].netPay) + toFils(detail.lines[0].otherDeduction),
+    );
+    assert.equal(byRole('STAFF_ADVANCES'), -toFils(detail.lines[0].otherDeduction));
 
     await markPayrollPaid(a.owner, runId);
     await expectDomainError(
@@ -436,5 +463,80 @@ describe('automatic payroll', () => {
     assert.equal(await runPayrollAutomatically(c.organizationId), null, 'never twice');
     const detail = await getPayrollRun(c.owner, first.payroll.id);
     assert.equal(detail.automatic, true);
+  });
+});
+
+describe('salary starting mid-month, stale runs and paying', () => {
+  let e: TestOrg;
+  let person: string;
+  let runId: string;
+  before(async () => {
+    e = await createTestOrg('PayMid');
+    person = e.technicianIds[0];
+    await setSalary(e.owner, person, { basicSalary: '3100.00', effectiveFrom: `${lastMonth}-11` });
+  });
+
+  test('days before the first salary are not paid, and are reported', async () => {
+    const run = await runPayroll(e.owner, { month: lastMonth });
+    runId = run.id;
+    const detail = await getPayrollRun(e.owner, runId);
+    const days = daysIn(lastMonth);
+    const paidDays = days - 10;
+    assert.equal(
+      detail.lines[0].basicSalary,
+      (Math.floor((310000 * paidDays * 2 + days) / (days * 2)) / 100).toFixed(2),
+      'pro-rated from the salary start, not the whole month',
+    );
+    assert.deepEqual(
+      detail.checks?.partSalary.map((part) => part.unpaidDays),
+      [10],
+    );
+  });
+
+  test('a first salary’s start date can be corrected earlier', async () => {
+    await setSalary(e.owner, person, { basicSalary: '3100.00', effectiveFrom: `${lastMonth}-01` });
+    const history = await getSalaryHistory(e.owner, person);
+    assert.equal(history.history.length, 1, 'corrected, not added');
+    assert.equal(history.history[0].effectiveFrom.toISOString().slice(0, 10), `${lastMonth}-01`);
+  });
+
+  test('a run that no longer matches the records can’t be approved until recalculated', async () => {
+    const detail = await getPayrollRun(e.owner, runId);
+    assert.equal(detail.checks?.changed.length, 1);
+    await expectDomainError(approvePayroll(e.owner, runId), /Recalculate/);
+    await recalculatePayroll(e.owner, runId);
+    const fresh = await getPayrollRun(e.owner, runId);
+    assert.equal(fresh.lines[0].basicSalary, '3100.00');
+    assert.equal(fresh.checks?.changed.length, 0);
+    await approvePayroll(e.owner, runId);
+    await expectDomainError(
+      setSalary(e.owner, person, { basicSalary: '3100.00', effectiveFrom: `${twoMonthsAgo}-01` }),
+      /has been approved/,
+    );
+  });
+
+  test('paid on the day and from the account given — never in the future or before the month', async () => {
+    const tomorrow = new Date(Date.now() + 86_400_000 * 2).toISOString().slice(0, 10);
+    await expectDomainError(markPayrollPaid(e.owner, runId, { paidOn: tomorrow }), /future/);
+    await expectDomainError(
+      markPayrollPaid(e.owner, runId, { paidOn: `${twoMonthsAgo}-28` }),
+      /before the month began/,
+    );
+    const cash = await prisma.chartOfAccount.findFirstOrThrow({
+      where: { organizationId: e.organizationId, role: 'CASH' },
+      select: { id: true },
+    });
+    const paidOn = `${thisMonth}-01`;
+    await markPayrollPaid(e.owner, runId, { paidOn, accountId: cash.id });
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { organizationId: e.organizationId, sourceType: 'PAYROLL_PAYMENT', sourceId: runId },
+      select: {
+        entryDate: true,
+        lines: { select: { chartOfAccountId: true, creditAmount: true } },
+      },
+    });
+    assert.equal(entry.entryDate.toISOString().slice(0, 10), paidOn);
+    const credit = entry.lines.find((line) => toFils(line.creditAmount.toString()) > 0);
+    assert.equal(credit?.chartOfAccountId, cash.id, 'from the cash account, not the bank');
   });
 });

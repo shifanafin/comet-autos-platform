@@ -90,8 +90,12 @@ const creditSchema = z.object({
   requestKey: z.string().optional(),
 });
 
-const fils = (value: { toString(): string } | null | undefined) =>
-  value ? toFils(value.toString()) : 0;
+/** Signed: a round-off (an invoice rounded down, the credit taking it back) is below zero. */
+const fils = (value: { toString(): string } | null | undefined) => {
+  if (!value) return 0;
+  const text = value.toString().trim();
+  return text.startsWith('-') ? -toFils(text.slice(1)) : toFils(text);
+};
 
 const milli = (value: { toString(): string }) => Math.round(Number(value.toString()) * 1000);
 

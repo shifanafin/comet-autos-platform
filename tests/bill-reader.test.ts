@@ -31,7 +31,7 @@ import {
   removeAttachment,
 } from '@/lib/documents/attachments';
 import { attachExpenseBill, listExpenseBills } from '@/lib/finance/expense-bills';
-import { recordExpense } from '@/lib/finance/expenses';
+import { recordExpense, voidExpense } from '@/lib/finance/expenses';
 import { createPurchase } from '@/lib/inventory/purchases';
 import { listAuditLog } from '@/lib/access/audit';
 import { localDateString } from '@/lib/format';
@@ -243,6 +243,13 @@ describe('saving a scanned bill', () => {
   });
 
   test('a purchase: audited, flagged as a duplicate next time', async () => {
+    // GL-20455 was filed as an expense above, and one bill is entered once:
+    // void the expense before entering it as a stock purchase.
+    const asExpense = await prisma.expense.findFirstOrThrow({
+      where: { organizationId: a.organizationId, billNumber: 'GL-20455', status: 'RECORDED' },
+      select: { id: true },
+    });
+    await voidExpense(a.owner, asExpense.id, { reason: 'Re-entered as a stock purchase' });
     const purchase = await createPurchase(a.owner, {
       supplierId: byTrn.id,
       supplierInvoiceNumber: 'GL-20455',

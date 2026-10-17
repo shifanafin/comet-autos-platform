@@ -328,12 +328,16 @@ describe('owner’s money', () => {
     );
   });
 
-  test('voided: kept on record, its entry reversed; the list shows both entries', async () => {
+  test('voided in an open period: kept on record, its entry removed', async () => {
     const row = await recordOwnerMoney(a.owner, {
       kind: 'CAPITAL_IN',
       accountId: roles.CASH,
       amount: '250',
       movedOn: today(),
+    });
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { organizationId: a.organizationId, sourceType: 'OWNER_MONEY', sourceId: row.id },
+      select: { id: true },
     });
     await voidOwnerMoney(a.owner, row.id, { reason: 'Entered twice' });
     const booked = await bookedFor(row.id);
@@ -344,8 +348,19 @@ describe('owner’s money', () => {
     const list = await listOwnerMoney(a.owner);
     const listed = list.rows.find((entry) => entry.id === row.id);
     assert.equal(listed?.status, 'VOID');
-    assert.match(listed?.journalEntry ?? '', /^JV-/);
-    assert.match(listed?.reversedBy ?? '', /^JV-/);
+    // Open period: the entry is deleted where it stands, not reversed — the audit log keeps it.
+    assert.equal(listed?.journalEntry ?? null, null);
+    assert.equal(listed?.reversedBy ?? null, null);
+    assert.equal(
+      await prisma.journalEntry.count({ where: { sourceType: 'OWNER_MONEY', sourceId: row.id } }),
+      0,
+    );
+    assert.ok(
+      await prisma.auditLog.findFirst({
+        where: { organizationId: a.organizationId, action: 'journal.deleted', entityId: entry.id },
+      }),
+      'the audit log keeps what was deleted',
+    );
     assert.equal(list.totals.capitalIn, '6000.00', 'a void counts for nothing');
     assert.equal(list.totals.loansIn, '1000.00');
     assert.equal(list.totals.drawings, '500.00');

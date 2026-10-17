@@ -67,10 +67,15 @@ describe('bill numbers are entered once', () => {
     );
   });
 
-  test('another vendor, or no vendor at all, is not a duplicate', async () => {
-    await paidExpense({ vendorName: `Other Vendor ${RUN}`, billNumber: 'INV-501' });
-    await paidExpense({ billNumber: 'INV-501' });
-    await paidExpense({ billNumber: 'INV-501' });
+  test('another vendor or no vendor is not a duplicate — unless the date and total match too', async () => {
+    await paidExpense({ vendorName: `Other Vendor ${RUN}`, billNumber: 'INV-501', amount: '101' });
+    await paidExpense({ billNumber: 'INV-501', amount: '102' });
+    await paidExpense({ billNumber: 'INV-501', amount: '103' });
+    // Same number, date and total is the same bill, whoever it is said to be from.
+    await expectDomainError(
+      paidExpense({ vendorName: `Third Vendor ${RUN}`, billNumber: 'INV-501', amount: '101' }),
+      /already entered as/,
+    );
   });
 
   test('editing an expense keeps its own bill number; voiding frees it', async () => {

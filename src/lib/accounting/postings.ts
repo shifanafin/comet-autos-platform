@@ -1066,6 +1066,8 @@ async function payrollRun(tx: Tx, organizationId: string, payrollId: string) {
       periodEnd: true,
       approvedAt: true,
       paidAt: true,
+      paidOn: true,
+      paidFromAccountId: true,
       items: {
         select: {
           netPay: true,
@@ -1121,11 +1123,16 @@ const postPayrollPayment: Poster = async (tx, organizationId, payrollId, account
   const run = await payrollRun(tx, organizationId, payrollId);
   if (!run || run.status !== 'PAID' || !run.paidAt) return null;
   const net = run.items.reduce((sum, item) => sum + fils(item.netPay), 0);
+  // On the day the money left, from the account it left; runs paid before
+  // either was recorded fall back to when it was marked paid, and the bank.
   return {
-    date: accountingDay(run.paidAt),
+    date: run.paidOn ?? accountingDay(run.paidAt),
     branchId: null,
     description: `Payroll ${payrollMonth(run)} — salaries paid`,
-    lines: new Lines().debit(accounts.SALARIES_PAYABLE, net).credit(accounts.BANK, net).build(),
+    lines: new Lines()
+      .debit(accounts.SALARIES_PAYABLE, net)
+      .credit(run.paidFromAccountId ?? accounts.BANK, net)
+      .build(),
   };
 };
 

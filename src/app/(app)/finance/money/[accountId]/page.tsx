@@ -8,27 +8,39 @@ import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
+import { FinancePeriodPicker } from '@/components/finance/period-picker';
 
 const money = (value: string) =>
   value.startsWith('-') ? `−${formatMoney(value.slice(1))}` : formatMoney(value);
 
-/** One money account: every movement in and out, newest first, with the balance after each. */
+/**
+ * One money account for a period: what it held when the period began, every
+ * movement in and out, newest first, with the balance after each, and what it
+ * held at the end.
+ */
 export default async function MoneyAccountPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountId: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
 }) {
   const user = await requireUser();
   const { accountId } = await params;
+  const query = await searchParams;
   let activity;
   try {
-    activity = await getMoneyAccountActivity(user, accountId);
+    activity = await getMoneyAccountActivity(user, accountId, {
+      ...query,
+      period: query.period ?? 'month',
+    });
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     if (error instanceof AuthError) return <AccessDenied what="money" />;
     throw error;
   }
-  const { account, rows } = activity;
+  const { account, rows, statement } = activity;
+  const period = activity.period!;
   const isCard = account.kind === 'company-card';
 
   return (
@@ -40,8 +52,43 @@ export default async function MoneyAccountPage({
           </Link>
         }
         title={account.name}
-        description={`${isCard ? 'Owed on it' : 'In it'} now: ${money(account.balance)}. Every movement, newest first.`}
+        description={`${isCard ? 'Owed on it' : 'In it'} now: ${money(account.balance)}. Every movement in the period, newest first.`}
       />
+
+      <FinancePeriodPicker
+        period={period}
+        basePath={`/finance/money/${account.id}`}
+        presets={['month', 'last-month', 'quarter', 'last-quarter', 'year']}
+      />
+
+      <Panel className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+        {[
+          {
+            label: `${isCard ? 'Owed' : 'Balance'} on ${formatCalendarDate(period.from)}`,
+            value: money(statement.opening),
+          },
+          { label: isCard ? 'Paid off' : 'Money in', value: formatMoney(statement.moneyIn) },
+          { label: isCard ? 'Spent' : 'Money out', value: formatMoney(statement.moneyOut) },
+          {
+            label: `${isCard ? 'Owed' : 'Balance'} on ${formatCalendarDate(period.to)}`,
+            value: money(statement.closing),
+            strong: true,
+          },
+        ].map((figure) => (
+          <div key={figure.label} className="flex min-w-0 flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">{figure.label}</span>
+            <span
+              className={
+                figure.strong
+                  ? 'text-xl leading-none font-semibold text-primary tabular-nums'
+                  : 'text-xl leading-none font-semibold tabular-nums'
+              }
+            >
+              {figure.value}
+            </span>
+          </div>
+        ))}
+      </Panel>
 
       {account.belowZero ? (
         <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning sm:px-6">
@@ -53,8 +100,8 @@ export default async function MoneyAccountPage({
 
       {rows.length === 0 ? (
         <EmptyState
-          title="Nothing yet"
-          description="Money received into or paid from this account will be listed here."
+          title="Nothing in this period"
+          description="No money went into or out of this account in these dates. Choose another period."
         />
       ) : (
         <Panel padding="none" className="overflow-hidden">

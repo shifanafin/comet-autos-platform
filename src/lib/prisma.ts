@@ -16,9 +16,17 @@ function createPrismaClient() {
     // spot is one transaction of a few dozen queries. Against a hosted
     // database each query is a network round-trip; Prisma's default of 5 s
     // is too tight for that. A transaction still can't run away: 20 s, and
-    // no more than 10 s waiting for a connection.
-    transactionOptions: { timeout: 20_000, maxWait: 10_000 },
+    // no more than 10 s waiting for a connection. PRISMA_TRANSACTION_TIMEOUT_MS
+    // lengthens it where the database is far away — the integration tests run
+    // from a laptop, every query a round-trip to another country.
+    transactionOptions: { timeout: transactionTimeout(), maxWait: 10_000 },
   });
+}
+
+/** 20 s, or PRISMA_TRANSACTION_TIMEOUT_MS when set (never less, never over 2 minutes). */
+function transactionTimeout() {
+  const wanted = Number(process.env.PRISMA_TRANSACTION_TIMEOUT_MS);
+  return Number.isFinite(wanted) && wanted > 20_000 ? Math.min(wanted, 120_000) : 20_000;
 }
 
 function throwMissingDatabaseUrl(): never {

@@ -300,7 +300,11 @@ describe('inventory management', () => {
     const filter = catalog.parts.find((part) => part.id === filterId);
     assert.ok(filter, 'the oil filter is offered');
     assert.equal(filter.sku, 'FLT-OIL-01');
-    assert.equal(Number(filter.stock), 8, 'stock on hand from the ledger');
+    assert.equal(
+      Number(filter.stock),
+      5,
+      'stock on hand from the ledger (8 opening, 3 written off)',
+    );
     assert.equal(Number(filter.price), 28);
     assert.equal(Number(filter.cost), 14);
     assert.ok(catalog.suppliers.some((supplier) => supplier.id === supplierId));

@@ -189,8 +189,9 @@ describe('the role grid', () => {
 
   test('the Owner role cannot be taken from the last active owner, and assignments are audited', async () => {
     const owner = await makeRole('Sole owner', PERMISSION_CODES, true);
-    // The acting admin manages access through a role of their own, so the
-    // "last administrator" guard is satisfied and the Owner guard is what bites.
+    // An admin who is not an Owner can't touch an Owner's account at all, and
+    // the sole Owner can't drop the role or deactivate themselves — so the
+    // workshop is never left without an Owner.
     const admin = await makeRole('Admin', ['user.view', 'user.edit', 'user.delete']);
     await prisma.userRole.create({
       data: { organizationId: a.organizationId, userId: a.owner.id, roleId: admin },
@@ -206,11 +207,24 @@ describe('the role grid', () => {
         email: viewer.email,
         roleIds: [admin],
       }),
-      /last active Owner/,
+      /Only an Owner can change an Owner's account/,
     );
     await expectDomainError(
       setUserActive(a.owner, viewer.id, { isActive: 'false' }),
-      /last active Owner/,
+      /Only an Owner can deactivate an Owner's account/,
+    );
+    const soleOwner = { ...a.owner, id: viewer.id };
+    await expectDomainError(
+      updateUser(soleOwner, viewer.id, {
+        fullName: viewer.fullName,
+        email: viewer.email,
+        roleIds: [admin],
+      }),
+      /your own roles/,
+    );
+    await expectDomainError(
+      setUserActive(soleOwner, viewer.id, { isActive: 'false' }),
+      /your own account/,
     );
 
     // With a second active owner, the role can move — and the move is audited.
@@ -308,7 +322,9 @@ describe('a view-only Partner', () => {
         () =>
           createDirectInvoice(partner, {
             customerId,
-            items: [{ itemType: 'LABOUR', description: 'Not allowed', quantity: '1', unitPrice: '10' }],
+            items: [
+              { itemType: 'LABOUR', description: 'Not allowed', quantity: '1', unitPrice: '10' },
+            ],
           }),
       ],
       [

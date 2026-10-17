@@ -53,6 +53,19 @@ describe('did you mean…?', () => {
     assert.ok(score >= SIMILAR && score < LIKELY_SAME, String(score));
   });
 
+  test('variants told apart by a short mark (LH / RH, H4 / H7) are never the same part', () => {
+    for (const [typed, existing] of [
+      ['Headlamp LH', 'Headlamp RH'],
+      ['Bulb H4', 'Bulb H7'],
+      ['Brake pad LH', 'Brake pad RH'],
+    ]) {
+      const score = partSimilarity({ name: typed }, part(existing));
+      assert.ok(score < LIKELY_SAME, `${typed} vs ${existing}: ${score}`);
+    }
+    // The same mark still matches through a plural.
+    assert.ok(partSimilarity({ name: 'Headlamps LH' }, part('Headlamp LH')) >= LIKELY_SAME);
+  });
+
   test('the closest come first, and nothing for a name too short to compare', () => {
     const parts = [part('Air filter', 'P-1', 'a'), part('Brake pads', 'P-2', 'b'), part('Brake pad set', 'P-3', 'c')];
     assert.equal(similarParts({ name: 'Brake pads' }, parts)[0].part.id, 'b');

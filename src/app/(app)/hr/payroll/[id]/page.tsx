@@ -5,7 +5,8 @@ import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { canSeePay, getPayrollRun, PAYROLL_STATUS_LABEL, type PayrollRun } from '@/lib/hr/payroll';
 import { getWpsFile } from '@/lib/hr/wps';
-import { formatCalendarDate, formatDateTime, formatMoney } from '@/lib/format';
+import { getAccountChoices } from '@/lib/accounting/reports';
+import { formatCalendarDate, formatDateTime, formatMoney, localDateString } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { RecordCard, RecordList, TableWrap } from '@/components/shared/record-card';
@@ -73,6 +74,29 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
   // Paying out: the bank's salary file and the payslips, once approved.
   const payable = run.status === 'APPROVED' || run.status === 'PAID';
   const wps = payable ? await getWpsFile(user, run.id) : null;
+  const today = localDateString();
+  const accounts =
+    run.status === 'APPROVED' && canApprove ? (await getAccountChoices(user)).money : [];
+  // What to put right before approving, in plain words.
+  const monthOpen = today < run.periodEnd.toISOString().slice(0, 10);
+  const warnings = run.checks
+    ? [
+        run.checks.changed.length
+          ? `The records have changed since this was calculated — ${run.checks.changed.join(', ')}. Recalculate before approving.`
+          : null,
+        ...run.checks.missingSalary.map(
+          (person) =>
+            `${person} worked this month but has no salary set, so is not on this payroll. Set their salary on their employee page, then recalculate.`,
+        ),
+        ...run.checks.partSalary.map(
+          (part) =>
+            `${part.name}'s salary starts ${formatCalendarDate(new Date(part.salaryFrom))}, so ${part.unpaidDays} day${part.unpaidDays === 1 ? '' : 's'} worked before it ${part.unpaidDays === 1 ? 'is' : 'are'} not paid. If they were on salary earlier, correct the start date on their page.`,
+        ),
+        monthOpen
+          ? `${run.label} hasn't ended yet: leave, absence or overtime after today will change it. Recalculate on or after ${formatCalendarDate(run.periodEnd)}, unless salaries are paid before the month ends.`
+          : null,
+      ].filter((line): line is string => Boolean(line))
+    : [];
 
   const trail = [
     run.calculatedAt
@@ -81,7 +105,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         : `Calculated ${formatDateTime(run.calculatedAt)} by ${run.createdBy}`
       : null,
     run.approvedAt ? `Approved ${formatDateTime(run.approvedAt)} by ${run.approvedBy}` : null,
-    run.paidAt ? `Paid ${formatDateTime(run.paidAt)} by ${run.paidBy}` : null,
+    run.paidAt
+      ? `Paid ${run.paidOn ? formatCalendarDate(run.paidOn) : formatDateTime(run.paidAt)} from ${run.paidFrom ?? 'the bank'} — recorded by ${run.paidBy}`
+      : null,
   ].filter(Boolean);
 
   return (
@@ -137,13 +163,29 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         net={run.totals.net}
         canPrepare={canPrepare}
         canApprove={canApprove}
+        today={today}
+        accounts={accounts}
       />
+
+      {warnings.length ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+          <p className="flex items-center gap-2 font-medium text-warning">
+            <TriangleAlert className="size-4 shrink-0" />
+            Before approving
+          </p>
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <Section
         title="Lines"
         description={
           editable
-            ? 'Check each line before approval. Absences are shown but only deducted if you change the deduction.'
+            ? 'Check each line before approval. Absence with no approved leave is already deducted at a day’s wage; add an advance or penalty with Deduction.'
             : 'What each person is paid for the month.'
         }
       >
@@ -364,11 +406,11 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         ))}
         <p className="flex items-start gap-2">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          Salaries are taken as they stood on the last day of the month and pro-rated for anyone who
-          joined or left during it. Unpaid days and absence with no approved leave are deducted at
-          (basic + allowances) ÷ 30 a day, half-pay days at half that; approved overtime is added at
-          +25% or +50% of the hourly basic. Annual leave earned but not taken is set aside with the
-          end-of-service, at basic ÷ 30 a day.
+          Each day worked is paid at the salary in force that day — pro-rated for anyone who joined
+          or left, or whose salary changed, during the month. Unpaid days and absence with no
+          approved leave are deducted at (basic + allowances) ÷ 30 a day, half-pay days at half
+          that; approved overtime is added at +25% or +50% of the hourly basic. Annual leave earned
+          but not taken is set aside with the end-of-service, at basic ÷ 30 a day.
         </p>
       </div>
     </Stack>

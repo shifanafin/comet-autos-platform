@@ -13,6 +13,8 @@ import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitive
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
 import { FinancePeriodPicker } from '@/components/finance/period-picker';
+import { VatPeriodList } from '@/components/accounting/vat-periods';
+import { getVatPeriods } from '@/lib/compliance/calendar';
 import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -242,12 +244,13 @@ export default async function VatPage({
   const canFile = hasPermission(user, 'vat.create');
   const canSeeFilings = hasPermission(user, 'vat.view');
   const today = localDateString();
-  const [filings, money] = canSeeFilings
+  const [filings, money, vatPeriods] = canSeeFilings
     ? await Promise.all([
         listVatFilings(user),
         canFile ? getAccountChoices(user).then((c) => c.money) : [],
+        getVatPeriods(user),
       ])
-    : [[], []];
+    : [[], [], null];
   const alreadyFiled = filings.find(
     (filing) =>
       filing.periodFrom.toISOString().slice(0, 10) <= period.to &&
@@ -352,6 +355,35 @@ export default async function VatPage({
         title="VAT returns"
         description={`The figures for your VAT return, from ${formatDate(period.from)} to ${formatDate(period.to)}. Check them before filing — this prepares the return, it does not submit it.`}
       />
+
+      {data.registered && vatPeriods ? (
+        <Section
+          title="Your VAT periods"
+          description={
+            vatPeriods.configured
+              ? 'Every period from the VAT certificate and where its return stands. Open one to see its figures, file it and record the payment.'
+              : 'Enter the first VAT period from the certificate to list every return and its due date.'
+          }
+          action={
+            vatPeriods.configured ? undefined : (
+              <Link
+                href="/finance/calendar"
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Enter the VAT periods
+              </Link>
+            )
+          }
+        >
+          {vatPeriods.configured ? (
+            <VatPeriodList
+              periods={vatPeriods.periods}
+              selected={{ from: period.from, to: period.to }}
+              canRecord={canFile}
+            />
+          ) : null}
+        </Section>
+      ) : null}
 
       <FinancePeriodPicker
         period={period}
