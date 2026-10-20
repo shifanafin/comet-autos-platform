@@ -122,6 +122,16 @@ export function PriorPeriodForm({ latestMonth }: { latestMonth: string }) {
             className={INPUT}
           />
         </div>
+        <label className="mt-4 flex items-start gap-3 text-sm">
+          <input type="checkbox" name="nothing" className="mt-0.5 size-4 shrink-0 accent-primary" />
+          <span>
+            <span className="font-medium">Nothing was bought or sold in this month</span>
+            <span className="block text-muted-foreground">
+              Leave the amounts blank. The month is recorded as nil, so the VAT return covering it
+              is complete; nothing is booked.
+            </span>
+          </span>
+        </label>
       </fieldset>
       <FormError message={Object.keys(errors).length ? undefined : state.error} />
       <div className="border-t border-border pt-4">

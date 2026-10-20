@@ -312,9 +312,10 @@ describe('quotation without a job card', () => {
       ORIGIN,
     );
     assert.match(shared.whatsappUrl, /^https:\/\/wa\.me\/971500204411\?text=/);
-    assert.match(shared.message, /Quotation: EST-/);
-    assert.match(shared.message, /Registration: S20/);
-    assert.match(shared.message, /Total: AED 262\.50/);
+    // WhatsApp bold (*…*) marks the figures; the plate sits beside the car.
+    assert.match(shared.message, /Quotation \*EST-/);
+    assert.match(shared.message, /Toyota Hilux\* · S20/);
+    assert.match(shared.message, /Total \*AED 262\.50\*/);
 
     assert.equal((await getQuoteAccess(rawToken)).state, 'open');
     await decideQuoteAsCustomer(rawToken, 'APPROVED', 'Go ahead');
@@ -497,8 +498,8 @@ describe('invoice without a job card', () => {
       await createShareLink(a.owner, { kind: 'receipt', id: first.id }),
       ORIGIN,
     );
-    assert.match(shared.message, /Receipt: RCT-/);
-    assert.match(shared.message, /Registration: S40/);
+    assert.match(shared.message, /Receipt \*RCT-/);
+    assert.match(shared.message, /Toyota Hilux\* · S40/);
     assert.match(shared.link, /^https:\/\/workshop\.example\/customer\/invoice\//);
   });
 

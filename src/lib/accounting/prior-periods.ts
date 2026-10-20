@@ -46,6 +46,8 @@ const summarySchema = z.object({
   purchasesVat: money,
   costsWithoutVat: money,
   salaries: money,
+  /** "on": nothing was bought or sold that month — recorded as nil, booking nothing. */
+  nothing: z.string().optional(),
   note: z.string().trim().max(300).optional(),
   requestKey: z.string().optional(),
 });
@@ -236,8 +238,19 @@ export async function savePriorPeriod(user: AuthenticatedUser, rawInput: unknown
     costsWithoutVat: amount(input.costsWithoutVat),
     salaries: amount(input.salaries),
   };
-  if (Object.values(values).every((value) => value === 0)) {
-    throw new DomainError('Enter at least one amount for the month.', 'sales');
+  // A month with no trading is said so in as many words — never by leaving
+  // the amounts blank by mistake. It books nothing, but shows the month
+  // (and the VAT return covering it) as complete.
+  const nil = input.nothing === 'on';
+  const blank = Object.values(values).every((value) => value === 0);
+  if (nil && !blank) {
+    throw new DomainError('Clear the amounts, or untick “Nothing was bought or sold”.', 'sales');
+  }
+  if (blank && !nil) {
+    throw new DomainError(
+      'Enter at least one amount — or, if nothing was bought or sold that month, tick that box.',
+      'sales',
+    );
   }
   if (vatTooHigh(values.salesVat, values.sales)) {
     throw new DomainError('VAT on sales is 5% of them at most. Check the figure.', 'salesVat');
@@ -315,7 +328,7 @@ export async function savePriorPeriod(user: AuthenticatedUser, rawInput: unknown
       action: 'prior_period.recorded',
       entityType: 'PriorPeriodSummary',
       entityId: row.id,
-      afterData: { periodFrom: from, periodTo: to, ...data, note: row.note },
+      afterData: { periodFrom: from, periodTo: to, ...data, nil, note: row.note },
     });
     await settleRequestKey(tx, user, rawInput, row.id);
     return { id: row.id };

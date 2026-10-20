@@ -147,6 +147,24 @@ describe('months before the books', () => {
     );
   });
 
+  test('a month with no trading is said so, books nothing, and is never just left blank', async () => {
+    await expectDomainError(savePriorPeriod(a.owner, { month: '2025-06' }), /tick that box/);
+    await expectDomainError(
+      savePriorPeriod(a.owner, { month: '2025-06', sales: '10.00', nothing: 'on' }),
+      /Clear the amounts/,
+    );
+    const saved = await savePriorPeriod(a.owner, { month: '2025-06', nothing: 'on' });
+    const row = await prisma.priorPeriodSummary.findUniqueOrThrow({ where: { id: saved.id } });
+    assert.equal(row.sales.toString(), '0');
+    assert.equal(
+      await prisma.journalEntry.count({
+        where: { organizationId: a.organizationId, sourceType: 'PRIOR_PERIOD', sourceId: saved.id },
+      }),
+      0,
+      'a nil month books nothing',
+    );
+  });
+
   test('another workshop can’t remove it; removing reverses the entry', async () => {
     await assert.rejects(
       removePriorPeriod(b.owner, augustId, { reason: 'Not ours' }),

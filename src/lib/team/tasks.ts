@@ -78,7 +78,9 @@ const statusSchema = z.object({
 });
 
 const moveSchema = z.object({
-  dueDate: z.string({ error: 'Choose the new day.' }).regex(/^d{4}-d{2}-d{2}$/, 'Choose the new day.'),
+  dueDate: z
+    .string({ error: 'Choose the new day.' })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose the new day.'),
   reason: z
     .string({ error: 'Say why it is being moved.' })
     .trim()

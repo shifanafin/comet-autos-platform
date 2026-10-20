@@ -436,15 +436,36 @@ export async function listJournal(
   const source = (
     ['INVOICE', 'PAYMENT', 'EXPENSE', 'STOCK_MOVEMENT', 'SUPPLIER_PAYMENT', 'MANUAL'] as const
   ).find((value) => value === input.source);
+  // An amount as typed — 1500, 1,500 or 1500.00 — finds the lines of that amount.
+  const amount = q && /^\d{1,3}(,?\d{3})*(\.\d{1,2})?$/.test(q) ? q.replace(/,/g, '') : null;
   const where: Prisma.JournalEntryWhereInput = {
     organizationId: user.organizationId,
-    entryDate: { gte: day(period.from), lte: day(period.to) },
+    // A search looks through every period: a number is found wherever it is.
+    ...(q ? {} : { entryDate: { gte: day(period.from), lte: day(period.to) } }),
     ...(source ? { sourceType: source } : {}),
     ...(q
       ? {
           OR: [
             { entryNumber: { contains: q, mode: 'insensitive' } },
             { description: { contains: q, mode: 'insensitive' } },
+            { lines: { some: { description: { contains: q, mode: 'insensitive' } } } },
+            { lines: { some: { customer: { name: { contains: q, mode: 'insensitive' } } } } },
+            { lines: { some: { supplier: { name: { contains: q, mode: 'insensitive' } } } } },
+            {
+              lines: {
+                some: {
+                  chartOfAccount: {
+                    OR: [
+                      { accountCode: { startsWith: q } },
+                      { accountName: { contains: q, mode: 'insensitive' } },
+                    ],
+                  },
+                },
+              },
+            },
+            ...(amount
+              ? [{ lines: { some: { OR: [{ debitAmount: amount }, { creditAmount: amount }] } } }]
+              : []),
           ],
         }
       : {}),

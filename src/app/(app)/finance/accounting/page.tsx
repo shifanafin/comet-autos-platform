@@ -295,10 +295,17 @@ export default async function AccountingPage({
   const journalPage =
     view === 'journal'
       ? await loadPage(pageFrom(params.page), (skip, take) =>
-          listJournal(user, { ...periodInput, source: params.source }, take, skip),
+          listJournal(user, { ...periodInput, source: params.source, q: params.q }, take, skip),
         )
       : null;
   const journal = journalPage?.result ?? null;
+  const journalQuery = view === 'journal' ? (params.q ?? '').trim() : '';
+  /** What the journal search keeps in the address: the view, period and source. */
+  const journalKeep = Object.fromEntries(
+    Object.entries({ view: 'journal', ...periodInput, source: params.source }).filter(
+      (entry): entry is [string, string] => Boolean(entry[1]),
+    ),
+  );
   const cash = view === 'cash' ? await getCashFlowStatement(user, periodInput) : null;
   const accountQuery = (params.q ?? '').trim();
   const accounts = view === 'accounts' ? await listAccounts(user, { q: accountQuery }) : null;
@@ -375,6 +382,18 @@ export default async function AccountingPage({
       ) : null}
       {journal ? (
         <Stack gap="xl">
+          <Stack gap="sm">
+            <SearchField
+              initialQuery={journalQuery}
+              placeholder="JV number, amount, customer, supplier, account or words"
+              keep={journalKeep}
+            />
+            {journalQuery ? (
+              <p className="text-sm text-muted-foreground">
+                {`${journalPage?.info.total ?? journal.entries.length} entr${(journalPage?.info.total ?? journal.entries.length) === 1 ? 'y matches' : 'ies match'} “${journalQuery}”, in every period.`}
+              </p>
+            ) : null}
+          </Stack>
           <JournalView data={journal} canEdit={canReverse} canChange={canEdit} />
           {journalPage ? (
             <Pagination

@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
 import { writeAuditLog } from '@/lib/audit';
 import { DomainError, NotFoundError } from '@/lib/errors';
-import { fixedSubLedger } from '@/lib/accounting/sub-ledger';
+import { fixedSubLedger, subLedgerOf } from '@/lib/accounting/sub-ledger';
 import { parseInput } from '@/lib/form-data';
 import { filsToString, toFils } from '@/lib/money';
 import { parseCalendarDate } from '@/lib/format';
@@ -481,7 +481,9 @@ export async function updateAccount(user: AuthenticatedUser, accountId: string, 
   }
   const paymentAccount = checked(input.isPaymentAccount);
   const subLedger = readSubLedger(input.subLedger, before.accountType);
-  const subLedgerChanges = subLedger !== undefined && subLedger !== before.subLedger;
+  // Against what the account is kept as — trade receivables and payables are
+  // per party by their role even with nothing stored.
+  const subLedgerChanges = subLedger !== undefined && subLedger !== subLedgerOf(before);
   if (subLedgerChanges && fixedSubLedger(before.role)) {
     throw new DomainError(
       'Trade receivables and trade payables are always kept per customer and per supplier.',
