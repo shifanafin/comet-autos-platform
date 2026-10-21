@@ -114,6 +114,7 @@ export function ExpenseForm({
   hidden = {},
   submit,
   onDone,
+  closeTo,
 }: {
   categories: { id: string; accountCode: string; accountName: string }[];
   defaultVatRate: string;
@@ -141,10 +142,17 @@ export function ExpenseForm({
   /** Saves a new expense in place of the usual action (Scan bill attaches the file too). */
   submit?: (prev: ActionResult, formData: FormData) => Promise<ActionResult>;
   onDone?: () => void;
+  /**
+   * A new expense on its own page: "Save" records it and clears the form for
+   * the next one; "Save & close" records it and goes back here.
+   */
+  closeTo?: string;
 }) {
   const router = useRouter();
   const [state, onSubmit, isPending] = useFormAction<ActionResult>(
     async (prev, formData) => {
+      const close = formData.get('then') === 'close';
+      formData.delete('then');
       const result = expense
         ? await updateExpenseAction(expense.id, prev, formData)
         : submit
@@ -152,8 +160,12 @@ export function ExpenseForm({
           : await recordExpenseAction(prev, formData);
       if (result.ok) {
         toast.success(expense ? 'Expense updated' : 'Expense recorded');
-        router.refresh();
-        onDone?.();
+        if (close && closeTo) {
+          router.push(closeTo);
+        } else {
+          router.refresh();
+          onDone?.();
+        }
       }
       return result;
     },
@@ -525,16 +537,44 @@ export function ExpenseForm({
       />
 
       <FormError message={Object.keys(errors).length ? undefined : state.error} />
-      <div className="border-t border-border pt-4">
-        <SubmitButton
-          pending={isPending}
-          size="lg"
-          className="h-11"
-          pendingLabel={expense ? 'Saving…' : 'Recording…'}
-        >
-          {expense ? <Save /> : <Plus />}
-          {expense ? 'Save changes' : 'Record expense'}
-        </SubmitButton>
+      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+        {closeTo && !expense ? (
+          <>
+            <SubmitButton
+              name="then"
+              value="close"
+              pending={isPending}
+              size="lg"
+              className="h-11"
+              pendingLabel="Saving…"
+            >
+              <Save />
+              Save &amp; close
+            </SubmitButton>
+            <SubmitButton
+              name="then"
+              value="next"
+              variant="outline"
+              pending={isPending}
+              size="lg"
+              className="h-11"
+              pendingLabel="Saving…"
+            >
+              <Plus />
+              Save
+            </SubmitButton>
+          </>
+        ) : (
+          <SubmitButton
+            pending={isPending}
+            size="lg"
+            className="h-11"
+            pendingLabel={expense ? 'Saving…' : 'Recording…'}
+          >
+            {expense ? <Save /> : <Plus />}
+            {expense ? 'Save changes' : 'Record expense'}
+          </SubmitButton>
+        )}
       </div>
     </form>
   );

@@ -47,7 +47,9 @@ export function useFormAction<State>(
     if (inFlight.current) return;
     inFlight.current = true;
     requestKey.current ??= newRequestKey();
-    const formData = new FormData(event.currentTarget);
+    // With the button pressed, so a form with two (Save, Save & close) knows which.
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const formData = new FormData(event.currentTarget, submitter ?? undefined);
     formData.set('requestKey', requestKey.current);
     startTransition(() => dispatch(formData));
   }

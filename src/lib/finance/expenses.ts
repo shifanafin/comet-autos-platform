@@ -444,6 +444,18 @@ export async function recordExpenseInTransaction(
   return expense;
 }
 
+/** What may be filled in on an expense paid by a signed voucher: the tax invoice's details. */
+const PAPER_DETAILS = new Set(['supplierTrn', 'billNumber', 'notes']);
+
+/** A stored value and a form's value are the same: dates by instant, numbers by value. */
+function sameValue(stored: unknown, next: unknown) {
+  const plain = (value: unknown) =>
+    value instanceof Date ? value.toISOString() : value == null ? '' : String(value);
+  const [a, b] = [plain(stored), plain(next)];
+  const numeric = /^-?\d+(\.\d+)?$/;
+  return a === b || (numeric.test(a) && numeric.test(b) && Number(a) === Number(b));
+}
+
 /**
  * Corrects a recorded expense — a mistyped amount, date, category or payee.
  * Same rules and VAT split as recording one; the audit log keeps what it was.
@@ -465,16 +477,10 @@ export async function updateExpense(user: AuthenticatedUser, expenseId: string, 
     });
     if (!before) throw new NotFoundError('expense');
     if (before.status === 'VOID') throw new DomainError('A voided expense cannot be changed.');
-    // Paid on a signed payment voucher: the paper and the books must agree.
     const voucher = await tx.paymentVoucher.findFirst({
       where: { organizationId: user.organizationId, expenseId: before.id },
       select: { voucherNumber: true },
     });
-    if (voucher) {
-      throw new DomainError(
-        `This was paid on payment voucher ${voucher.voucherNumber}, which the payee signed. To correct it, void the voucher and write a new one.`,
-      );
-    }
     await assertBillFree(
       tx,
       user.organizationId,
@@ -499,6 +505,20 @@ export async function updateExpense(user: AuthenticatedUser, expenseId: string, 
       billNumber: emptyToNull(input.billNumber),
       ...payer,
     };
+    // Paid on a signed payment voucher: the paper and the books must agree.
+    // The supplier's tax invoice details may still be filled in when it
+    // arrives — they move no money and nothing the payee signed.
+    if (voucher) {
+      const changed = Object.entries(data).some(
+        ([key, value]) =>
+          !PAPER_DETAILS.has(key) && !sameValue(before[key as keyof typeof before], value),
+      );
+      if (changed) {
+        throw new DomainError(
+          `This was paid on payment voucher ${voucher.voucherNumber}, which the payee signed. Only the supplier’s TRN, the bill number and the notes can be filled in here; to correct anything else, void the voucher and write a new one.`,
+        );
+      }
+    }
     const expense = await tx.expense.update({ where: { id: before.id }, data });
     await writeAuditLog(tx, {
       organizationId: user.organizationId,

@@ -29,7 +29,7 @@ import { ensureChart } from '@/lib/accounting/chart';
 import { countUnbooked } from '@/lib/accounting/entries';
 import { recordMoneyTransfer } from '@/lib/finance/money';
 import { getVatReturn } from '@/lib/finance/vat';
-import { updateExpense, voidExpense } from '@/lib/finance/expenses';
+import { toExpenseDraft, updateExpense, voidExpense } from '@/lib/finance/expenses';
 import {
   getPaymentVoucher,
   listPaymentVouchers,
@@ -255,6 +255,21 @@ describe('outside work', () => {
       }),
       /payment voucher/,
     );
+    // The supplier's tax invoice, arriving later: its details may be filled in.
+    const { id: _id, ...draft } = toExpenseDraft(
+      await prisma.expense.findUniqueOrThrow({ where: { id: expenseId } }),
+    );
+    void _id;
+    await updateExpense(a.owner, expenseId, {
+      ...draft,
+      supplierTrn: '100367364500003',
+      billNumber: 'TI-34499',
+      notes: 'Tax invoice received.',
+    });
+    const filled = await prisma.expense.findUniqueOrThrow({ where: { id: expenseId } });
+    assert.equal(filled.supplierTrn, '100367364500003');
+    assert.equal(filled.billNumber, 'TI-34499');
+    assert.equal(await balanceOf(sublet.id), 35_000, 'the money as it was');
 
     await voidPaymentVoucher(a.owner, voucher.id, { reason: 'Wrong mechanic.' });
     const expense = await prisma.expense.findUniqueOrThrow({ where: { id: expenseId } });

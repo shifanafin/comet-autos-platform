@@ -130,6 +130,7 @@ describe('an expense paid personally', () => {
       expenseDate: today(),
       vendorName: 'Taimoor Auto Spare Parts',
       billNumber: 'TI/26/4512',
+      supplierTrn: '104558747200001',
       paidByUserId: a.owner.id,
     });
     expenseId = expense.id;

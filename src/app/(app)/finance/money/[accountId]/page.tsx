@@ -9,6 +9,8 @@ import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
 import { FinancePeriodPicker } from '@/components/finance/period-picker';
+import { SearchField } from '@/components/shared/search-field';
+import { MonthByMonth } from '@/components/accounting/month-by-month';
 
 const money = (value: string) =>
   value.startsWith('-') ? `−${formatMoney(value.slice(1))}` : formatMoney(value);
@@ -23,11 +25,12 @@ export default async function MoneyAccountPage({
   searchParams,
 }: {
   params: Promise<{ accountId: string }>;
-  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string; q?: string }>;
 }) {
   const user = await requireUser();
   const { accountId } = await params;
-  const query = await searchParams;
+  const { q, ...query } = await searchParams;
+  const search = (q ?? '').trim().toLowerCase();
   let activity;
   try {
     activity = await getMoneyAccountActivity(user, accountId, {
@@ -39,9 +42,21 @@ export default async function MoneyAccountPage({
     if (error instanceof AuthError) return <AccessDenied what="money" />;
     throw error;
   }
-  const { account, rows, statement } = activity;
+  const { account, statement, months } = activity;
   const period = activity.period!;
   const isCard = account.kind === 'company-card';
+  // A search narrows the lines shown; the figures stay those of the whole period.
+  const rows = search
+    ? activity.rows.filter((row) =>
+        [row.description, row.entryNumber ?? '', row.moneyIn, row.moneyOut].some((text) =>
+          text.toLowerCase().includes(search),
+        ),
+      )
+    : activity.rows;
+  /** The period chosen, kept while searching. */
+  const keep = Object.fromEntries(
+    Object.entries(query).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -58,7 +73,7 @@ export default async function MoneyAccountPage({
       <FinancePeriodPicker
         period={period}
         basePath={`/finance/money/${account.id}`}
-        presets={['month', 'last-month', 'quarter', 'last-quarter', 'year']}
+        presets={['today', 'week', 'month', 'last-month', 'quarter', 'last-quarter', 'year']}
       />
 
       <Panel className="grid grid-cols-2 gap-6 sm:grid-cols-4">
@@ -98,10 +113,33 @@ export default async function MoneyAccountPage({
         </p>
       ) : null}
 
+      <MonthByMonth
+        months={months}
+        columns={isCard ? ['Paid off', 'Spent'] : ['Money in', 'Money out']}
+        balanceLabel={isCard ? 'Owed' : 'Balance'}
+      />
+
+      <Stack gap="sm">
+        <SearchField
+          initialQuery={q ?? ''}
+          placeholder="What, entry number or amount"
+          keep={keep}
+        />
+        {search ? (
+          <p className="text-sm text-muted-foreground">
+            {`${rows.length} movement${rows.length === 1 ? '' : 's'} in this period match “${q?.trim()}”. The figures above are for the whole period.`}
+          </p>
+        ) : null}
+      </Stack>
+
       {rows.length === 0 ? (
         <EmptyState
-          title="Nothing in this period"
-          description="No money went into or out of this account in these dates. Choose another period."
+          title={search ? 'Nothing matches' : 'Nothing in this period'}
+          description={
+            search
+              ? 'Try another word or amount, or a wider period.'
+              : 'No money went into or out of this account in these dates. Choose another period.'
+          }
         />
       ) : (
         <Panel padding="none" className="overflow-hidden">

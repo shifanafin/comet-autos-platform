@@ -45,6 +45,9 @@ export default async function ExpensePage({ params }: { params: Promise<{ id: st
     throw error;
   }
   const isVoid = expense.status === 'VOID';
+  // Input VAT is claimed only on a tax invoice, which shows the supplier's TRN.
+  const awaitingTrn =
+    !isVoid && !expense.supplierTrn && Number(expense.taxAmount?.toString() ?? 0) > 0;
   const paid = expense.paidByUser
     ? `Personally by ${expense.paidByUser.fullName}`
     : expense.paymentMethod
@@ -125,7 +128,15 @@ export default async function ExpensePage({ params }: { params: Promise<{ id: st
                 ) : null}
                 <Row label="Supplier">{expense.vendorName ?? '—'}</Row>
                 <Row label="Supplier TRN">
-                  <span className="font-mono">{expense.supplierTrn ?? '—'}</span>
+                  {expense.supplierTrn ? (
+                    <span className="font-mono">{expense.supplierTrn}</span>
+                  ) : awaitingTrn ? (
+                    <span className="text-warning">
+                      None — its VAT waits, unclaimed, until the TRN from the tax invoice is entered
+                    </span>
+                  ) : (
+                    '—'
+                  )}
                 </Row>
                 <Row label="Bill number">{expense.billNumber ?? '—'}</Row>
                 <Row label="Tax code">

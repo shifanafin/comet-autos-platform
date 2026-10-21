@@ -107,6 +107,7 @@ before(async () => {
     description: 'Workshop supplies',
     amount: '100.00',
     taxRate: '5',
+    supplierTrn: '100123456700003',
     expenseDate: today,
     paymentMethod: 'CASH',
   });

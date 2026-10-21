@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ReceiptText } from 'lucide-react';
+import { Plus, ReceiptText } from 'lucide-react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { getExpenseFormOptions, listExpenses, toExpenseDraft } from '@/lib/finance/expenses';
 import { formatDate, formatMoney } from '@/lib/format';
@@ -11,7 +11,7 @@ import { Pagination } from '@/components/shared/pagination';
 import { RecordCard, RecordList, TableWrap } from '@/components/shared/record-card';
 import { SearchField } from '@/components/shared/search-field';
 import { StatusPill } from '@/components/shared/status-pill';
-import { ScanExpense } from '@/components/finance/scan-expense';
+import { LinkButton } from '@/components/shared/link-button';
 import { VoidExpenseButton } from '@/components/finance/void-expense';
 import { EditExpenseButton } from '@/components/finance/edit-expense';
 import { ExpenseBills } from '@/components/finance/expense-bills';
@@ -62,7 +62,7 @@ export default async function ExpensesPage({
   const canEdit = hasPermission(user, 'expense.edit');
   const canVoid = hasPermission(user, 'expense.delete');
   const canChange = canEdit || canVoid;
-  const formOptions = canRecord || canEdit ? await getExpenseFormOptions(user) : null;
+  const formOptions = canEdit ? await getExpenseFormOptions(user) : null;
   // The supplier's bill behind each expense, kept as evidence for the VAT reclaimed.
   const bills = await listExpenseBills(
     user,
@@ -112,15 +112,23 @@ export default async function ExpensesPage({
         title="Expenses & bills"
         description="What the workshop spends to keep running — rent, utilities, supplies. Parts bought for a job are purchases, not expenses."
         actions={
-          canImport(user, 'expenses') ? (
-            <ListDataActions
-              entity="expenses"
-              label="expenses"
-              canImport
-              columns={importColumns('expenses')}
-              note={importNote('expenses')}
-            />
-          ) : undefined
+          <span className="flex flex-wrap items-center gap-2">
+            {canImport(user, 'expenses') ? (
+              <ListDataActions
+                entity="expenses"
+                label="expenses"
+                canImport
+                columns={importColumns('expenses')}
+                note={importNote('expenses')}
+              />
+            ) : null}
+            {canRecord ? (
+              <LinkButton href="/finance/expenses/new" size="lg">
+                <Plus />
+                Record expense
+              </LinkButton>
+            ) : null}
+          </span>
         }
       />
 
@@ -150,18 +158,6 @@ export default async function ExpensesPage({
           <span className="text-xs text-muted-foreground">Net plus VAT</span>
         </div>
       </Panel>
-
-      {canRecord && formOptions ? (
-        <ScanExpense
-          categories={formOptions.categories}
-          defaultVatRate={formOptions.defaultVatRate}
-          taxCodes={formOptions.taxCodes}
-          modes={formOptions.modes}
-          people={formOptions.people}
-          jobs={formOptions.jobs}
-          moneyAccounts={formOptions.moneyAccounts}
-        />
-      ) : null}
 
       <Section
         title="Recorded"

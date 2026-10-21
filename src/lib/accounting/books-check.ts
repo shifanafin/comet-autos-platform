@@ -159,6 +159,53 @@ async function keptOnPurpose(organizationId: string, problems: BooksProblem[]) {
   return kept;
 }
 
+/**
+ * Cash, petty cash and bank accounts that stood below zero at the end of any
+ * day. A drawer can't hold less than nothing, so a payment was booked before
+ * the money it came from — someone paid personally, the money was put in from
+ * outside the books, or a date is wrong. Card settlements are left out: they
+ * clear on the bank's timing. (A real bank overdraft would show here too.)
+ */
+async function moneyBelowZero(organizationId: string) {
+  const rows = await prisma.$queryRaw<
+    { id: string; code: string; name: string; first_day: string; lowest: string; lowest_day: string }[]
+  >`
+    WITH daily AS (
+      SELECT l.chart_of_account_id AS account_id, e.entry_date AS day,
+             SUM(l.debit_amount - l.credit_amount) AS movement
+      FROM journal_entry_lines l
+      JOIN journal_entries e ON e.id = l.journal_entry_id
+      JOIN chart_of_accounts a ON a.id = l.chart_of_account_id
+      WHERE l.organization_id = ${organizationId}::uuid
+        AND a.is_payment_account
+        AND a.role IS DISTINCT FROM 'CARD_CLEARING'
+      GROUP BY 1, 2
+    ), running AS (
+      SELECT account_id, day, SUM(movement) OVER (PARTITION BY account_id ORDER BY day) AS balance
+      FROM daily
+    ), lowest AS (
+      SELECT DISTINCT ON (account_id) account_id, day, balance
+      FROM running WHERE balance < 0 ORDER BY account_id, balance, day
+    )
+    SELECT a.id, a.account_code AS code, a.account_name AS name,
+           to_char(MIN(r.day), 'YYYY-MM-DD') AS first_day,
+           lowest.balance::text AS lowest, to_char(lowest.day, 'YYYY-MM-DD') AS lowest_day
+    FROM running r
+    JOIN lowest ON lowest.account_id = r.account_id
+    JOIN chart_of_accounts a ON a.id = r.account_id
+    WHERE r.balance < 0
+    GROUP BY a.id, a.account_code, a.account_name, lowest.balance, lowest.day
+    ORDER BY a.account_code`;
+  return rows.map((row) => ({
+    accountId: row.id,
+    code: row.code,
+    name: row.name,
+    firstDay: row.first_day,
+    lowest: row.lowest,
+    lowestDay: row.lowest_day,
+  }));
+}
+
 /** Every record and booked entry compared; what is out of step, by kind. */
 export async function checkBooks(user: AuthenticatedUser) {
   requirePermission(user, 'accounting.view');
@@ -231,6 +278,8 @@ export async function checkBooks(user: AuthenticatedUser) {
     summary: summary.filter((row) => row.checked > 0),
     problems: real.map(describe),
     kept: keptRows.map(describe),
+    /** Money accounts that stood below zero on some day: each needs its missing source found. */
+    belowZero: await moneyBelowZero(organizationId),
   };
 }
 

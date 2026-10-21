@@ -32,7 +32,8 @@ import { prisma } from '@/lib/prisma';
 import { createDirectInvoice } from '@/lib/billing/direct-invoice';
 import { recordInvoicePayment } from '@/lib/billing/invoice';
 import { reverseInvoicePayment, updateInvoice, voidInvoice } from '@/lib/billing/invoice-changes';
-import { recordExpense, voidExpense } from '@/lib/finance/expenses';
+import { recordExpense, toExpenseDraft, updateExpense, voidExpense } from '@/lib/finance/expenses';
+import { getVatReturn } from '@/lib/finance/vat';
 import { ensureChart } from '@/lib/accounting/chart';
 import {
   bookExistingRecords,
@@ -320,6 +321,7 @@ describe('expenses', () => {
       description: `Workshop rent ${RUN}`,
       amount: '1000',
       taxRate: '5',
+      supplierTrn: '100123456700003',
       expenseDate: today(),
       paymentMethod: 'BANK_TRANSFER',
     });
@@ -331,6 +333,38 @@ describe('expenses', () => {
     await voidExpense(a.owner, expense.id, { reason: 'Duplicate' });
     const afterVoid = await bookedFor(expense.id);
     assert.ok([...afterVoid.values()].every((value) => value === 0));
+  });
+
+  test('VAT without the supplier’s TRN waits, unclaimed, until the TRN is entered', async () => {
+    const expense = await recordExpense(a.owner, {
+      description: `Fuel ${RUN}`,
+      amount: '100',
+      taxRate: '5',
+      expenseDate: today(),
+      vendorName: 'ENOC',
+      paymentMethod: 'CASH',
+    });
+    const waiting = await bookedFor(expense.id);
+    assert.equal(waiting.get(roles.VAT_INPUT_PENDING), toFils('5.00'), 'awaiting tax invoice');
+    assert.equal(waiting.get(roles.VAT_INPUT) ?? 0, 0, 'not claimed');
+    const before = await getVatReturn(a.owner, { period: 'month' });
+    assert.ok(before.awaitingTaxInvoice.expenses.some((row) => row.id === expense.id));
+    assert.ok(!before.expenses.some((row) => row.id === expense.id), 'not in the return');
+
+    const { id: _id, ...draft } = toExpenseDraft(expense);
+    void _id;
+    await updateExpense(a.owner, expense.id, { ...draft, supplierTrn: '100058294300003' });
+    const claimed = await bookedFor(expense.id);
+    assert.equal(claimed.get(roles.VAT_INPUT), toFils('5.00'), 'claimed once the TRN is in');
+    assert.equal(claimed.get(roles.VAT_INPUT_PENDING) ?? 0, 0);
+    const after = await getVatReturn(a.owner, { period: 'month' });
+    assert.ok(after.expenses.some((row) => row.id === expense.id));
+    assert.equal(
+      toFils(after.boxes.expenseVat) - toFils(before.boxes.expenseVat),
+      toFils('5.00'),
+    );
+
+    await voidExpense(a.owner, expense.id, { reason: 'Test' });
   });
 });
 
@@ -563,6 +597,7 @@ describe('VAT returns', () => {
       description: `Diagnostic tool ${RUN}`,
       amount: '2000',
       taxRate: '5',
+      supplierTrn: '100123456700003',
       expenseDate: daysAgo(35),
       paymentMethod: 'BANK_TRANSFER',
     });

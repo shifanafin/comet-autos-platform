@@ -162,6 +162,7 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
           expenseDate: true,
           amount: true,
           taxAmount: true,
+          supplierTrn: true,
           chartOfAccount: { select: { accountName: true } },
         },
       }),
@@ -361,25 +362,31 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
   const exemptFils = supplies.EXEMPT;
 
   // ── Expenses with VAT ───────────────────────────────────────────────────
+  // Claimed only on a tax invoice — the supplier's TRN recorded. The rest
+  // wait in "awaiting tax invoice", as the books hold them (postings.ts).
   let expenseNetFils = 0;
   let expenseVatFils = 0;
-  const expenseRows = expenses
-    .filter((expense) => fils(expense.taxAmount) > 0)
+  const expenseRow = (expense: (typeof expenses)[number]) => ({
+    id: expense.id,
+    number: expense.expenseNumber,
+    date: expense.expenseDate,
+    party: expense.vendorName ?? expense.chartOfAccount?.accountName ?? 'Expense',
+    description: expense.description,
+    trn: expense.supplierTrn,
+    net: filsToString(fils(expense.amount)),
+    vat: filsToString(fils(expense.taxAmount)),
+  });
+  const withVat = expenses.filter((expense) => fils(expense.taxAmount) > 0);
+  const expenseRows = withVat
+    .filter((expense) => expense.supplierTrn)
     .map((expense) => {
-      const net = fils(expense.amount);
-      const vat = fils(expense.taxAmount);
-      expenseNetFils += net;
-      expenseVatFils += vat;
-      return {
-        id: expense.id,
-        number: expense.expenseNumber,
-        date: expense.expenseDate,
-        party: expense.vendorName ?? expense.chartOfAccount?.accountName ?? 'Expense',
-        description: expense.description,
-        net: filsToString(net),
-        vat: filsToString(vat),
-      };
+      expenseNetFils += fils(expense.amount);
+      expenseVatFils += fils(expense.taxAmount);
+      return expenseRow(expense);
     });
+  const expensesAwaiting = registered
+    ? withVat.filter((expense) => !expense.supplierTrn).map(expenseRow)
+    : [];
 
   // ── Parts received less parts returned, grouped per purchase ────────────
   const byPurchase = new Map<
@@ -573,6 +580,11 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
     awaitingTaxInvoice: {
       purchases: awaiting._count._all,
       vat: (awaiting._sum.taxAmount ?? 0).toString(),
+      /** Expenses with VAT but no supplier TRN: not claimed until it is entered. */
+      expenses: expensesAwaiting,
+      expensesVat: filsToString(
+        expensesAwaiting.reduce((sum, row) => sum + toFils(row.vat), 0),
+      ),
     },
   };
 }

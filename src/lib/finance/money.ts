@@ -13,6 +13,7 @@ import { syncPosting } from '@/lib/accounting/journal';
 import { checkMoneyAccount } from '@/lib/accounting/chart';
 import { sourceLinks } from '@/lib/accounting/reports';
 import { resolvePeriod } from '@/lib/finance/dashboard';
+import { monthByMonth } from '@/lib/accounting/months';
 
 /** A period chosen on screen: ?period=month, or custom with from/to. */
 export type MoneyPeriodInput = { period?: string; from?: string; to?: string };
@@ -268,6 +269,20 @@ export async function getMoneyAccountActivity(
       moneyOut: filsToString(totalOut),
       closing: signed(opening + sign * (totalIn - totalOut)),
     },
+    /** The period month by month, each opening on the last one's close. */
+    months: period
+      ? monthByMonth(
+          opening,
+          within.map((row) => ({
+            date: day(row.date),
+            a: row.inFils,
+            b: row.outFils,
+            delta: sign * (row.inFils - row.outFils),
+          })),
+          period.from,
+          period.to,
+        )
+      : [],
     account: {
       id: account.id,
       code: account.accountCode,

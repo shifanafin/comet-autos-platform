@@ -531,6 +531,7 @@ const postExpense: Poster = async (tx, organizationId, expenseId, accounts) => {
       chartOfAccountId: true,
       paymentMethod: true,
       paidFromAccountId: true,
+      supplierTrn: true,
       paidByUser: { select: { fullName: true } },
     },
   });
@@ -538,7 +539,12 @@ const postExpense: Poster = async (tx, organizationId, expenseId, accounts) => {
 
   const net = fils(expense.amount);
   const vat = fils(expense.taxAmount);
-  const recoverable = await isVatRegistered(tx, organizationId);
+  const registered = await isVatRegistered(tx, organizationId);
+  // Input VAT is reclaimed only on a tax invoice, and a tax invoice shows the
+  // supplier's TRN (VAT Executive Regulation, Arts. 55 and 59). Until the TRN
+  // is entered the VAT waits in "awaiting tax invoice", out of the return;
+  // entering it moves the VAT across (lib/finance/vat.ts counts the same).
+  const claimed = registered && Boolean(expense.supplierTrn);
   const category = expense.chartOfAccountId ?? accounts.OTHER_EXPENSES;
   const paidFrom = expense.paidByUser
     ? accounts.OWNER_ADVANCES
@@ -546,8 +552,9 @@ const postExpense: Poster = async (tx, organizationId, expenseId, accounts) => {
       ? (expense.paidFromAccountId ?? accounts[METHOD_ACCOUNT_ROLE[expense.paymentMethod]])
       : accounts.ACCOUNTS_PAYABLE;
   const lines = new Lines()
-    .debit(category, recoverable ? net : net + vat)
-    .debit(accounts.VAT_INPUT, recoverable ? vat : 0)
+    .debit(category, registered ? net : net + vat)
+    .debit(accounts.VAT_INPUT, claimed ? vat : 0)
+    .debit(accounts.VAT_INPUT_PENDING, registered && !claimed ? vat : 0)
     .credit(paidFrom, net + vat);
   if (expense.paidByUser) {
     lines.memo(paidFrom, `Paid personally by ${expense.paidByUser.fullName}`);

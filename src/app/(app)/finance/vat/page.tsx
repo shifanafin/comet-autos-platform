@@ -421,6 +421,28 @@ export default async function VatPage({
               </Link>
             </p>
           ) : null}
+          {data.awaitingTaxInvoice.expenses.length > 0 ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 text-sm sm:px-5">
+              <span>
+                {formatMoney(data.awaitingTaxInvoice.expensesVat)} of input VAT on{' '}
+                {data.awaitingTaxInvoice.expenses.length} expense
+                {data.awaitingTaxInvoice.expenses.length === 1 ? '' : 's'} is not in this return —
+                no supplier TRN is recorded. Enter the TRN from the tax invoice to claim it; a
+                receipt without one can&apos;t be claimed.
+              </span>
+              <span className="flex flex-wrap gap-x-4 gap-y-1">
+                {data.awaitingTaxInvoice.expenses.map((row) => (
+                  <Link
+                    key={row.id}
+                    href={`/finance/expenses/${row.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {`${row.number ?? 'Expense'} · ${row.party} · ${formatMoney(row.vat)}`}
+                  </Link>
+                ))}
+              </span>
+            </div>
+          ) : null}
           <Panel className="grid gap-6 sm:grid-cols-3">
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Output VAT</span>
@@ -733,7 +755,7 @@ export default async function VatPage({
 
       <Section
         title="Expenses"
-        description={`Recorded expenses that carry VAT${data.registered ? ` (${formatMoney(boxes.expenseVat)})` : ''}. Voided expenses never count.`}
+        description={`Recorded expenses that carry VAT, with the supplier’s TRN${data.registered ? ` (${formatMoney(boxes.expenseVat)})` : ''}. Voided expenses never count.`}
       >
         {data.expenses.length === 0 && data.sales.length === 0 && data.purchases.length === 0 ? (
           <EmptyState

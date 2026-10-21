@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/layout/primitives';
 import { StatusPill } from '@/components/shared/status-pill';
-import { formatCalendarDate, formatDateTime } from '@/lib/format';
+import { formatCalendarDate, formatDateTime, formatMoney } from '@/lib/format';
 import type { BooksCheck as Result } from '@/lib/accounting/books-check';
 import type { PostedSource } from '@/lib/accounting/journal';
 import {
@@ -173,6 +173,29 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
             stands while its period is open, reversed and booked again once it is closed. The audit
             log keeps what each entry said before.
           </p>
+        </Panel>
+      ) : null}
+
+      {result.belowZero.length > 0 ? (
+        <Panel className="flex flex-col gap-3 border-warning/40 bg-warning/5">
+          <p className="text-sm">
+            <span className="font-semibold">Money below zero.</span> A drawer or account can&apos;t
+            hold less than nothing, so a payment was booked before the money it came from. Find
+            what is missing — paid by an owner personally, money put in from outside the books, or a
+            wrong date — and record it.
+          </p>
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {result.belowZero.map((row) => (
+              <li key={row.accountId} className="flex flex-wrap items-baseline gap-x-2">
+                <Link href={`/finance/money/${row.accountId}`} className="font-medium text-primary hover:underline">
+                  {`${row.code} ${row.name}`}
+                </Link>
+                <span className="text-muted-foreground">
+                  {`below zero from ${formatCalendarDate(row.firstDay)}; lowest ${formatMoney(row.lowest)} on ${formatCalendarDate(row.lowestDay)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
         </Panel>
       ) : null}
 

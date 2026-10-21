@@ -14,6 +14,7 @@ import { StatusPill } from '@/components/shared/status-pill';
 import { LinkButton } from '@/components/shared/link-button';
 import { ReverseEntryButton } from '@/components/accounting/books-controls';
 import { cn } from '@/lib/utils';
+import { MonthByMonth } from '@/components/accounting/month-by-month';
 
 /*
  * The statements read from the general ledger (lib/accounting/reports.ts):
@@ -339,76 +340,79 @@ export function TrialBalanceView({ data, search }: { data: TrialBalance; search:
 
 export function AccountLedgerView({ data }: { data: AccountLedger }) {
   return (
-    <Section
-      title={`${data.account.code} · ${data.account.name}`}
-      description={`Every entry from ${formatCalendarDate(data.period.from)} to ${formatCalendarDate(data.period.to)}, with the running balance.`}
-    >
-      <Panel padding="none" className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead className="bg-muted/40 text-left text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
-            <tr>
-              <th className="w-28 px-4 py-3">Date</th>
-              <th className="w-28 px-2 py-3">Entry</th>
-              <th className="px-2 py-3">Description</th>
-              <th className="w-28 px-2 py-3 text-right">Debit</th>
-              <th className="w-28 px-2 py-3 text-right">Credit</th>
-              <th className="w-32 px-4 py-3 text-right">Balance</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            <tr className="bg-muted/20">
-              <td className="px-4 py-3 text-muted-foreground" colSpan={5}>
-                Opening balance
-              </td>
-              <td className="px-4 py-3 text-right font-medium tabular-nums">
-                {formatMoney(data.opening)}
-              </td>
-            </tr>
-            {data.rows.map((row) => (
-              <tr key={row.id} className={cn(row.reversal && 'text-muted-foreground')}>
-                <td className="px-4 py-3 whitespace-nowrap">{formatCalendarDate(row.date)}</td>
-                <td className="px-2 py-3 font-mono text-xs">{row.entryNumber}</td>
-                <td className="px-2 py-3">
-                  {row.source.href ? (
-                    <Link href={row.source.href} className="hover:underline">
-                      {row.description}
-                    </Link>
-                  ) : (
-                    row.description
-                  )}
-                  <span className="block text-xs text-muted-foreground">
-                    {SOURCE_LABEL[row.source.type]}
-                    {row.reversal ? ' · reversal' : ''}
-                  </span>
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {row.debit ? formatMoney(row.debit) : ''}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {row.credit ? formatMoney(row.credit) : ''}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">{formatMoney(row.balance)}</td>
-              </tr>
-            ))}
-            {data.rows.length === 0 ? (
+    <>
+      <MonthByMonth months={data.months} columns={['Debit', 'Credit']} />
+      <Section
+        title={`${data.account.code} · ${data.account.name}`}
+        description={`Every entry from ${formatCalendarDate(data.period.from)} to ${formatCalendarDate(data.period.to)}, with the running balance.`}
+      >
+        <Panel padding="none" className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-muted/40 text-left text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
               <tr>
-                <td className="px-4 py-4 text-muted-foreground" colSpan={6}>
-                  No entries in this period.
+                <th className="w-28 px-4 py-3">Date</th>
+                <th className="w-28 px-2 py-3">Entry</th>
+                <th className="px-2 py-3">Description</th>
+                <th className="w-28 px-2 py-3 text-right">Debit</th>
+                <th className="w-28 px-2 py-3 text-right">Credit</th>
+                <th className="w-32 px-4 py-3 text-right">Balance</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              <tr className="bg-muted/20">
+                <td className="px-4 py-3 text-muted-foreground" colSpan={5}>
+                  Opening balance
+                </td>
+                <td className="px-4 py-3 text-right font-medium tabular-nums">
+                  {formatMoney(data.opening)}
                 </td>
               </tr>
-            ) : null}
-          </tbody>
-          <tfoot className="border-t-2 border-border font-semibold">
-            <tr>
-              <td className="px-4 py-3" colSpan={5}>
-                Closing balance
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">{formatMoney(data.closing)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </Panel>
-    </Section>
+              {data.rows.map((row) => (
+                <tr key={row.id} className={cn(row.reversal && 'text-muted-foreground')}>
+                  <td className="px-4 py-3 whitespace-nowrap">{formatCalendarDate(row.date)}</td>
+                  <td className="px-2 py-3 font-mono text-xs">{row.entryNumber}</td>
+                  <td className="px-2 py-3">
+                    {row.source.href ? (
+                      <Link href={row.source.href} className="hover:underline">
+                        {row.description}
+                      </Link>
+                    ) : (
+                      row.description
+                    )}
+                    <span className="block text-xs text-muted-foreground">
+                      {SOURCE_LABEL[row.source.type]}
+                      {row.reversal ? ' · reversal' : ''}
+                    </span>
+                  </td>
+                  <td className="px-2 py-3 text-right tabular-nums">
+                    {row.debit ? formatMoney(row.debit) : ''}
+                  </td>
+                  <td className="px-2 py-3 text-right tabular-nums">
+                    {row.credit ? formatMoney(row.credit) : ''}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">{formatMoney(row.balance)}</td>
+                </tr>
+              ))}
+              {data.rows.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-muted-foreground" colSpan={6}>
+                    No entries in this period.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+            <tfoot className="border-t-2 border-border font-semibold">
+              <tr>
+                <td className="px-4 py-3" colSpan={5}>
+                  Closing balance
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">{formatMoney(data.closing)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </Panel>
+      </Section>
+    </>
   );
 }
 

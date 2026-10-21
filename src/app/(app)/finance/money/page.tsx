@@ -91,7 +91,7 @@ export default async function MoneyPage({
       <FinancePeriodPicker
         period={overview.period!}
         basePath="/finance/money"
-        presets={['month', 'last-month', 'quarter', 'last-quarter', 'year']}
+        presets={['today', 'week', 'month', 'last-month', 'quarter', 'last-quarter', 'year']}
       />
 
       {overview.groups.map((group) => (

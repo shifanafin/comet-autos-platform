@@ -9,6 +9,7 @@ import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { resolvePeriod, type ResolvedPeriod } from '@/lib/finance/dashboard';
 import { ensureChart, isCostOfSales } from '@/lib/accounting/chart';
+import { monthByMonth } from '@/lib/accounting/months';
 
 /*
  * The statements, read from the general ledger — every figure the sum of
@@ -416,6 +417,22 @@ export async function getAccountLedger(
     opening: filsToString(openingFils),
     closing: filsToString(running),
     rows,
+    /** The period month by month: opening, debits, credits, closing. */
+    months: monthByMonth(
+      openingFils,
+      lines.map((line) => {
+        const debit = toFils(line.debitAmount.toString());
+        const credit = toFils(line.creditAmount.toString());
+        return {
+          date: line.journalEntry.entryDate.toISOString().slice(0, 10),
+          a: debit,
+          b: credit,
+          delta: signed(debit, credit),
+        };
+      }),
+      period.from,
+      period.to,
+    ),
   };
 }
 

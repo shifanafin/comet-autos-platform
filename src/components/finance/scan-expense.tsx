@@ -79,6 +79,7 @@ export function ScanExpense({
   modes,
   people = [],
   jobs,
+  closeTo,
 }: {
   categories: { id: string; accountCode: string; accountName: string }[];
   defaultVatRate: string;
@@ -87,13 +88,24 @@ export function ScanExpense({
   modes: PaymentModeOption[];
   people?: { id: string; name: string }[];
   jobs?: JobChoice[];
+  /** On its own page: Save & close goes back here. */
+  closeTo?: string;
 }) {
   const router = useRouter();
   const { phase, scan, reset } = useBillScan('expense');
   // Each expense recorded by hand clears the form for the next one.
   const [saved, setSaved] = useState(0);
   const scanned = phase.name === 'ready' ? phase : null;
-  const form = { categories, defaultVatRate, moneyAccounts, taxCodes, modes, people, jobs };
+  const form = {
+    categories,
+    defaultVatRate,
+    moneyAccounts,
+    taxCodes,
+    modes,
+    people,
+    jobs,
+    closeTo,
+  };
 
   async function save(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
     const result = await recordScannedExpenseAction({ ok: false }, formData);
