@@ -467,9 +467,14 @@ export async function listMoneyTransfers(
   limit = 300,
   /** Rows to skip: the pages before the one shown. */
   offset = 0,
+  /** Active (the default) or only those voided — kept on record, out of the everyday list. */
+  view: 'active' | 'voided' = 'active',
 ) {
   requirePermission(user, 'money.view');
-  const where = { organizationId: user.organizationId };
+  const where = {
+    organizationId: user.organizationId,
+    status: view === 'voided' ? ('VOID' as const) : ('POSTED' as const),
+  };
   const [transfers, total] = await Promise.all([
     prisma.moneyTransfer.findMany({
       where,

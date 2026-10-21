@@ -84,11 +84,7 @@ const payeeFields = {
 const paymentFields = {
   paymentMethod: z.enum(METHODS, { error: 'Choose how it was paid.' }),
   paidFromAccountId: optionalId,
-  paymentReference: z
-    .string()
-    .trim()
-    .max(60, 'Keep the reference under 60 characters.')
-    .optional(),
+  paymentReference: z.string().trim().max(60, 'Keep the reference under 60 characters.').optional(),
 };
 
 /** Paying card money over: when, the bank's fee, and how. */
@@ -525,18 +521,24 @@ export async function listPaymentVouchers(
   limit = 300,
   /** Rows to skip: the pages before the one shown. */
   offset = 0,
+  /** Active (the default) or only those voided — kept on record, out of the everyday list. */
+  view: 'active' | 'voided' = 'active',
 ) {
   requirePermission(user, 'payment_voucher.view');
   const where = { organizationId: user.organizationId };
+  const shown = {
+    ...where,
+    status: view === 'voided' ? ('VOID' as const) : { not: 'VOID' as const },
+  };
   const [rows, total, owed] = await Promise.all([
     prisma.paymentVoucher.findMany({
-      where,
+      where: shown,
       orderBy: [{ createdAt: 'desc' }],
       skip: offset,
       take: limit,
       select: listSelect,
     }),
-    prisma.paymentVoucher.count({ where }),
+    prisma.paymentVoucher.count({ where: shown }),
     prisma.paymentVoucher.findMany({
       where: { ...where, status: 'OWED' },
       orderBy: [{ collectedOn: 'asc' }, { createdAt: 'asc' }],

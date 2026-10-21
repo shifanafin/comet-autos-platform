@@ -6,6 +6,7 @@ import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
+import { ActiveDeletedTabs } from '@/components/shared/active-deleted-tabs';
 import { LinkButton } from '@/components/shared/link-button';
 import { Pagination } from '@/components/shared/pagination';
 import { StatusPill } from '@/components/shared/status-pill';
@@ -30,15 +31,17 @@ function Status({ status }: { status: PaymentVoucherRow['status'] }) {
 export default async function PaymentVouchersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; show?: string }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
+  // Voided entries stay on record, out of the everyday list.
+  const voided = params.show === 'voided';
   let list;
   let info;
   try {
     ({ result: list, info } = await loadPage(pageFrom(params.page), (skip, take) =>
-      listPaymentVouchers(user, take, skip),
+      listPaymentVouchers(user, take, skip, voided ? 'voided' : 'active'),
     ));
   } catch (error) {
     if (error instanceof AuthError) return <AccessDenied what="payment vouchers" />;
@@ -58,7 +61,11 @@ export default async function PaymentVouchersPage({
                 <CreditCard />
                 Card money for someone
               </LinkButton>
-              <LinkButton href="/finance/payment-vouchers/new?kind=work" variant="outline" size="lg">
+              <LinkButton
+                href="/finance/payment-vouchers/new?kind=work"
+                variant="outline"
+                size="lg"
+              >
                 <Wrench />
                 Outside work
               </LinkButton>
@@ -100,11 +107,22 @@ export default async function PaymentVouchersPage({
         </Section>
       ) : null}
 
-      <Section title="Vouchers">
+      <Section
+        title="Vouchers"
+        action={
+          <ActiveDeletedTabs
+            basePath="/finance/payment-vouchers"
+            deleted={voided}
+            query=""
+            labels={['Active', 'Voided']}
+            show="voided"
+          />
+        }
+      >
         {list.vouchers.length === 0 ? (
           <EmptyState
             icon={FileSignature}
-            title="No payment vouchers yet"
+            title={voided ? 'Nothing voided' : 'No payment vouchers yet'}
             description="When you pay someone — card money collected for them, or an outside mechanic — the voucher they sign is listed here."
           />
         ) : (

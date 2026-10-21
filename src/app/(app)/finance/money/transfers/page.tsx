@@ -8,6 +8,7 @@ import { formatCalendarDate, formatDateTime, formatMoney, localDateString } from
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
+import { ActiveDeletedTabs } from '@/components/shared/active-deleted-tabs';
 import { Pagination } from '@/components/shared/pagination';
 import { loadPage, pageFrom } from '@/lib/pagination';
 import { StatusPill } from '@/components/shared/status-pill';
@@ -19,17 +20,21 @@ export const metadata = { title: 'Money transfers' };
 export default async function MoneyTransfersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; show?: string }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
+  // Voided entries stay on record, out of the everyday list.
+  const voided = params.show === 'voided';
   let list;
   let info;
   let accounts;
   let vat;
   try {
     [{ result: list, info }, accounts, vat] = await Promise.all([
-      loadPage(pageFrom(params.page), (skip, take) => listMoneyTransfers(user, take, skip)),
+      loadPage(pageFrom(params.page), (skip, take) =>
+        listMoneyTransfers(user, take, skip, voided ? 'voided' : 'active'),
+      ),
       getTransferAccounts(user),
       getVatSettings(user.organizationId),
     ]);
@@ -68,11 +73,22 @@ export default async function MoneyTransfersPage({
         </Section>
       ) : null}
 
-      <Section title="Transfers made">
+      <Section
+        title="Transfers made"
+        action={
+          <ActiveDeletedTabs
+            basePath="/finance/money/transfers"
+            deleted={voided}
+            query=""
+            labels={['Active', 'Voided']}
+            show="voided"
+          />
+        }
+      >
         {list.transfers.length === 0 ? (
           <EmptyState
             icon={ArrowRightLeft}
-            title="No transfers yet"
+            title={voided ? 'Nothing voided' : 'No transfers yet'}
             description="Each time money moves between the cash drawer, the petty-cash box and the bank, it is listed here."
           />
         ) : (

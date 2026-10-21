@@ -6,6 +6,7 @@ import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
+import { ActiveDeletedTabs } from '@/components/shared/active-deleted-tabs';
 import { Pagination } from '@/components/shared/pagination';
 import { pageFrom, slicePage } from '@/lib/pagination';
 import { StatusPill } from '@/components/shared/status-pill';
@@ -17,10 +18,12 @@ export const metadata = { title: 'Rent & other income' };
 export default async function OtherIncomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; show?: string }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
+  // Voided entries stay on record, out of the everyday list.
+  const voided = params.show === 'voided';
   let list;
   let options;
   try {
@@ -29,7 +32,8 @@ export default async function OtherIncomePage({
     if (error instanceof AuthError) return <AccessDenied what="rent & other income" />;
     throw error;
   }
-  const { rows, info } = slicePage(list.rows, pageFrom(params.page));
+  const shown = list.rows.filter((row) => (row.status === 'VOID') === voided);
+  const { rows, info } = slicePage(shown, pageFrom(params.page));
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -63,11 +67,22 @@ export default async function OtherIncomePage({
         </Section>
       ) : null}
 
-      <Section title="Recorded">
-        {list.rows.length === 0 ? (
+      <Section
+        title="Recorded"
+        action={
+          <ActiveDeletedTabs
+            basePath="/finance/money/income"
+            deleted={voided}
+            query=""
+            labels={['Active', 'Voided']}
+            show="voided"
+          />
+        }
+      >
+        {shown.length === 0 ? (
           <EmptyState
             icon={Banknote}
-            title="Nothing recorded yet"
+            title={voided ? 'Nothing voided' : 'Nothing recorded yet'}
             description="Each time rent or other income is received, it is listed here with its receipt."
           />
         ) : (

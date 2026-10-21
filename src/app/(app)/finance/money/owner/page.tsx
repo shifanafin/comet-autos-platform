@@ -8,6 +8,7 @@ import { formatCalendarDate, formatMoney } from '@/lib/format';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
+import { ActiveDeletedTabs } from '@/components/shared/active-deleted-tabs';
 import { Pagination } from '@/components/shared/pagination';
 import { pageFrom, slicePage } from '@/lib/pagination';
 import { StatusPill } from '@/components/shared/status-pill';
@@ -33,10 +34,12 @@ export const metadata = { title: "Owner's money" };
 export default async function OwnerMoneyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; show?: string }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
+  // Voided entries stay on record, out of the everyday list.
+  const voided = params.show === 'voided';
   let list;
   let options;
   let purchase;
@@ -50,7 +53,8 @@ export default async function OwnerMoneyPage({
     if (error instanceof AuthError) return <AccessDenied what="owner's money" />;
     throw error;
   }
-  const { rows, info } = slicePage(list.rows, pageFrom(params.page));
+  const shown = list.rows.filter((row) => (row.status === 'VOID') === voided);
+  const { rows, info } = slicePage(shown, pageFrom(params.page));
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -206,9 +210,7 @@ export default async function OwnerMoneyPage({
               </table>
             </div>
           ) : (
-            <p className="px-4 py-4 text-sm text-muted-foreground sm:px-6">
-              Nothing recorded yet.
-            </p>
+            <p className="px-4 py-4 text-sm text-muted-foreground sm:px-6">Nothing recorded yet.</p>
           )}
           {purchase.canRecord && options.partners.length ? (
             <div className="border-t border-border px-4 py-6 sm:px-6">
@@ -218,11 +220,22 @@ export default async function OwnerMoneyPage({
         </Panel>
       </Section>
 
-      <Section title="Recorded">
-        {list.rows.length === 0 ? (
+      <Section
+        title="Recorded"
+        action={
+          <ActiveDeletedTabs
+            basePath="/finance/money/owner"
+            deleted={voided}
+            query=""
+            labels={['Active', 'Voided']}
+            show="voided"
+          />
+        }
+      >
+        {shown.length === 0 ? (
           <EmptyState
             icon={HandCoins}
-            title="Nothing recorded yet"
+            title={voided ? 'Nothing voided' : 'Nothing recorded yet'}
             description="Each time an owner puts money in or takes it out, it is listed here with its journal entry."
           />
         ) : (
