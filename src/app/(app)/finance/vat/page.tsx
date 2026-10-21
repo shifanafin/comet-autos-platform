@@ -299,7 +299,25 @@ export default async function VatPage({
       net: row.sales,
       vat: row.salesVat,
     }));
-  const standardDocuments = [...standardSales, ...credited('standard', true), ...priorSales];
+  // Rent & other income, in the box of its VAT treatment.
+  const incomeIn = (treatment: VatReturn['otherIncome'][number]['treatment']): BoxDocument[] =>
+    data.otherIncome
+      .filter((row) => row.treatment === treatment)
+      .map((row) => ({
+        key: `income-${row.id}`,
+        href: `/finance/money/income/${row.id}`,
+        number: row.number,
+        date: formatCalendarDate(row.date),
+        party: row.party,
+        net: row.net,
+        vat: row.vat,
+      }));
+  const standardDocuments = [
+    ...standardSales,
+    ...credited('standard', true),
+    ...incomeIn('STANDARD'),
+    ...priorSales,
+  ];
   const salesIn = (part: 'zeroRated' | 'exempt'): BoxDocument[] => [
     ...data.sales
       .filter((row) => row[part] !== '0.00')
@@ -313,6 +331,7 @@ export default async function VatPage({
         vat: '0.00',
       })),
     ...credited(part, false),
+    ...incomeIn(part === 'zeroRated' ? 'ZERO_RATED' : 'EXEMPT'),
   ];
   const zeroRatedSales = salesIn('zeroRated');
   const exemptSales = salesIn('exempt');
@@ -750,6 +769,27 @@ export default async function VatPage({
               </tbody>
             </table>
           </Panel>
+        </Section>
+      ) : null}
+
+      {data.otherIncome.length ? (
+        <Section
+          title="Rent & other income"
+          description="Money received outside the workshop's sales, on the day received — in Box 1 with its VAT, or Box 4 or 5 by its tax code."
+        >
+          <DocumentTable
+            empty="No rent or other income in this period."
+            rows={data.otherIncome.map((row) => ({
+              key: row.id,
+              href: `/finance/money/income/${row.id}`,
+              number: row.number,
+              date: formatCalendarDate(row.date),
+              party: row.party,
+              detail: row.description,
+              net: row.net,
+              vat: row.vat,
+            }))}
+          />
         </Section>
       ) : null}
 

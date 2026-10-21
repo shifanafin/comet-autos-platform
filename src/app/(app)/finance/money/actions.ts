@@ -7,6 +7,7 @@ import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
 import { recordMoneyTransfer, voidMoneyTransfer } from '@/lib/finance/money';
 import { addPartner, recordOwnerMoney, voidOwnerMoney } from '@/lib/finance/owner-money';
+import { recordOtherIncome, voidOtherIncome } from '@/lib/finance/other-income';
 import {
   recordBusinessPurchasePayment,
   voidBusinessPurchasePayment,
@@ -57,6 +58,32 @@ export async function voidOwnerMoneyAction(
   const user = await requireUser();
   const result = await runAction(() => voidOwnerMoney(user, id, input));
   if (result.ok) refresh();
+  return toClientResult(result);
+}
+
+export async function recordOtherIncomeAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => recordOtherIncome(user, formDataToObject(formData)));
+  if (result.ok || result.duplicate) {
+    refresh();
+    revalidatePath('/finance/vat');
+  }
+  return toClientResult(result);
+}
+
+export async function voidOtherIncomeAction(
+  id: string,
+  input: { reason: string; requestKey: string },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => voidOtherIncome(user, id, input));
+  if (result.ok) {
+    refresh();
+    revalidatePath('/finance/vat');
+  }
   return toClientResult(result);
 }
 

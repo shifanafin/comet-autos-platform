@@ -18,6 +18,7 @@ const DEFAULT_PREFIX: Record<DocumentType, string> = {
   CUSTOMER_ADVANCE: 'ADV-',
   OWNER_MONEY: 'OWN-',
   PAYMENT_VOUCHER: 'PV-',
+  OTHER_INCOME: 'INC-',
 };
 
 /**
