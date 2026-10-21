@@ -250,6 +250,19 @@ export interface EntrySource {
   href: string | null;
 }
 
+/**
+ * How one line reads in a ledger, a cash book or a reconciliation: what the
+ * entry is, then the line's own note when it adds something. A short note
+ * ("Paid from petty cash") never hides what the money was for.
+ */
+export function lineText(note: string | null, entryDescription: string | null) {
+  const entry = entryDescription?.trim() ?? '';
+  const own = note?.trim() ?? '';
+  if (!own || entry.includes(own)) return entry;
+  if (!entry || own.includes(entry)) return own;
+  return `${entry} — ${own}`;
+}
+
 /** The screen behind each entry's record, for linking from the ledger and money pages. */
 export async function sourceLinks(
   organizationId: string,
@@ -397,7 +410,7 @@ export async function getAccountLedger(
       entryId: line.journalEntry.id,
       entryNumber: line.journalEntry.entryNumber,
       date: line.journalEntry.entryDate,
-      description: line.description ?? line.journalEntry.description ?? '',
+      description: lineText(line.description, line.journalEntry.description),
       reversal: line.journalEntry.reversalOfJournalEntryId !== null,
       source: link(line.journalEntry.sourceType, line.journalEntry.sourceId),
       debit: debit ? filsToString(debit) : null,

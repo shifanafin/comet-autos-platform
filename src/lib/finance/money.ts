@@ -11,7 +11,7 @@ import { localDateString, parseCalendarDate } from '@/lib/format';
 import { allocateDocumentNumber } from '@/lib/numbering';
 import { syncPosting } from '@/lib/accounting/journal';
 import { checkMoneyAccount } from '@/lib/accounting/chart';
-import { sourceLinks } from '@/lib/accounting/reports';
+import { lineText, sourceLinks } from '@/lib/accounting/reports';
 import { resolvePeriod } from '@/lib/finance/dashboard';
 import { monthByMonth } from '@/lib/accounting/months';
 
@@ -241,7 +241,7 @@ export async function getMoneyAccountActivity(
       id: line.id,
       date: line.journalEntry.entryDate,
       entryNumber: line.journalEntry.entryNumber,
-      description: line.description ?? line.journalEntry.description ?? '',
+      description: lineText(line.description, line.journalEntry.description),
       moneyIn: inFils ? filsToString(inFils) : '',
       moneyOut: outFils ? filsToString(outFils) : '',
       balance: signed(running),

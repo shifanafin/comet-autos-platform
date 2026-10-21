@@ -8,6 +8,7 @@ import { DomainError, NotFoundError } from '@/lib/errors';
 import { parseInput } from '@/lib/form-data';
 import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
+import { lineText } from '@/lib/accounting/reports';
 
 /*
  * Bank reconciliation — proving the books' cash, bank and card accounts
@@ -254,7 +255,7 @@ export async function getReconciliation(user: AuthenticatedUser, reconciliationI
       id: line.id,
       date: line.journalEntry.entryDate.toISOString().slice(0, 10),
       entryNumber: line.journalEntry.entryNumber,
-      description: line.description ?? line.journalEntry.description ?? '',
+      description: lineText(line.description, line.journalEntry.description),
       sourceType: line.journalEntry.sourceType,
       /** Money in (a debit to the account) or out. */
       moneyIn: amount > 0 ? filsToString(amount) : '',

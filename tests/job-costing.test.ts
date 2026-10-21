@@ -106,6 +106,7 @@ describe('what a job cost and made', () => {
       description: 'Discs skimmed at machine shop',
       amount: '30.00',
       taxRate: '5',
+      supplierTrn: '100123456700003',
       expenseDate: localDateString(),
       paymentMethod: 'CASH',
       forJob: `invoice:${invoiceId}`,
