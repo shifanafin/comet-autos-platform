@@ -61,7 +61,6 @@ const NOTE_COLUMNS = [
   ['payment_vouchers', 'notes'],
   ['money_transfers', 'notes'],
   ['owner_money', 'notes'],
-  ['other_income', 'notes'],
 ] as const;
 
 interface Found {

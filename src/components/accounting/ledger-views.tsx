@@ -35,7 +35,6 @@ const SOURCE_LABEL: Record<string, string> = {
   PRIOR_PERIOD: 'Before these books',
   FINAL_SETTLEMENT: 'Final settlement',
   FINAL_SETTLEMENT_PAYMENT: 'Final settlement',
-  OTHER_INCOME: 'Rent & other income',
   MANUAL: 'Manual',
 };
 

@@ -288,7 +288,7 @@ enum JournalSource {
   PAYMENT_VOUCHER
   /// One month's totals from before these books began (PriorPeriodSummary).
   PRIOR_PERIOD
-  /// Rent or other income received, outside the workshop's sales (OtherIncome).
+  /// Unused.
   OTHER_INCOME
   /// An employee's final settlement on leaving, once approved.
   FINAL_SETTLEMENT
@@ -549,6 +549,7 @@ enum DocumentType {
   CUSTOMER_ADVANCE
   OWNER_MONEY
   PAYMENT_VOUCHER
+  /// Unused.
   OTHER_INCOME
 }
 
@@ -712,7 +713,6 @@ model Organization {
   bankReconciliations BankReconciliation[]
   moneyTransfers      MoneyTransfer[]
   ownerMoney          OwnerMoney[]
-  otherIncome         OtherIncome[]
   businessPurchasePayments BusinessPurchasePayment[]
   paymentVouchers     PaymentVoucher[]
   partners            Partner[]
@@ -857,7 +857,6 @@ model User {
   moneyTransfersCreated    MoneyTransfer[]             @relation("MoneyTransferCreatedBy")
   ownerMoneyCreated        OwnerMoney[]                @relation("OwnerMoneyCreatedBy")
   ownerMoneyOwned          OwnerMoney[]                @relation("OwnerMoneyOwner")
-  otherIncomeCreated       OtherIncome[]               @relation("OtherIncomeCreatedBy")
   businessPurchasesCreated BusinessPurchasePayment[]   @relation("BusinessPurchaseCreatedBy")
   paymentVouchersCreated   PaymentVoucher[]            @relation("PaymentVoucherCreatedBy")
   advancesReceived         CustomerAdvance[]           @relation("CustomerAdvanceReceivedBy")
@@ -2278,8 +2277,6 @@ model ChartOfAccount {
   transfersOut           MoneyTransfer[]         @relation("MoneyTransferFrom")
   transfersIn            MoneyTransfer[]         @relation("MoneyTransferTo")
   ownerMoney             OwnerMoney[]
-  otherIncomeBooked      OtherIncome[]           @relation("OtherIncomeAccount")
-  otherIncomeReceived    OtherIncome[]           @relation("OtherIncomeMoneyAccount")
   cardCollectionsIn      PaymentVoucher[]        @relation("PaymentVoucherCardAccount")
   paymentVouchersPaid    PaymentVoucher[]        @relation("PaymentVoucherPaidFrom")
   advancesReceivedInto   CustomerAdvance[]       @relation("CustomerAdvanceAccount")
@@ -3304,7 +3301,6 @@ model TaxCode {
   estimateItems EstimateItem[]
   purchaseItems PurchaseItem[]
   expenses      Expense[]
-  otherIncome   OtherIncome[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, code])
@@ -3489,60 +3485,6 @@ model OwnerMoney {
   @@unique([organizationId, entryNumber])
   @@index([organizationId, movedOn])
   @@map("owner_money")
-}
-
-enum OtherIncomeStatus {
-  POSTED
-  /// Withdrawn — entered in error. Kept on record; its entry is reversed.
-  VOID
-}
-
-/// Rent & other income (INC-): money received that is not from the workshop's
-/// sales — the rent of its premises' space, a commission, scrap sold. Kept
-/// apart from the tax invoices (INV-); its receipt is, when it carries VAT,
-/// the simplified tax invoice. Booked as journal source OTHER_INCOME:
-///   Dr the money account (amount) / Cr the income account (net) / Cr Output VAT (VAT)
-/// The amount received includes the VAT of its tax code. Never edited: a
-/// mistake is voided, which reverses its entry.
-model OtherIncome {
-  id              String            @id @default(uuid(7)) @db.Uuid
-  organizationId  String            @map("organization_id") @db.Uuid
-  incomeNumber    String            @map("income_number")
-  receivedOn      DateTime          @map("received_on") @db.Date
-  /// Who paid it — a name; no customer record needed.
-  receivedFrom    String            @map("received_from")
-  /// What it was for: "Rent — workshop space, October 2026".
-  description     String
-  /// The income account it books to (Rental income, Other income…).
-  incomeAccountId String            @map("income_account_id") @db.Uuid
-  /// The cash or bank account it went into.
-  accountId       String            @map("account_id") @db.Uuid
-  taxCodeId       String?           @map("tax_code_id") @db.Uuid
-  vatTreatment    VatTreatment      @map("vat_treatment")
-  vatRate         Decimal           @map("vat_rate") @db.Decimal(5, 2)
-  /// What was received, VAT included.
-  amount          Decimal           @db.Decimal(14, 2)
-  netAmount       Decimal           @map("net_amount") @db.Decimal(14, 2)
-  vatAmount       Decimal           @map("vat_amount") @db.Decimal(14, 2)
-  reference       String?
-  notes           String?
-  status          OtherIncomeStatus @default(POSTED)
-  voidedAt        DateTime?         @map("voided_at") @db.Timestamptz
-  voidReason      String?           @map("void_reason")
-  createdByUserId String            @map("created_by_user_id") @db.Uuid
-  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz
-
-  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  incomeAccount ChartOfAccount @relation("OtherIncomeAccount", fields: [organizationId, incomeAccountId], references: [organizationId, id], onDelete: Restrict)
-  account       ChartOfAccount @relation("OtherIncomeMoneyAccount", fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
-  taxCode       TaxCode?       @relation(fields: [organizationId, taxCodeId], references: [organizationId, id], onDelete: Restrict)
-  createdBy     User           @relation("OtherIncomeCreatedBy", fields: [organizationId, createdByUserId], references: [organizationId, id], onDelete: Restrict)
-
-  @@unique([organizationId, id])
-  @@unique([organizationId, incomeNumber])
-  @@index([organizationId, receivedOn])
-  @@map("other_income")
 }
 
 enum MoneyTransferStatus {

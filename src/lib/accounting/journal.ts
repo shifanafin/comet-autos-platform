@@ -41,7 +41,10 @@ type Tx = Prisma.TransactionClient;
  * Sources booked from a record through its posting rule. Manual, opening
  * balance and year-end closing entries are booked directly instead.
  */
-export type PostedSource = Exclude<JournalSource, 'MANUAL' | 'OPENING_BALANCE' | 'YEAR_END_CLOSE'>;
+export type PostedSource = Exclude<
+  JournalSource,
+  'MANUAL' | 'OPENING_BALANCE' | 'YEAR_END_CLOSE' | 'OTHER_INCOME'
+>;
 
 interface EntryInput {
   organizationId: string;

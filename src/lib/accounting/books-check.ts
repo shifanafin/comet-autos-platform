@@ -76,8 +76,6 @@ const RECORDS: Record<PostedSource, (organizationId: string) => Promise<string[]
   PURCHASE_ROUNDING: (o) => prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   PURCHASE_BILL: (o) => prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   OWNER_MONEY: (o) => prisma.ownerMoney.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  OTHER_INCOME: (o) =>
-    prisma.otherIncome.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   CARD_COLLECTION: (o) =>
     prisma.paymentVoucher.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   PAYMENT_VOUCHER: (o) =>
@@ -114,7 +112,6 @@ export const SOURCE_LABEL: Record<PostedSource, string> = {
   PURCHASE_ROUNDING: 'Purchase round-offs',
   PURCHASE_BILL: 'Supplier bills matched later',
   OWNER_MONEY: "Owner's money",
-  OTHER_INCOME: 'Rent & other income',
   CARD_COLLECTION: 'Card money collected for others',
   PAYMENT_VOUCHER: 'Payment vouchers',
   PRIOR_PERIOD: 'Months before these books',

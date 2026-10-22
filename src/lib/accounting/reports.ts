@@ -326,17 +326,15 @@ export async function sourceLinks(
                                 ? `/finance/payment-vouchers/${id}`
                                 : source === 'MONEY_TRANSFER'
                                   ? '/finance/money/transfers'
-                                  : source === 'OTHER_INCOME'
-                                    ? `/finance/money/income/${id}`
-                                    : source === 'OWNER_MONEY'
-                                      ? '/finance/money/owner'
-                                      : source === 'CUSTOMER_ADVANCE'
-                                        ? `/finance/advances/${id}`
-                                        : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
-                                              source === 'CUSTOMER_ADVANCE_REFUND') &&
-                                            advanceOf.get(id)
-                                          ? `/finance/advances/${advanceOf.get(id)}`
-                                          : null;
+                                  : source === 'OWNER_MONEY'
+                                    ? '/finance/money/owner'
+                                    : source === 'CUSTOMER_ADVANCE'
+                                      ? `/finance/advances/${id}`
+                                      : (source === 'CUSTOMER_ADVANCE_ALLOCATION' ||
+                                            source === 'CUSTOMER_ADVANCE_REFUND') &&
+                                          advanceOf.get(id)
+                                        ? `/finance/advances/${advanceOf.get(id)}`
+                                        : null;
     return { type: source, id, href };
   };
 }

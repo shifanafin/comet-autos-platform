@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ArrowRightLeft, Banknote, CreditCard, HandCoins, TriangleAlert } from 'lucide-react';
+import { ArrowRight, ArrowRightLeft, CreditCard, HandCoins, TriangleAlert } from 'lucide-react';
 import { AuthError, requireUser } from '@/lib/auth/authorize';
 import { getMoneyOverview } from '@/lib/finance/money';
 import { formatMoney } from '@/lib/format';
@@ -57,10 +57,6 @@ export default async function MoneyPage({
         actions={
           overview.canTransfer ? (
             <>
-              <LinkButton href="/finance/money/income" size="lg" variant="outline">
-                <Banknote />
-                Rent &amp; other income
-              </LinkButton>
               <LinkButton href="/finance/money/owner" size="lg" variant="outline">
                 <HandCoins />
                 Owner&apos;s money
@@ -71,16 +67,10 @@ export default async function MoneyPage({
               </LinkButton>
             </>
           ) : (
-            <>
-              <LinkButton href="/finance/money/income" size="lg" variant="outline">
-                <Banknote />
-                Rent &amp; other income
-              </LinkButton>
-              <LinkButton href="/finance/money/owner" size="lg" variant="outline">
-                <HandCoins />
-                Owner&apos;s money
-              </LinkButton>
-            </>
+            <LinkButton href="/finance/money/owner" size="lg" variant="outline">
+              <HandCoins />
+              Owner&apos;s money
+            </LinkButton>
           )
         }
       />

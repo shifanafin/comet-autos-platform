@@ -1030,42 +1030,6 @@ const postOwnerMoney: Poster = async (tx, organizationId, id, accounts) => {
   };
 };
 
-// ─── Rent & other income ────────────────────────────────────────────────────
-
-/**
- * Money received outside the workshop's sales (lib/finance/other-income.ts):
- * Dr the cash or bank account, Cr the income account, Cr Output VAT with the
- * VAT inside the amount.
- */
-const postOtherIncome: Poster = async (tx, organizationId, id, accounts) => {
-  const row = await tx.otherIncome.findFirst({
-    where: { id, organizationId },
-    select: {
-      status: true,
-      incomeNumber: true,
-      receivedOn: true,
-      receivedFrom: true,
-      description: true,
-      amount: true,
-      netAmount: true,
-      vatAmount: true,
-      incomeAccountId: true,
-      accountId: true,
-    },
-  });
-  if (!row || row.status !== 'POSTED') return null;
-  return {
-    date: row.receivedOn,
-    branchId: null,
-    description: `${row.incomeNumber} — ${row.description} (${row.receivedFrom})`,
-    lines: new Lines()
-      .debit(row.accountId, fils(row.amount))
-      .credit(row.incomeAccountId, fils(row.netAmount))
-      .credit(accounts.VAT_OUTPUT, fils(row.vatAmount))
-      .build(),
-  };
-};
-
 // ─── Owners repaid ──────────────────────────────────────────────────────────
 
 const postOwnerReimbursement: Poster = async (tx, organizationId, id, accounts) => {
@@ -1685,7 +1649,7 @@ const postAssetDisposal: Poster = async (tx, organizationId, assetId, accounts) 
 
 /** The posting rule for each kind of record. MANUAL entries are made by hand. */
 export const POSTING_RULES: Record<
-  Exclude<JournalSource, 'MANUAL' | 'OPENING_BALANCE' | 'YEAR_END_CLOSE'>,
+  Exclude<JournalSource, 'MANUAL' | 'OPENING_BALANCE' | 'YEAR_END_CLOSE' | 'OTHER_INCOME'>,
   Poster
 > = {
   INVOICE: postInvoice,
@@ -1710,7 +1674,6 @@ export const POSTING_RULES: Record<
   INVOICE_DISCOUNT: postInvoiceDiscount,
   PURCHASE_ROUNDING: postPurchaseRounding,
   OWNER_MONEY: postOwnerMoney,
-  OTHER_INCOME: postOtherIncome,
   PURCHASE_BILL: postPurchaseBill,
   CARD_COLLECTION: postCardCollection,
   PAYMENT_VOUCHER: postPaymentVoucher,

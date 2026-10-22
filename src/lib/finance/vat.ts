@@ -105,7 +105,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
     awaiting,
     bankFees,
     feesRecovered,
-    otherIncome,
   ] = await Promise.all([
       getVatSettings(organizationId),
       prisma.organization.findUniqueOrThrow({
@@ -293,21 +292,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
           feeVatAmount: true,
         },
       }),
-      // Rent & other income: on the day received.
-      prisma.otherIncome.findMany({
-        where: { organizationId, status: 'POSTED', receivedOn: dates },
-        orderBy: [{ receivedOn: 'asc' }, { incomeNumber: 'asc' }],
-        select: {
-          id: true,
-          incomeNumber: true,
-          receivedOn: true,
-          receivedFrom: true,
-          description: true,
-          vatTreatment: true,
-          netAmount: true,
-          vatAmount: true,
-        },
-      }),
     ]);
 
   const registered = settings.isVatRegistered;
@@ -373,23 +357,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
   supplies.STANDARD += advances.netFils;
   outputFils += advances.vatFils;
 
-  // ── Rent & other income: in the box of its VAT treatment ─────────────────
-  const otherIncomeRows = otherIncome.map((row) => {
-    const net = fils(row.netAmount);
-    const vat = fils(row.vatAmount);
-    supplies[row.vatTreatment] += net;
-    outputFils += vat;
-    return {
-      id: row.id,
-      number: row.incomeNumber,
-      date: row.receivedOn,
-      party: row.receivedFrom,
-      description: row.description,
-      treatment: row.vatTreatment,
-      net: filsToString(net),
-      vat: filsToString(vat),
-    };
-  });
 
   const standardFils = supplies.STANDARD;
   const zeroFils = supplies.ZERO_RATED;
@@ -595,8 +562,6 @@ export async function getVatReturn(user: AuthenticatedUser, input: VatReturnInpu
       net: filsToString(row.net),
       vat: filsToString(row.vat),
     })),
-    /** Rent & other income received in the period: in its box, with its output VAT. */
-    otherIncome: otherIncomeRows,
     expenses: expenseRows,
     purchases: purchaseRows,
     bankCharges: bankChargeRows,

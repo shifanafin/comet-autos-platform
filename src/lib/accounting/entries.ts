@@ -593,7 +593,6 @@ const LATER_SOURCES = [
   'PRIOR_PERIOD',
   'FINAL_SETTLEMENT',
   'FINAL_SETTLEMENT_PAYMENT',
-  'OTHER_INCOME',
 ] as const;
 
 /** What is waiting to be booked, oldest first, by kind of record. */
@@ -625,7 +624,6 @@ async function unbooked(organizationId: string) {
     cardCollections,
     priorPeriods,
     settlements,
-    otherIncome,
   ] = await Promise.all([
     prisma.invoice.findMany({
       where: {
@@ -793,11 +791,6 @@ async function unbooked(organizationId: string) {
       orderBy: [{ terminationDate: 'asc' }],
       select: { id: true, status: true },
     }),
-    prisma.otherIncome.findMany({
-      where: { organizationId, status: 'POSTED' },
-      orderBy: [{ receivedOn: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true },
-    }),
   ]);
   const booked = new Set(bookedMovements.map((entry) => entry.sourceId));
   const paidBooked = new Set(bookedPayrollPayments.map((entry) => entry.sourceId));
@@ -856,7 +849,6 @@ async function unbooked(organizationId: string) {
       settlements.filter((row) => row.status === 'PAID'),
       'FINAL_SETTLEMENT_PAYMENT',
     ),
-    OTHER_INCOME: notBooked(otherIncome, 'OTHER_INCOME'),
   } satisfies Record<PostedSource, string[]>;
 }
 
@@ -922,7 +914,6 @@ export async function bookExistingRecords(user: AuthenticatedUser) {
     'PRIOR_PERIOD',
     'FINAL_SETTLEMENT',
     'FINAL_SETTLEMENT_PAYMENT',
-    'OTHER_INCOME',
   ];
   let booked = 0;
   const failed: string[] = [];

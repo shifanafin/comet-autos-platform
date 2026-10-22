@@ -162,18 +162,6 @@ const RECORDS: Partial<Record<PostedSource, Redatable>> = {
       await tx.ownerMoney.update({ where: { id }, data: { movedOn: date } });
     },
   },
-  OTHER_INCOME: {
-    load: async (tx, organizationId, id) => {
-      const row = await tx.otherIncome.findFirst({
-        where: { id, organizationId },
-        select: { incomeNumber: true, receivedOn: true },
-      });
-      return row ? { what: `income receipt ${row.incomeNumber}`, date: row.receivedOn } : null;
-    },
-    write: async (tx, _organizationId, id, _day, date) => {
-      await tx.otherIncome.update({ where: { id }, data: { receivedOn: date } });
-    },
-  },
   CUSTOMER_ADVANCE: {
     load: async (tx, organizationId, id) => {
       const row = await tx.customerAdvance.findFirst({
