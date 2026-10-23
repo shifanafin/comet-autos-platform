@@ -53,7 +53,9 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
       }
       const { fixed, failed } = response.data;
       if (failed.length) {
-        toast.warning(`${fixed} brought into step; ${failed.length} could not be: ${failed[0].why}`);
+        toast.warning(
+          `${fixed} brought into step; ${failed.length} could not be: ${failed[0].why}`,
+        );
       } else {
         toast.success(`${fixed} brought into step`);
       }
@@ -78,20 +80,22 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
   }
 
   const busy = running || fixing;
+  // Out of step, or booked twice: everything Bring into step puts right.
+  const issues = result.problems.length + result.bookedTwice.length;
   return (
     <div className="flex flex-col gap-6">
       <Panel className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-start gap-3">
-          {result.problems.length === 0 ? (
+          {issues === 0 ? (
             <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" />
           ) : (
             <Wrench className="mt-0.5 size-5 shrink-0 text-warning" />
           )}
           <div>
             <p className="font-semibold">
-              {result.problems.length === 0
+              {issues === 0
                 ? `All ${result.checked} records are in the books, as their records say.`
-                : `${result.problems.length} of ${result.checked} records are out of step.`}
+                : `${issues} of ${result.checked} records are out of step.`}
             </p>
             <p className="text-xs text-muted-foreground">
               Checked {formatDateTime(result.checkedAt)}
@@ -103,7 +107,7 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
             {running ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             Check again
           </Button>
-          {canFix && result.problems.length > 0 ? (
+          {canFix && issues > 0 ? (
             <Button onClick={() => fix()} disabled={busy}>
               {fixing && fixingId === 'all' ? <Loader2 className="animate-spin" /> : <Wrench />}
               Bring all into step
@@ -147,7 +151,9 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
                         </span>
                       </td>
                       <td className="px-2 py-3">
-                        <StatusPill tone={STATE[row.state].tone}>{STATE[row.state].label}</StatusPill>
+                        <StatusPill tone={STATE[row.state].tone}>
+                          {STATE[row.state].label}
+                        </StatusPill>
                       </td>
                       <td className="px-4 py-3 pr-6 text-right">
                         {canFix ? (
@@ -157,7 +163,9 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
                             disabled={busy}
                             onClick={() => fix({ source: row.source, sourceId: row.sourceId })}
                           >
-                            {fixing && fixingId === key ? <Loader2 className="animate-spin" /> : null}
+                            {fixing && fixingId === key ? (
+                              <Loader2 className="animate-spin" />
+                            ) : null}
                             Bring into step
                           </Button>
                         ) : null}
@@ -176,18 +184,48 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
         </Panel>
       ) : null}
 
+      {result.bookedTwice.length > 0 ? (
+        <Panel className="flex flex-col gap-3 border-warning/40 bg-warning/5">
+          <p className="text-sm">
+            <span className="font-semibold">Booked twice.</span> These records each have more than
+            one entry standing, so their money counts twice. Bringing into step keeps the latest
+            entry and reverses the others — nothing is deleted.
+          </p>
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {result.bookedTwice.map((row) => (
+              <li
+                key={`${row.source}:${row.sourceId}`}
+                className="flex flex-wrap items-baseline gap-x-2"
+              >
+                {row.href ? (
+                  <Link href={row.href} className="font-medium text-primary hover:underline">
+                    {row.kind}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{row.kind}</span>
+                )}
+                <span className="text-muted-foreground">{row.entries.join(', ')}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
+
       {result.belowZero.length > 0 ? (
         <Panel className="flex flex-col gap-3 border-warning/40 bg-warning/5">
           <p className="text-sm">
             <span className="font-semibold">Money below zero.</span> A drawer or account can&apos;t
-            hold less than nothing, so a payment was booked before the money it came from. Find
-            what is missing — paid by an owner personally, money put in from outside the books, or a
+            hold less than nothing, so a payment was booked before the money it came from. Find what
+            is missing — paid by an owner personally, money put in from outside the books, or a
             wrong date — and record it.
           </p>
           <ul className="flex flex-col gap-1.5 text-sm">
             {result.belowZero.map((row) => (
               <li key={row.accountId} className="flex flex-wrap items-baseline gap-x-2">
-                <Link href={`/finance/money/${row.accountId}`} className="font-medium text-primary hover:underline">
+                <Link
+                  href={`/finance/money/${row.accountId}`}
+                  className="font-medium text-primary hover:underline"
+                >
                   {`${row.code} ${row.name}`}
                 </Link>
                 <span className="text-muted-foreground">
@@ -209,7 +247,11 @@ export function BooksCheck({ canFix }: { canFix: boolean }) {
               <li key={`${row.source}:${row.sourceId}`} className="px-4 py-2.5 sm:px-6">
                 <span className="block">{row.description}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {[row.entryNumber, row.entryDate ? formatCalendarDate(row.entryDate) : null, row.why]
+                  {[
+                    row.entryNumber,
+                    row.entryDate ? formatCalendarDate(row.entryDate) : null,
+                    row.why,
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </span>

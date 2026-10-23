@@ -12,7 +12,7 @@ import { allocateDocumentNumber } from '@/lib/numbering';
 import { syncPosting } from '@/lib/accounting/journal';
 import { checkMoneyAccount } from '@/lib/accounting/chart';
 import { getTransferAccounts } from '@/lib/finance/money';
-import { OWNER_MONEY_LABEL } from '@/lib/finance/owner-money-labels';
+import { OWNER_MONEY_LABEL, type OwnerMoneyKindKey } from '@/lib/finance/owner-money-labels';
 
 /*
  * Owner's money (OWN-) — an owner putting money into the business, or taking
@@ -23,12 +23,81 @@ import { OWNER_MONEY_LABEL } from '@/lib/finance/owner-money-labels';
  *                 (repaid through "Reimburse owner", as anything owed to an owner)
  *   drawings      money the owner takes for themself  Dr Owner's drawings / Cr the account
  *
- * None of it is income or an expense, so profit never moves. Never edited: a
- * mistake is voided, which reverses its entry.
+ * Capital can also come in without passing through cash or bank:
+ *
+ *   a cost paid   the partner paid a business cost from their own pocket
+ *                 (Tasheel fees, a typing centre)   Dr the expense / Cr Owner's capital
+ *   left in       what the business owed the partner — a salary not taken,
+ *                 a bill they paid — left in        Dr what was owed / Cr Owner's capital
+ *
+ * Either way the partner is named, so it counts in their contribution.
+ * The money put in is never income; a cost paid is the expense it always
+ * was, only funded by the partner. Never edited: a mistake is voided, which
+ * reverses its entry.
  */
 
 /** Only the workshop's own cash, petty cash and bank — never card settlements or a card's debt. */
 const OWN_MONEY = new Set(['cash', 'petty', 'bank', 'other']);
+
+/** How money put in arrived: into cash or bank, as a cost the partner paid, or as something owed left in. */
+export type OwnerMoneyHow = 'money' | 'cost' | 'owed';
+
+/** Expense accounts the automatic postings keep — never chosen by hand. */
+const SYSTEM_EXPENSES = [
+  'COST_OF_PARTS',
+  'STOCK_ADJUSTMENTS',
+  'GRATUITY_EXPENSE',
+  'LEAVE_EXPENSE',
+] as const;
+
+/** What the business can owe a partner that they may leave in as capital. */
+const OWED_ROLES = ['SALARIES_PAYABLE', 'OWNER_ADVANCES'] as const;
+
+/** The accounts capital can come in through other than cash or bank: costs paid, and amounts owed. */
+async function directAccounts(organizationId: string) {
+  const rows = await prisma.chartOfAccount.findMany({
+    where: {
+      organizationId,
+      isActive: true,
+      OR: [
+        {
+          accountType: 'EXPENSE',
+          OR: [{ role: null }, { role: { notIn: [...SYSTEM_EXPENSES] } }],
+        },
+        { role: { in: [...OWED_ROLES] } },
+      ],
+    },
+    orderBy: { accountCode: 'asc' },
+    select: { id: true, accountCode: true, accountName: true, accountType: true },
+  });
+  const option = (row: (typeof rows)[number]) => ({
+    id: row.id,
+    code: row.accountCode,
+    label: row.accountName,
+  });
+  return {
+    cost: rows.filter((row) => row.accountType === 'EXPENSE').map(option),
+    owed: rows.filter((row) => row.accountType !== 'EXPENSE').map(option),
+  };
+}
+
+/** How a recorded entry's money arrived, read from the account it books to. */
+export function ownerMoneyHow(account: { isPaymentAccount: boolean; accountType: string }) {
+  if (account.isPaymentAccount) return 'money';
+  return account.accountType === 'EXPENSE' ? 'cost' : 'owed';
+}
+
+/** Where an entry's money went, in words: "into Cash on hand", "paid for Bank charges"… */
+export function ownerMoneyWhere(
+  kind: OwnerMoneyKindKey,
+  account: { accountName: string; isPaymentAccount: boolean; accountType: string },
+) {
+  if (kind === 'DRAWINGS') return `from ${account.accountName}`;
+  const how = ownerMoneyHow(account);
+  if (how === 'cost') return `paid for ${account.accountName}`;
+  if (how === 'owed') return `left in from ${account.accountName}`;
+  return `into ${account.accountName}`;
+}
 
 /** The accounts the entry books to besides the money account, by kind — for the form's preview. */
 async function ownerAccounts(organizationId: string) {
@@ -57,7 +126,7 @@ async function ownerAccounts(organizationId: string) {
 /** What the form needs: the money accounts, the partners and the other side of each entry. */
 export async function getOwnerMoneyForm(user: AuthenticatedUser) {
   requirePermission(user, 'money.view');
-  const [accounts, partners, other] = await Promise.all([
+  const [accounts, partners, other, direct] = await Promise.all([
     getTransferAccounts(user),
     prisma.partner.findMany({
       where: { organizationId: user.organizationId, isActive: true },
@@ -65,11 +134,14 @@ export async function getOwnerMoneyForm(user: AuthenticatedUser) {
       select: { id: true, name: true },
     }),
     ownerAccounts(user.organizationId),
+    directAccounts(user.organizationId),
   ]);
   return {
     accounts: accounts.filter((account) => OWN_MONEY.has(account.kind)),
     partners,
     other,
+    /** Capital put in other than through cash or bank: the cost paid, or what was owed. */
+    direct,
     today: localDateString(),
   };
 }
@@ -80,7 +152,8 @@ const recordSchema = z.object({
   kind: z.enum(['CAPITAL_IN', 'LOAN_IN', 'DRAWINGS'], {
     error: 'Choose whether money went in or came out.',
   }),
-  accountId: z.uuid({ error: 'Choose the cash, petty cash or bank account.' }),
+  how: z.enum(['money', 'cost', 'owed']).optional(),
+  accountId: z.uuid({ error: 'Choose the account.' }),
   partnerId: z.union([z.literal(''), z.uuid()]).optional(),
   amount: z
     .string({ error: 'Enter the amount.' })
@@ -105,14 +178,32 @@ export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknow
   if (!movedOn || input.movedOn > localDateString()) {
     throw new DomainError('Enter the date — not a future one.', 'movedOn');
   }
-  const account = (await getTransferAccounts(user)).find((a) => a.id === input.accountId);
-  if (!account || !OWN_MONEY.has(account.kind)) {
-    throw new DomainError('Choose a cash, petty cash or bank account.', 'accountId');
+  const how: OwnerMoneyHow = input.how ?? 'money';
+  if (how === 'money') {
+    const account = (await getTransferAccounts(user)).find((a) => a.id === input.accountId);
+    if (!account || !OWN_MONEY.has(account.kind)) {
+      throw new DomainError('Choose a cash, petty cash or bank account.', 'accountId');
+    }
+  } else {
+    if (input.kind !== 'CAPITAL_IN') {
+      throw new DomainError('Only money put in can be a cost paid or an amount left in.', 'how');
+    }
+    const direct = await directAccounts(user.organizationId);
+    if (!direct[how].some((a) => a.id === input.accountId)) {
+      throw new DomainError(
+        how === 'cost'
+          ? 'Choose the expense the partner paid for.'
+          : 'Choose what the business owed.',
+        'accountId',
+      );
+    }
+    // A cost paid or an amount left in is always someone's: it counts in their contribution.
+    if (!input.partnerId) throw new DomainError('Choose the partner.', 'partnerId');
   }
 
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'owner_money.record');
-    await checkMoneyAccount(tx, user.organizationId, input.accountId);
+    if (how === 'money') await checkMoneyAccount(tx, user.organizationId, input.accountId);
     const partner = input.partnerId
       ? await tx.partner.findFirst({
           where: { id: input.partnerId, organizationId: user.organizationId, isActive: true },
@@ -149,6 +240,7 @@ export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknow
         entryNumber,
         kind: input.kind,
         what: OWNER_MONEY_LABEL[input.kind],
+        how,
         accountId: input.accountId,
         partner: partner?.name ?? null,
         amount: filsToString(amountFils),
@@ -220,7 +312,9 @@ export async function listOwnerMoney(user: AuthenticatedUser) {
       notes: true,
       status: true,
       voidReason: true,
-      account: { select: { accountCode: true, accountName: true } },
+      account: {
+        select: { accountCode: true, accountName: true, isPaymentAccount: true, accountType: true },
+      },
       owner: { select: { fullName: true } },
       partner: { select: { id: true, name: true } },
       createdBy: { select: { fullName: true } },
@@ -262,6 +356,7 @@ export async function listOwnerMoney(user: AuthenticatedUser) {
     rows: rows.map((row) => ({
       ...row,
       label: OWNER_MONEY_LABEL[row.kind],
+      where: ownerMoneyWhere(row.kind, row.account),
       journalEntry: booked.get(row.id)?.entry ?? null,
       reversedBy: booked.get(row.id)?.reversal ?? null,
     })),

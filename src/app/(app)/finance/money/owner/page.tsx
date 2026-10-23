@@ -83,7 +83,7 @@ export default async function OwnerMoneyPage({
 
       <Section
         title="Partners"
-        description="The business's owners. Each one's money put in, lent and taken out is kept against their name — and what they paid to buy the business, which is outside the company's books."
+        description="The business's owners. Each one's money put in, lent and taken out is kept against their name — and what they paid to buy the business, which is outside the company's books. Click a name to see everything that partner has put in."
       >
         <Panel padding="none" className="overflow-hidden">
           {list.partners.length ? (
@@ -103,7 +103,14 @@ export default async function OwnerMoneyPage({
                 <tbody className="divide-y divide-border">
                   {list.partners.map((partner) => (
                     <tr key={partner.id}>
-                      <td className="px-4 py-3 pl-6 font-medium">{partner.name}</td>
+                      <td className="px-4 py-3 pl-6 font-medium">
+                        <Link
+                          href={`/finance/money/owner/partners/${partner.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {partner.name}
+                        </Link>
+                      </td>
                       <td className="px-2 py-3 text-right tabular-nums">
                         {formatMoney(partner.capitalIn)}
                       </td>
@@ -263,7 +270,7 @@ export default async function OwnerMoneyPage({
                           <span className="font-medium">{row.label}</span>{' '}
                           {isVoid ? <StatusPill tone="neutral">Void</StatusPill> : null}
                           <span className="block text-xs text-muted-foreground">
-                            {`${row.entryNumber} · ${row.kind === 'DRAWINGS' ? 'from' : 'into'} ${row.account.accountName}${row.partner ? ` · ${row.partner.name}` : row.owner ? ` · ${row.owner.fullName}` : ''}${row.reference ? ` · ref ${row.reference}` : ''}`}
+                            {`${row.entryNumber} · ${row.where}${row.partner ? ` · ${row.partner.name}` : row.owner ? ` · ${row.owner.fullName}` : ''}${row.reference ? ` · ref ${row.reference}` : ''}`}
                           </span>
                           {row.notes ? (
                             <span className="block text-xs text-muted-foreground">{row.notes}</span>

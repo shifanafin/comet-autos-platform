@@ -61,6 +61,7 @@ const NOTE_COLUMNS = [
   ['payment_vouchers', 'notes'],
   ['money_transfers', 'notes'],
   ['owner_money', 'notes'],
+  ['purchases', 'notes'],
 ] as const;
 
 interface Found {
@@ -171,32 +172,116 @@ export async function removeVoidedInternalRecords(user: AuthenticatedUser, reaso
         }
       }
 
-      // Close each series' gaps; notes follow the new numbers, lowest first.
       const renumbered: { old: string; new: string }[] = [];
       for (const type of [...new Set(found.map((record) => record.kind.type))]) {
-        const [{ changes }] = await tx.$queryRaw<{ changes: { old: string; new: string }[] }[]>`
-          SELECT close_document_number_gaps(${user.organizationId}::uuid, ${type}::"DocumentType") AS changes`;
-        for (const change of changes) {
-          for (const [table, column] of NOTE_COLUMNS) {
-            await tx.$executeRaw`
-              UPDATE ${Prisma.raw(table)}
-              SET ${Prisma.raw(column)} = replace(${Prisma.raw(column)}, ${change.old}, ${change.new})
-              WHERE organization_id = ${user.organizationId}::uuid AND ${Prisma.raw(column)} LIKE ${`%${change.old}%`}`;
-          }
-        }
-        renumbered.push(...changes);
-        if (changes.length) {
-          await writeAuditLog(tx, {
-            organizationId: user.organizationId,
-            actorUserId: user.id,
-            action: 'document.numbers_closed',
-            entityType: 'DocumentNumberSequence',
-            entityId: user.organizationId,
-            metadata: { series: type, changes, reason },
-          });
-        }
+        renumbered.push(...(await closeSeries(tx, user, type, reason)));
       }
       return { removed: found.map((record) => record.number), renumbered };
+    },
+    { timeout: 120_000 },
+  );
+}
+
+/** Renumbered 1, 2, 3… in their order: the workshop's own paperwork. */
+const INTERNAL_SERIES = [
+  'EXPENSE_VOUCHER',
+  'PAYMENT_VOUCHER',
+  'MONEY_TRANSFER',
+  'OWNER_MONEY',
+  'PURCHASE_ORDER',
+  'SUPPLIER_PAYMENT',
+] as const;
+
+/** Never renumbered — customers hold them — only the next number kept right after the last. */
+const CUSTOMER_SERIES = [
+  'TAX_INVOICE',
+  'PAYMENT_RECEIPT',
+  'CREDIT_NOTE',
+  'CUSTOMER_ADVANCE',
+  'ESTIMATE',
+  'JOB_CARD',
+] as const;
+
+/**
+ * Closes one series (close_document_number_gaps): an internal one renumbered
+ * in its order, a customer one only its counter set. Notes quoting an old
+ * number follow it, lowest first, as the journal's narrations do.
+ */
+async function closeSeries(tx: Tx, user: AuthenticatedUser, type: string, reason: string) {
+  const [{ changes }] = await tx.$queryRaw<{ changes: { old: string; new: string }[] }[]>`
+    SELECT close_document_number_gaps(${user.organizationId}::uuid, ${type}::"DocumentType") AS changes`;
+  for (const change of changes) {
+    for (const [table, column] of NOTE_COLUMNS) {
+      await tx.$executeRaw`
+        UPDATE ${Prisma.raw(table)}
+        SET ${Prisma.raw(column)} = replace(${Prisma.raw(column)}, ${change.old}, ${change.new})
+        WHERE organization_id = ${user.organizationId}::uuid AND ${Prisma.raw(column)} LIKE ${`%${change.old}%`}`;
+    }
+  }
+  if (changes.length) {
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'document.numbers_closed',
+      entityType: 'DocumentNumberSequence',
+      entityId: user.organizationId,
+      metadata: { series: type, changes, reason },
+    });
+  }
+  return changes;
+}
+
+/** The numbers missing from each series, and whether its next number is right — reads only. */
+export async function numberGaps(user: AuthenticatedUser) {
+  requirePermission(user, 'accounting.approve');
+  return prisma.$queryRaw<
+    {
+      series: string;
+      prefix: string;
+      next_number: number;
+      records: number;
+      highest: number | null;
+    }[]
+  >`
+    SELECT s.document_type::text AS series, s.prefix, s.next_number,
+           COUNT(DISTINCT n.num)::int AS records, MAX(n.num)::int AS highest
+    FROM document_number_sequences s
+    LEFT JOIN LATERAL (
+      SELECT substring(x.number FROM '^[^0-9]*([0-9]+)')::int AS num FROM (
+        SELECT expense_number AS number FROM expenses WHERE organization_id = s.organization_id AND s.document_type = 'EXPENSE_VOUCHER'
+        UNION ALL SELECT voucher_number FROM payment_vouchers WHERE organization_id = s.organization_id AND s.document_type = 'PAYMENT_VOUCHER'
+        UNION ALL SELECT transfer_number FROM money_transfers WHERE organization_id = s.organization_id AND s.document_type = 'MONEY_TRANSFER'
+        UNION ALL SELECT entry_number FROM owner_money WHERE organization_id = s.organization_id AND s.document_type = 'OWNER_MONEY'
+        UNION ALL SELECT purchase_number FROM purchases WHERE organization_id = s.organization_id AND s.document_type = 'PURCHASE_ORDER'
+        UNION ALL SELECT supplier_payment_number FROM supplier_payments WHERE organization_id = s.organization_id AND s.document_type = 'SUPPLIER_PAYMENT'
+        UNION ALL SELECT invoice_number FROM invoices WHERE organization_id = s.organization_id AND s.document_type = 'TAX_INVOICE'
+        UNION ALL SELECT payment_number FROM payments WHERE organization_id = s.organization_id AND s.document_type = 'PAYMENT_RECEIPT'
+        UNION ALL SELECT credit_note_number FROM credit_notes WHERE organization_id = s.organization_id AND s.document_type = 'CREDIT_NOTE'
+        UNION ALL SELECT advance_number FROM customer_advances WHERE organization_id = s.organization_id AND s.document_type = 'CUSTOMER_ADVANCE'
+        UNION ALL SELECT job_number FROM job_cards WHERE organization_id = s.organization_id AND s.document_type = 'JOB_CARD'
+        UNION ALL SELECT estimate_number FROM estimates WHERE organization_id = s.organization_id AND s.document_type = 'ESTIMATE'
+      ) x WHERE x.number IS NOT NULL
+    ) n ON true
+    WHERE s.organization_id = ${user.organizationId}::uuid
+      AND s.document_type::text IN (${Prisma.join([...INTERNAL_SERIES, ...CUSTOMER_SERIES])})
+    GROUP BY s.document_type, s.prefix, s.next_number
+    ORDER BY 1`;
+}
+
+/**
+ * Closes every gap: the internal series renumbered 1, 2, 3…, every series'
+ * next number set right after its last. One transaction: all of it, or none.
+ */
+export async function closeNumberGaps(user: AuthenticatedUser, reason: string) {
+  requirePermission(user, 'accounting.approve');
+  if (reason.trim().length < 3) throw new Error('Say why, in a few words.');
+  return prisma.$transaction(
+    async (tx) => {
+      const renumbered: { old: string; new: string }[] = [];
+      for (const type of [...INTERNAL_SERIES, ...CUSTOMER_SERIES]) {
+        renumbered.push(...(await closeSeries(tx, user, type, reason)));
+      }
+      return { renumbered };
     },
     { timeout: 120_000 },
   );

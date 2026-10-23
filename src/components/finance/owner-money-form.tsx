@@ -13,7 +13,7 @@ import type { ActionResult } from '@/lib/errors';
 import { formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { OWNER_MONEY_LABEL, type OwnerMoneyKindKey } from '@/lib/finance/owner-money-labels';
-import type { OwnerMoneyForm as FormOptions } from '@/lib/finance/owner-money';
+import type { OwnerMoneyForm as FormOptions, OwnerMoneyHow } from '@/lib/finance/owner-money';
 import {
   addPartnerAction,
   recordOwnerMoneyAction,
@@ -38,6 +38,25 @@ const KINDS: { kind: OwnerMoneyKindKey; title: string; hint: string }[] = [
   },
 ];
 
+/** How money put in arrived: through cash or bank, or straight into a cost or a debt. */
+const HOWS: { how: OwnerMoneyHow; title: string; hint: string }[] = [
+  {
+    how: 'money',
+    title: 'Money into cash or bank',
+    hint: 'Cash handed over, or a transfer into the bank.',
+  },
+  {
+    how: 'cost',
+    title: 'Paid a business cost from own pocket',
+    hint: 'e.g. Tasheel or MOHRE fees the partner paid personally. A supplier bill with VAT goes in Expenses instead, so its VAT is claimed.',
+  },
+  {
+    how: 'owed',
+    title: 'Left in what the business owed them',
+    hint: 'e.g. a salary the partner did not take: the business no longer owes it, it stays as their capital.',
+  },
+];
+
 /** An amount as typed, in fils — 0 while it isn't a figure yet. */
 function typedFils(value: string) {
   const text = value.trim();
@@ -55,10 +74,10 @@ const aed = (fils: number) => formatMoney((fils / 100).toFixed(2));
 export function OwnerMoneyForm({ options }: { options: FormOptions }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const cashId = options.accounts.find((account) => account.kind === 'cash')?.id ?? '';
   const [kind, setKind] = useState<OwnerMoneyKindKey>('CAPITAL_IN');
-  const [accountId, setAccountId] = useState(
-    options.accounts.find((account) => account.kind === 'cash')?.id ?? '',
-  );
+  const [how, setHow] = useState<OwnerMoneyHow>('money');
+  const [accountId, setAccountId] = useState(cashId);
   const [amount, setAmount] = useState('');
   const [state, onSubmit, isPending] = useFormAction<ActionResult>(
     async (prev, formData) => {
@@ -74,15 +93,26 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
     { ok: false },
   );
   const errors = state.fieldErrors ?? {};
+  const choices = how === 'money' ? options.accounts : options.direct[how];
   const account = options.accounts.find((a) => a.id === accountId);
+  const chosen = choices.find((a) => a.id === accountId);
   const other = options.other[kind];
   const fils = typedFils(amount);
   const out = kind === 'DRAWINGS';
+  const chooseHow = (next: OwnerMoneyHow) => {
+    setHow(next);
+    setAccountId(next === 'money' ? cashId : '');
+  };
+  const chooseKind = (next: OwnerMoneyKindKey) => {
+    setKind(next);
+    // Only money put in can be a cost paid or something owed left in.
+    if (next !== 'CAPITAL_IN' && how !== 'money') chooseHow('money');
+  };
 
   // The entry, as the books will record it.
   const moneyLine = {
-    code: account?.code ?? '—',
-    name: account?.label ?? 'Choose the account',
+    code: chosen?.code ?? '—',
+    name: chosen?.label ?? 'Choose the account',
   };
   const lines = out
     ? [
@@ -97,6 +127,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
   return (
     <form ref={formRef} onSubmit={onSubmit} className="@container flex flex-col gap-6">
       <input type="hidden" name="kind" value={kind} />
+      <input type="hidden" name="how" value={how} />
 
       <div role="radiogroup" aria-label="What happened" className="grid gap-3 @2xl:grid-cols-3">
         {KINDS.map((option) => (
@@ -105,7 +136,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
             type="button"
             role="radio"
             aria-checked={kind === option.kind}
-            onClick={() => setKind(option.kind)}
+            onClick={() => chooseKind(option.kind)}
             className={cn(
               'flex flex-col gap-1 rounded-lg border p-4 text-left transition-colors',
               kind === option.kind
@@ -121,17 +152,51 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
       {errors.kind ? <p className="text-sm text-destructive">{errors.kind}</p> : null}
 
       <div className="grid gap-6 @xl:grid-cols-2">
+        {kind === 'CAPITAL_IN' ? (
+          <Field
+            label="How it came in"
+            htmlFor="owner-money-how"
+            error={errors.how}
+            className="@xl:col-span-2"
+            hint={HOWS.find((option) => option.how === how)?.hint}
+          >
+            <NativeSelect
+              id="owner-money-how"
+              value={how}
+              onChange={(event) => chooseHow(event.target.value as OwnerMoneyHow)}
+              className="h-11 @xl:max-w-md"
+            >
+              {HOWS.map((option) => (
+                <option key={option.how} value={option.how}>
+                  {option.title}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        ) : null}
         <Field
-          label={out ? 'Taken from' : 'Put into'}
+          label={
+            out
+              ? 'Taken from'
+              : how === 'cost'
+                ? 'Cost paid for'
+                : how === 'owed'
+                  ? 'What the business owed'
+                  : 'Put into'
+          }
           htmlFor="owner-money-account"
           required
           error={errors.accountId}
           hint={
-            account
-              ? account.balance.startsWith('-')
-                ? `Shows ${formatMoney(account.balance.slice(1))} below zero now.`
-                : `Holds ${formatMoney(account.balance)} now.`
-              : 'Cash on hand, the petty-cash box or the bank.'
+            how === 'cost'
+              ? 'The expense the partner paid from their own pocket.'
+              : how === 'owed'
+                ? 'A salary not taken, or money the business owes them back.'
+                : account
+                  ? account.balance.startsWith('-')
+                    ? `Shows ${formatMoney(account.balance.slice(1))} below zero now.`
+                    : `Holds ${formatMoney(account.balance)} now.`
+                  : 'Cash on hand, the petty-cash box or the bank.'
           }
         >
           <NativeSelect
@@ -144,7 +209,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
             <option value="" disabled>
               Choose…
             </option>
-            {options.accounts.map((option) => (
+            {choices.map((option) => (
               <option key={option.id} value={option.id}>
                 {`${option.code} ${option.label}`}
               </option>
@@ -155,6 +220,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
           <Field
             label="Partner"
             htmlFor="owner-money-partner"
+            required={how !== 'money'}
             error={errors.partnerId}
             hint="Whose money it is — add partners under Partners below."
           >
@@ -248,15 +314,19 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
           </table>
         </div>
         <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-          {fils > 0
-            ? `${moneyLine.name} goes ${out ? 'down' : 'up'} by ${aed(fils)}. ${
-                kind === 'LOAN_IN'
-                  ? `The business owes you ${aed(fils)} more — repay it with Reimburse owner.`
-                  : kind === 'DRAWINGS'
-                    ? 'It is not an expense: profit does not change.'
-                    : 'It is not income: profit does not change.'
-              }`
-            : 'Enter the amount to see the entry.'}
+          {fils <= 0
+            ? 'Enter the amount to see the entry.'
+            : how === 'cost'
+              ? `${moneyLine.name} is the business's cost, as it would be if the business had paid it; the partner paid it, so ${aed(fils)} counts as their capital. No cash or bank moves.`
+              : how === 'owed'
+                ? `The business no longer owes ${aed(fils)} — it stays in as the partner's capital. No cash or bank moves, and profit does not change.`
+                : `${moneyLine.name} goes ${out ? 'down' : 'up'} by ${aed(fils)}. ${
+                    kind === 'LOAN_IN'
+                      ? `The business owes you ${aed(fils)} more — repay it with Reimburse owner.`
+                      : kind === 'DRAWINGS'
+                        ? 'It is not an expense: profit does not change.'
+                        : 'It is not income: profit does not change.'
+                  }`}
         </p>
       </div>
 

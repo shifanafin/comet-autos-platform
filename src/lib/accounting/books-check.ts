@@ -2,7 +2,13 @@ import type { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/authorize';
-import { postingState, syncPosting, type PostedSource, type PostingState } from '@/lib/accounting/journal';
+import {
+  postingState,
+  reverseEntry,
+  syncPosting,
+  type PostedSource,
+  type PostingState,
+} from '@/lib/accounting/journal';
 import { POSTING_RULES } from '@/lib/accounting/postings';
 import { sourceLinks } from '@/lib/accounting/reports';
 
@@ -41,51 +47,86 @@ const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
 
 /** Every record of each kind the books post from (the rule decides whether it counts). */
 const RECORDS: Record<PostedSource, (organizationId: string) => Promise<string[]>> = {
-  INVOICE: (o) => prisma.invoice.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  INVOICE: (o) =>
+    prisma.invoice.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   INVOICE_DISCOUNT: (o) =>
     prisma.invoice.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  PAYMENT: (o) => prisma.payment.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  EXPENSE: (o) => prisma.expense.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  PAYMENT: (o) =>
+    prisma.payment.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  EXPENSE: (o) =>
+    prisma.expense.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   STOCK_MOVEMENT: (o) =>
-    prisma.inventoryTransaction.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.inventoryTransaction
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   SUPPLIER_PAYMENT: (o) =>
-    prisma.supplierPayment.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  PAYROLL: (o) => prisma.payroll.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.supplierPayment
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
+  PAYROLL: (o) =>
+    prisma.payroll.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   PAYROLL_PAYMENT: (o) =>
     prisma.payroll.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  VAT_FILING: (o) => prisma.vatFiling.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  VAT_PAYMENT: (o) => prisma.vatFiling.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  CREDIT_NOTE: (o) => prisma.creditNote.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  VAT_FILING: (o) =>
+    prisma.vatFiling.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  VAT_PAYMENT: (o) =>
+    prisma.vatFiling.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  CREDIT_NOTE: (o) =>
+    prisma.creditNote.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   CREDIT_NOTE_REFUND: (o) =>
     prisma.creditNote.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  FIXED_ASSET: (o) => prisma.fixedAsset.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  FIXED_ASSET: (o) =>
+    prisma.fixedAsset.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   ASSET_DISPOSAL: (o) =>
     prisma.fixedAsset.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   DEPRECIATION: (o) =>
-    prisma.assetDepreciation.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.assetDepreciation
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   OWNER_REIMBURSEMENT: (o) =>
-    prisma.ownerReimbursement.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.ownerReimbursement
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   MONEY_TRANSFER: (o) =>
     prisma.moneyTransfer.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   CUSTOMER_ADVANCE: (o) =>
-    prisma.customerAdvance.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.customerAdvance
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   CUSTOMER_ADVANCE_ALLOCATION: (o) =>
-    prisma.customerAdvanceAllocation.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.customerAdvanceAllocation
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   CUSTOMER_ADVANCE_REFUND: (o) =>
-    prisma.customerAdvanceRefund.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  PURCHASE_ROUNDING: (o) => prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  PURCHASE_BILL: (o) => prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
-  OWNER_MONEY: (o) => prisma.ownerMoney.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.customerAdvanceRefund
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
+  PURCHASE_ROUNDING: (o) =>
+    prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  PURCHASE_BILL: (o) =>
+    prisma.purchase.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+  OWNER_MONEY: (o) =>
+    prisma.ownerMoney.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
   CARD_COLLECTION: (o) =>
-    prisma.paymentVoucher.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.paymentVoucher
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   PAYMENT_VOUCHER: (o) =>
-    prisma.paymentVoucher.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.paymentVoucher
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   PRIOR_PERIOD: (o) =>
-    prisma.priorPeriodSummary.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.priorPeriodSummary
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   FINAL_SETTLEMENT: (o) =>
-    prisma.finalSettlement.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.finalSettlement
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
   FINAL_SETTLEMENT_PAYMENT: (o) =>
-    prisma.finalSettlement.findMany({ where: { organizationId: o }, select: { id: true } }).then(ids),
+    prisma.finalSettlement
+      .findMany({ where: { organizationId: o }, select: { id: true } })
+      .then(ids),
 };
 
 export const SOURCE_LABEL: Record<PostedSource, string> = {
@@ -142,7 +183,9 @@ export interface BooksProblem {
 
 /** Why a stock movement's own entry is kept as booked, or null when it is not one of those. */
 async function keptOnPurpose(organizationId: string, problems: BooksProblem[]) {
-  const movementIds = problems.filter((row) => row.source === 'STOCK_MOVEMENT').map((row) => row.sourceId);
+  const movementIds = problems
+    .filter((row) => row.source === 'STOCK_MOVEMENT')
+    .map((row) => row.sourceId);
   if (!movementIds.length) return new Map<string, string>();
   const movements = await prisma.inventoryTransaction.findMany({
     where: { organizationId, id: { in: movementIds } },
@@ -151,9 +194,18 @@ async function keptOnPurpose(organizationId: string, problems: BooksProblem[]) {
   const kept = new Map<string, string>();
   for (const movement of movements) {
     if (movement.transactionType === 'JOB_CONSUMPTION') {
-      kept.set(movement.id, 'A part fitted on an old job, costed on its own entry; its invoice skips it.');
-    } else if (movement.transactionType === 'ADJUSTMENT' && /^historical (job )?consumption/i.test(movement.note ?? '')) {
-      kept.set(movement.id, 'Old stock used on customers’ cars, written off to cost of sales on its own entry.');
+      kept.set(
+        movement.id,
+        'A part fitted on an old job, costed on its own entry; its invoice skips it.',
+      );
+    } else if (
+      movement.transactionType === 'ADJUSTMENT' &&
+      /^historical (job )?consumption/i.test(movement.note ?? '')
+    ) {
+      kept.set(
+        movement.id,
+        'Old stock used on customers’ cars, written off to cost of sales on its own entry.',
+      );
     }
   }
   return kept;
@@ -168,7 +220,14 @@ async function keptOnPurpose(organizationId: string, problems: BooksProblem[]) {
  */
 async function moneyBelowZero(organizationId: string) {
   const rows = await prisma.$queryRaw<
-    { id: string; code: string; name: string; first_day: string; lowest: string; lowest_day: string }[]
+    {
+      id: string;
+      code: string;
+      name: string;
+      first_day: string;
+      lowest: string;
+      lowest_day: string;
+    }[]
   >`
     WITH daily AS (
       SELECT l.chart_of_account_id AS account_id, e.entry_date AS day,
@@ -235,14 +294,21 @@ export async function checkBooks(user: AuthenticatedUser) {
       (row): row is { sourceId: string; state: Exclude<PostingState, 'ok'> } => row.state !== 'ok',
     );
     problems.push(...found.map((row) => ({ source, ...row })));
-    summary.push({ source, label: SOURCE_LABEL[source], checked: all.length, problems: found.length });
+    summary.push({
+      source,
+      label: SOURCE_LABEL[source],
+      checked: all.length,
+      problems: found.length,
+    });
   }
   // The historical stock entries are kept as booked: not problems.
   const kept = await keptOnPurpose(organizationId, problems);
   const keptRows = problems
     .filter((row) => row.source === 'STOCK_MOVEMENT' && kept.has(row.sourceId))
     .map((row) => ({ ...row, why: kept.get(row.sourceId)! }));
-  const real = problems.filter((row) => !(row.source === 'STOCK_MOVEMENT' && kept.has(row.sourceId)));
+  const real = problems.filter(
+    (row) => !(row.source === 'STOCK_MOVEMENT' && kept.has(row.sourceId)),
+  );
   for (const row of summary) {
     row.problems = real.filter((problem) => problem.source === row.source).length;
   }
@@ -254,7 +320,14 @@ export async function checkBooks(user: AuthenticatedUser) {
       OR: listed.map((row) => ({ sourceType: row.source, sourceId: row.sourceId })),
     },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, entryNumber: true, entryDate: true, description: true, sourceType: true, sourceId: true },
+    select: {
+      id: true,
+      entryNumber: true,
+      entryDate: true,
+      description: true,
+      sourceType: true,
+      sourceId: true,
+    },
   });
   const link = await sourceLinks(
     organizationId,
@@ -280,7 +353,43 @@ export async function checkBooks(user: AuthenticatedUser) {
     kept: keptRows.map(describe),
     /** Money accounts that stood below zero on some day: each needs its missing source found. */
     belowZero: await moneyBelowZero(organizationId),
+    bookedTwice: await describeTwice(organizationId),
   };
+}
+
+/**
+ * Records booked more than once: two entries standing for one record, neither
+ * reversed. Only one can be what the record says; the others double its money.
+ */
+async function bookedTwice(organizationId: string) {
+  return prisma.$queryRaw<
+    { source: PostedSource; source_id: string; entries: { id: string; number: string | null }[] }[]
+  >`
+    SELECT e.source_type::text AS source, e.source_id,
+           json_agg(json_build_object('id', e.id, 'number', e.entry_number) ORDER BY e.created_at) AS entries
+    FROM journal_entries e
+    WHERE e.organization_id = ${organizationId}::uuid
+      AND e.source_id IS NOT NULL
+      AND e.reversal_of_journal_entry_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reversal_of_journal_entry_id = e.id)
+    GROUP BY e.source_type, e.source_id
+    HAVING COUNT(*) > 1`;
+}
+
+async function describeTwice(organizationId: string) {
+  const rows = await bookedTwice(organizationId);
+  if (!rows.length) return [];
+  const link = await sourceLinks(
+    organizationId,
+    rows.map((row) => ({ sourceType: row.source, sourceId: row.source_id })),
+  );
+  return rows.map((row) => ({
+    source: row.source,
+    sourceId: row.source_id,
+    kind: SOURCE_LABEL[row.source] ?? row.source,
+    entries: row.entries.map((entry) => entry.number ?? '—'),
+    href: link(row.source, row.source_id).href,
+  }));
 }
 
 export type BooksCheck = Awaited<ReturnType<typeof checkBooks>>;
@@ -310,6 +419,44 @@ export async function bringBooksIntoStep(
       fixed += 1;
     } catch (error) {
       failed.push({ ...problem, why: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  // Booked twice: the latest entry kept and put right by the record's own
+  // rule; each earlier one reversed on its own date, so nothing is deleted
+  // and the money counts once.
+  const twice = (await bookedTwice(user.organizationId)).filter(
+    (row) => !only || (row.source === only.source && row.source_id === only.sourceId),
+  );
+  for (const row of twice) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const entries = await tx.journalEntry.findMany({
+            where: { id: { in: row.entries.map((entry) => entry.id) } },
+            include: { lines: true },
+            orderBy: { createdAt: 'asc' },
+          });
+          for (const extra of entries.slice(0, -1)) {
+            await reverseEntry(
+              tx,
+              extra,
+              extra.entryDate,
+              user.id,
+              'Booked twice: this entry is the extra one.',
+            );
+          }
+          await syncPosting(tx, user.organizationId, row.source, row.source_id, user.id);
+        },
+        { timeout: 60_000 },
+      );
+      fixed += 1;
+    } catch (error) {
+      failed.push({
+        source: row.source,
+        sourceId: row.source_id,
+        state: 'differs',
+        why: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   return { fixed, failed };
