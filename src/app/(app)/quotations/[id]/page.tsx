@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { getTaxCodeOptions } from '@/lib/accounting/tax-codes';
-import { getPartCatalog } from '@/lib/inventory/part-options';
 import { draftDeleteBlocker } from '@/lib/workshop/estimates';
 import { DeleteDraftQuotationButton } from '@/components/workshop/delete-draft-quotation';
 import { notFound } from 'next/navigation';
@@ -264,7 +263,6 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                 minValidUntil={localDateString()}
                 defaultVatRate={defaultVatRate}
                 taxCodes={await getTaxCodeOptions(user.organizationId, 'sales')}
-                catalog={await getPartCatalog(user)}
                 initialBill={editableBill(quotation)}
                 initialLines={quotation.items
                   .filter((item) => item.itemType !== 'OTHER')
