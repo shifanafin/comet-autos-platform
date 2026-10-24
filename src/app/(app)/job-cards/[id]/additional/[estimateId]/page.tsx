@@ -1,5 +1,4 @@
 import { getTaxCodeOptions } from '@/lib/accounting/tax-codes';
-import { getPartCatalog } from '@/lib/inventory/part-options';
 import { notFound } from 'next/navigation';
 import type { ApprovalMethod } from '@/generated/prisma/enums';
 import { requireUser, hasPermission } from '@/lib/auth/authorize';
@@ -91,7 +90,6 @@ export default async function AdditionalWorkPage({
                 recommendation={null}
                 defaultVatRate={defaultVatRate}
                 taxCodes={await getTaxCodeOptions(user.organizationId, 'sales')}
-                catalog={await getPartCatalog(user)}
                 initialValidUntil={
                   estimate.validUntil
                     ? estimate.validUntil.toISOString().slice(0, 10)
