@@ -1,6 +1,5 @@
 'use client';
 
-import type { PartCatalog } from '@/lib/inventory/part-options';
 import type { TaxCodeOption } from '@/lib/accounting/tax-codes';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -43,8 +42,7 @@ export function QuotationBuilder({
   recommendation,
   customerName,
   defaultVatRate,
-  taxCodes,
-  catalog,
+  taxCodes
 }: {
   estimateId: string;
   initialLines: DraftLine[];
@@ -58,8 +56,6 @@ export function QuotationBuilder({
   defaultVatRate: string;
   /** The sales tax codes a line can be given. */
   taxCodes?: TaxCodeOption[];
-  /** The inventory, for picking a part on a Parts line. */
-  catalog?: PartCatalog;
 }) {
   const router = useRouter();
   // Most lines on a workshop quotation are parts, so a new one starts as a part.
@@ -134,7 +130,6 @@ export function QuotationBuilder({
         onBillChange={setBill}
         defaultVatRate={defaultVatRate}
         taxCodes={taxCodes}
-        catalog={catalog}
       />
 
       <Field
