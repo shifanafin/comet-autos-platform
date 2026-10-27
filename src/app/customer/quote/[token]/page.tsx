@@ -7,6 +7,7 @@ import { formatCalendarDate, formatDateTime, formatKm } from '@/lib/format';
 import { customerLinkMetadata, quotePreview } from '@/lib/customer-access/preview';
 import {
   CUSTOMER_BAR_COLOR,
+  CUSTOMER_TONE,
   CustomerNotice,
   CustomerShell,
 } from '@/components/customer/customer-shell';
@@ -85,6 +86,8 @@ export default async function CustomerQuotePage({
   const replaced = !decision && Boolean(quote.replacedAt);
   const awaiting = !decision && !replaced && quote.status === 'SENT' && !quote.expired;
   const additional = quote.kind === 'ADDITIONAL';
+  const approved = decision?.status === 'APPROVED';
+  const totalTone = CUSTOMER_TONE[approved ? 'done' : awaiting ? 'moving' : 'stopped'];
 
   return (
     <CustomerShell organization={access.organization} label="Quotation">
@@ -144,19 +147,27 @@ export default async function CustomerQuotePage({
           </div>
         ) : null}
 
-        <section className="flex items-center justify-between gap-4 rounded-2xl bg-sidebar px-5 py-5 text-sidebar-foreground">
+        <section
+          className={cn(
+            'flex items-center justify-between gap-4 rounded-2xl px-5 py-5',
+            totalTone.card,
+          )}
+        >
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium tracking-wide text-sidebar-foreground/60 uppercase">
-              Quotation total
+            <span className={cn('text-xs font-medium tracking-wide uppercase', totalTone.accent)}>
+              {approved ? 'Approved total' : 'Quotation total'}
             </span>
             <span className="text-3xl font-semibold tracking-tight tabular-nums">
               {formatAed(quote.totalAmount.toString())}
             </span>
-            <span className="text-xs text-sidebar-foreground/60">
+            <span className="text-xs text-muted-foreground">
               Including VAT
-              {quote.validUntil ? ` · valid until ${formatCalendarDate(quote.validUntil)}` : ''}
+              {quote.validUntil && !decision
+                ? ` · valid until ${formatCalendarDate(quote.validUntil)}`
+                : ''}
             </span>
           </div>
+          {approved ? <CheckCircle2 className={cn('size-7 shrink-0', totalTone.accent)} /> : null}
         </section>
 
         {vehicle ? (

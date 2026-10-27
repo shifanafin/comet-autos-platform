@@ -6,6 +6,47 @@ import type { OrganizationBranding } from '@/lib/customer-access/access';
 /** The shell's graphite bar; customer pages give the phone's browser bar the same colour. */
 export const CUSTOMER_BAR_COLOR = '#111118';
 
+/**
+ * How the headline card on a customer page feels, the same on every link:
+ * done (green), moving along (the brand colour), waiting on the customer
+ * (amber), or stopped (grey). Never a dark slab — that reads as closed.
+ */
+export type CustomerTone = 'done' | 'moving' | 'waiting' | 'stopped';
+
+export const CUSTOMER_TONE: Record<
+  CustomerTone,
+  { card: string; accent: string; solid: string; ring: string; rule: string }
+> = {
+  done: {
+    card: 'bg-success/10',
+    accent: 'text-success',
+    solid: 'bg-success text-success-foreground',
+    ring: 'ring-success',
+    rule: 'border-success/20',
+  },
+  moving: {
+    card: 'bg-primary/10',
+    accent: 'text-primary',
+    solid: 'bg-primary text-primary-foreground',
+    ring: 'ring-primary',
+    rule: 'border-primary/20',
+  },
+  waiting: {
+    card: 'bg-warning/10',
+    accent: 'text-warning',
+    solid: 'bg-warning text-warning-foreground',
+    ring: 'ring-warning',
+    rule: 'border-warning/20',
+  },
+  stopped: {
+    card: 'bg-muted',
+    accent: 'text-muted-foreground',
+    solid: 'bg-muted-foreground text-background',
+    ring: 'ring-muted-foreground',
+    rule: 'border-border',
+  },
+};
+
 /*
  * The frame of every customer page opened from a WhatsApp link: a slim
  * branded bar, a single readable column sized for phones, and the workshop's

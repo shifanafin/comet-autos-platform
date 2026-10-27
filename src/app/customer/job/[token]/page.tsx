@@ -1,17 +1,27 @@
 import type { Metadata, Viewport } from 'next';
-import { Check, Clock, Link2Off } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Check, CircleCheck, CirclePause, Clock, Link2Off, Wrench } from 'lucide-react';
 import { CUSTOMER_STEPS, getJobAccess, loadCustomerJob } from '@/lib/customer-access/job';
 import { formatAed } from '@/lib/documents/model';
 import { formatCalendarDate } from '@/lib/format';
 import {
   CUSTOMER_BAR_COLOR,
+  CUSTOMER_TONE,
   CustomerNotice,
   CustomerShell,
+  type CustomerTone,
 } from '@/components/customer/customer-shell';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { cn } from '@/lib/utils';
 
 export const viewport: Viewport = { themeColor: CUSTOMER_BAR_COLOR };
+
+const STAGE_ICON: Record<CustomerTone, LucideIcon> = {
+  done: CircleCheck,
+  moving: Wrench,
+  waiting: Clock,
+  stopped: CirclePause,
+};
 
 // A private link: never listed by search engines.
 export const metadata: Metadata = { title: 'Your job card', robots: { index: false } };
@@ -55,6 +65,9 @@ export default async function CustomerJobPage({ params }: { params: Promise<{ to
   }
   const { vehicle, stage } = job;
   const lines = job.estimates.flatMap((estimate) => estimate.items);
+  const tone = CUSTOMER_TONE[stage.tone];
+  const finished = stage.step === CUSTOMER_STEPS.length - 1;
+  const StageIcon = STAGE_ICON[stage.tone];
 
   return (
     <CustomerShell organization={access.organization} label="Job card">
@@ -69,37 +82,52 @@ export default async function CustomerJobPage({ params }: { params: Promise<{ to
           </p>
         </header>
 
-        <section className="flex flex-col gap-4 rounded-2xl bg-sidebar px-5 py-5 text-sidebar-foreground">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium tracking-wide text-sidebar-foreground/60 uppercase">
-              Now
-            </span>
-            <span className="text-2xl font-semibold tracking-tight">{stage.label}</span>
+        <section className={cn('flex flex-col gap-5 rounded-2xl px-5 py-5', tone.card)}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className={cn('text-xs font-medium tracking-wide uppercase', tone.accent)}>
+                Now
+              </span>
+              <span className="text-2xl font-semibold tracking-tight">{stage.label}</span>
+              <span className="text-sm text-muted-foreground">{stage.note}</span>
+            </div>
+            <StageIcon className={cn('size-7 shrink-0', tone.accent)} />
           </div>
           {stage.step >= 0 ? (
             <ol className="grid grid-cols-6 gap-1" aria-label="Job progress">
-              {CUSTOMER_STEPS.map((step, index) => (
-                <li key={step} className="flex flex-col items-center gap-1.5 text-center">
-                  <span
-                    className={cn(
-                      'flex size-6 items-center justify-center rounded-full text-[11px] font-semibold',
-                      index <= stage.step
-                        ? 'bg-sidebar-foreground text-sidebar'
-                        : 'bg-sidebar-foreground/15 text-sidebar-foreground/60',
-                    )}
+              {CUSTOMER_STEPS.map((step, index) => {
+                // The last step, once reached, is done too: nothing is left open.
+                const done = index < stage.step || (finished && index === stage.step);
+                const current = index === stage.step && !finished;
+                return (
+                  <li
+                    key={step}
+                    aria-current={current ? 'step' : undefined}
+                    className="flex flex-col items-center gap-1.5 text-center"
                   >
-                    {index < stage.step ? <Check className="size-3.5" /> : index + 1}
-                  </span>
-                  <span
-                    className={cn(
-                      'text-[10px] leading-tight sm:text-xs',
-                      index <= stage.step ? 'font-medium' : 'text-sidebar-foreground/60',
-                    )}
-                  >
-                    {step}
-                  </span>
-                </li>
-              ))}
+                    <span
+                      className={cn(
+                        'flex size-6 items-center justify-center rounded-full text-[11px] font-semibold',
+                        done
+                          ? tone.solid
+                          : current
+                            ? cn('bg-background ring-2', tone.ring, tone.accent)
+                            : 'bg-foreground/10 text-muted-foreground',
+                      )}
+                    >
+                      {done ? <Check className="size-3.5" /> : index + 1}
+                    </span>
+                    <span
+                      className={cn(
+                        'text-[10px] leading-tight sm:text-xs',
+                        index <= stage.step ? 'font-medium' : 'text-muted-foreground',
+                      )}
+                    >
+                      {step}
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           ) : null}
         </section>

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCustomerAccess, type CustomerAccess } from '@/lib/customer-access/access';
 import { resolveAccessToken } from '@/lib/customer-access/tokens';
 import { normalizeStatus } from '@/lib/workshop/stages';
+import type { CustomerTone } from '@/components/customer/customer-shell';
 
 /*
  * A job card as its customer sees it on a secure link: the job, the car,
@@ -20,37 +21,101 @@ export const CUSTOMER_STEPS = [
   'Delivered',
 ] as const;
 
-/** Where the job is, in the customer's words, and which step that is (-1: off the path). */
-export function customerStage(status: JobCardStatus): { label: string; step: number } {
+export interface CustomerStage {
+  label: string;
+  /** One reassuring line under the label. */
+  note: string;
+  /** Which of CUSTOMER_STEPS it is; -1: off the path. */
+  step: number;
+  tone: CustomerTone;
+}
+
+/** Where the job is, in the customer's words. */
+export function customerStage(status: JobCardStatus): CustomerStage {
   switch (normalizeStatus(status)) {
     case 'ARRIVED':
-      return { label: 'Received', step: 0 };
+      return {
+        label: 'Received',
+        note: 'Your vehicle is with us. We will check it shortly.',
+        step: 0,
+        tone: 'moving',
+      };
     case 'INSPECTION':
     case 'DIAGNOSIS':
-      return { label: 'Checking your vehicle', step: 1 };
+      return {
+        label: 'Checking your vehicle',
+        note: 'Our technician is looking at your vehicle.',
+        step: 1,
+        tone: 'moving',
+      };
     case 'ESTIMATE':
-      return { label: 'Preparing your quotation', step: 2 };
+      return {
+        label: 'Preparing your quotation',
+        note: 'We will send it to you for approval.',
+        step: 2,
+        tone: 'moving',
+      };
     case 'WAITING_APPROVAL':
-      return { label: 'Waiting for your approval', step: 2 };
+      return {
+        label: 'Waiting for your approval',
+        note: 'Your quotation is ready. Let us know and we will start the work.',
+        step: 2,
+        tone: 'waiting',
+      };
     case 'APPROVED':
     case 'REPAIR':
-      return { label: 'Being repaired', step: 3 };
+      return {
+        label: 'Being repaired',
+        note: 'The work you approved is under way.',
+        step: 3,
+        tone: 'moving',
+      };
     case 'QUALITY_CHECK':
-      return { label: 'Final checks', step: 3 };
+      return {
+        label: 'Final checks',
+        note: 'The work is done. We are checking everything before handing it back.',
+        step: 3,
+        tone: 'moving',
+      };
     case 'READY':
     case 'INVOICED':
     case 'PAID':
-      return { label: 'Ready for collection', step: 4 };
+      return {
+        label: 'Ready for collection',
+        note: 'Your vehicle is ready. Come and collect it any time during working hours.',
+        step: 4,
+        tone: 'done',
+      };
     case 'DELIVERED':
-      return { label: 'Delivered', step: 5 };
+      return {
+        label: 'Delivered',
+        note: 'Your vehicle has been handed back. Thank you for choosing us.',
+        step: 5,
+        tone: 'done',
+      };
     case 'REJECTED':
-      return { label: 'Quotation declined', step: -1 };
+      return {
+        label: 'Quotation declined',
+        note: 'Contact us if you would like other options.',
+        step: -1,
+        tone: 'stopped',
+      };
     case 'ON_HOLD':
-      return { label: 'On hold', step: -1 };
+      return {
+        label: 'On hold',
+        note: 'Work is paused for now. We will update you.',
+        step: -1,
+        tone: 'stopped',
+      };
     case 'CANCELLED':
-      return { label: 'Cancelled', step: -1 };
+      return { label: 'Cancelled', note: 'This job was cancelled.', step: -1, tone: 'stopped' };
     default:
-      return { label: 'In the workshop', step: -1 };
+      return {
+        label: 'In the workshop',
+        note: 'Your vehicle is with us.',
+        step: -1,
+        tone: 'moving',
+      };
   }
 }
 

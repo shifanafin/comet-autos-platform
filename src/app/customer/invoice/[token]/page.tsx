@@ -7,6 +7,7 @@ import { formatDate } from '@/lib/format';
 import { customerLinkMetadata, invoicePreview } from '@/lib/customer-access/preview';
 import {
   CUSTOMER_BAR_COLOR,
+  CUSTOMER_TONE,
   CustomerNotice,
   CustomerShell,
 } from '@/components/customer/customer-shell';
@@ -71,6 +72,7 @@ export default async function CustomerInvoicePage({
   }
   const { document, balance, receipts } = data;
   const paid = balance.state === 'PAID';
+  const tone = CUSTOMER_TONE[paid ? 'done' : 'moving'];
 
   return (
     <CustomerShell organization={access.organization} label="Invoice">
@@ -90,44 +92,25 @@ export default async function CustomerInvoicePage({
           </p>
         </header>
 
-        <section
-          className={cn(
-            'flex flex-col gap-4 rounded-2xl px-5 py-5',
-            paid ? 'bg-success/10' : 'bg-sidebar text-sidebar-foreground',
-          )}
-        >
+        <section className={cn('flex flex-col gap-4 rounded-2xl px-5 py-5', tone.card)}>
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1">
-              <span
-                className={cn(
-                  'text-xs font-medium tracking-wide uppercase',
-                  paid ? 'text-success' : 'text-sidebar-foreground/60',
-                )}
-              >
+              <span className={cn('text-xs font-medium tracking-wide uppercase', tone.accent)}>
                 {paid ? 'Paid in full' : 'Balance due'}
               </span>
               <span className="text-3xl font-semibold tracking-tight tabular-nums">
                 {formatAed(paid ? balance.total : balance.balance)}
               </span>
             </div>
-            {paid ? <CheckCircle2 className="size-7 text-success" /> : null}
+            {paid ? <CheckCircle2 className={cn('size-7 shrink-0', tone.accent)} /> : null}
           </div>
-          <dl
-            className={cn(
-              'grid grid-cols-2 gap-3 border-t pt-4 text-sm',
-              paid ? 'border-success/20' : 'border-white/10',
-            )}
-          >
+          <dl className={cn('grid grid-cols-2 gap-3 border-t pt-4 text-sm', tone.rule)}>
             <div>
-              <dt className={paid ? 'text-muted-foreground' : 'text-sidebar-foreground/60'}>
-                Invoice total
-              </dt>
+              <dt className="text-muted-foreground">Invoice total</dt>
               <dd className="font-medium tabular-nums">{formatAed(balance.total)}</dd>
             </div>
             <div>
-              <dt className={paid ? 'text-muted-foreground' : 'text-sidebar-foreground/60'}>
-                Paid
-              </dt>
+              <dt className="text-muted-foreground">Paid</dt>
               <dd className="font-medium tabular-nums">{formatAed(balance.paid)}</dd>
             </div>
           </dl>
