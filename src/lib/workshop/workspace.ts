@@ -48,10 +48,12 @@ export async function getJobWorkspace(user: AuthenticatedUser, jobCardId: string
         include: { diagnosedByEmployee: { select: { id: true, firstName: true, lastName: true } } },
       },
       // The original quotation chain only; additional-work requests are
-      // shown by the repair sections (lib/workshop/repair.ts).
+      // shown by the repair sections (lib/workshop/repair.ts). The version
+      // that counts first: an older one the customer approved over a newer
+      // one is current, not the highest number.
       estimates: {
         where: { kind: 'ORIGINAL' },
-        orderBy: { version: 'desc' },
+        orderBy: [{ isCurrent: 'desc' }, { version: 'desc' }],
         include: {
           items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
           approvals: {

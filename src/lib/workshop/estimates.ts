@@ -423,9 +423,26 @@ const linkSchema = z.object({
 });
 
 /**
+ * Stages past the quotation step, up to delivery. A job that got there
+ * without a quotation — the quotation was raised on its own and never tied
+ * to it — can still have its approved quotation filed against it, for the
+ * record only: the job stays exactly where it is.
+ */
+const QUOTED_STATUSES = [
+  'APPROVED',
+  'REPAIR',
+  'QUALITY_CHECK',
+  'READY',
+  'INVOICED',
+  'PAID',
+  'DELIVERED',
+] as const;
+
+/**
  * Job cards a quotation raised without one could be tied to: the same
- * customer's (and vehicle's, when the quotation names one), still before
- * their quotation step, with no quotation of their own.
+ * customer's (and vehicle's, when the quotation names one), with no
+ * quotation of their own, still before their quotation step — or, for an
+ * approved quotation, already past it.
  */
 export async function jobsForQuotation(user: AuthenticatedUser, estimateId: string) {
   requirePermission(user, 'quotation.view');
@@ -434,12 +451,17 @@ export async function jobsForQuotation(user: AuthenticatedUser, estimateId: stri
     select: { jobCardId: true, kind: true, customerId: true, vehicleId: true, branchId: true },
   });
   if (!estimate || estimate.jobCardId || estimate.kind !== 'ORIGINAL') return [];
+  const approved = (
+    await versionsOf(prisma, user.organizationId, { ...estimate, id: estimateId })
+  ).some((version) => version.status === 'APPROVED');
   return prisma.jobCard.findMany({
     where: {
       organizationId: user.organizationId,
       customerId: estimate.customerId,
       branchId: estimate.branchId,
-      status: { in: [...QUOTABLE_STATUSES] },
+      status: {
+        in: approved ? [...QUOTABLE_STATUSES, ...QUOTED_STATUSES] : [...QUOTABLE_STATUSES],
+      },
       ...(estimate.vehicleId ? { vehicleId: estimate.vehicleId } : {}),
       estimates: { none: { kind: 'ORIGINAL' } },
     },
@@ -456,10 +478,12 @@ export async function jobsForQuotation(user: AuthenticatedUser, estimateId: stri
 /**
  * Ties a quotation raised without a job card to one, afterwards — every
  * version of it. The same checks as raising it against the job: the same
- * customer (and vehicle, when the quotation names one), the job still before
- * its quotation step and without a quotation of its own. The job then moves
- * to where the quotation stands: approved, waiting for the customer's
- * answer, or at the quotation step.
+ * customer (and vehicle, when the quotation names one), the job without a
+ * quotation of its own. A job still before its quotation step then moves to
+ * where the quotation stands: approved, waiting for the customer's answer,
+ * or at the quotation step. A job already past it (repaired, invoiced,
+ * delivered) takes only an approved quotation, filed for the record: its
+ * status, invoice and the books are left exactly as they are.
  */
 export async function linkQuotationToJob(
   user: AuthenticatedUser,
@@ -507,13 +531,23 @@ export async function linkQuotationToJob(
         'jobCardId',
       );
     }
+    const versions = await versionsOf(tx, user.organizationId, estimate);
+    const approved = versions.some((version) => version.status === 'APPROVED');
     const from = normalizeStatus(job.status);
-    if (!QUOTABLE_STATUSES.includes(from as (typeof QUOTABLE_STATUSES)[number])) {
+    // Past its quotation step: an approved quotation is filed for the record
+    // only. One still open could be approved later and move a finished job.
+    const recordOnly = QUOTED_STATUSES.includes(from as (typeof QUOTED_STATUSES)[number]);
+    if (recordOnly && !approved) {
+      throw new DomainError(
+        'That job card has moved past the quotation stage: only an approved quotation can be linked to it.',
+        'jobCardId',
+      );
+    }
+    if (!recordOnly && !QUOTABLE_STATUSES.includes(from as (typeof QUOTABLE_STATUSES)[number])) {
       throw new DomainError('That job card has moved past the quotation stage.', 'jobCardId');
     }
 
     // Every version moves together: on a job, versions are grouped by the job.
-    const versions = await versionsOf(tx, user.organizationId, estimate);
     const ids = versions.map((version) => version.id);
     await tx.estimate.updateMany({
       where: { organizationId: user.organizationId, id: { in: ids } },
@@ -524,12 +558,11 @@ export async function linkQuotationToJob(
       data: { vehicleId: job.vehicleId },
     });
 
-    // The job goes to where the quotation stands.
-    const approved = versions.some((version) => version.status === 'APPROVED');
+    // The job goes to where the quotation stands — unless it is already past it.
     const waiting = !approved && versions.some(isOpenVersion);
-    const steps: ('ESTIMATE' | 'WAITING_APPROVAL' | 'APPROVED')[] = ['ESTIMATE'];
-    if (approved || waiting) steps.push('WAITING_APPROVAL');
-    if (approved) steps.push('APPROVED');
+    const steps: ('ESTIMATE' | 'WAITING_APPROVAL' | 'APPROVED')[] = recordOnly ? [] : ['ESTIMATE'];
+    if (!recordOnly && (approved || waiting)) steps.push('WAITING_APPROVAL');
+    if (!recordOnly && approved) steps.push('APPROVED');
     for (const toStatus of steps) {
       await applyJobStatusChange(tx, {
         organizationId: user.organizationId,
@@ -549,7 +582,12 @@ export async function linkQuotationToJob(
       entityType: 'Estimate',
       entityId: estimate.id,
       beforeData: { jobCardId: null },
-      afterData: { jobCardId: job.id, jobNumber: job.jobNumber, versions: ids.length },
+      afterData: {
+        jobCardId: job.id,
+        jobNumber: job.jobNumber,
+        versions: ids.length,
+        ...(recordOnly ? { recordOnly: true, jobStatus: from } : {}),
+      },
     });
     return { jobCardId: job.id, jobNumber: job.jobNumber };
   });

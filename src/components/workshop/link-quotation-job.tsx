@@ -11,8 +11,9 @@ import { linkQuotationToJobAction } from '@/app/(app)/quotations/actions';
 
 /**
  * A quotation raised without a job card: tie it to one of the customer's
- * job cards still before their quotation step (lib/workshop/estimates.ts
- * linkQuotationToJob).
+ * job cards without a quotation of its own — still before its quotation
+ * step, or, for an approved quotation, already past it (lib/workshop/
+ * estimates.ts linkQuotationToJob).
  */
 export function LinkQuotationJob({
   estimateId,
@@ -38,8 +39,8 @@ export function LinkQuotationJob({
   if (jobs.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No job card to link: this customer has none still before its quotation step, or each already
-        has its own quotation.
+        No job card to link: each of this customer&apos;s job cards already has its own quotation, or
+        has moved past the quotation step — only an approved quotation can go on one of those.
       </p>
     );
   }

@@ -255,8 +255,10 @@ export async function getVehicleDetail(user: AuthenticatedUser, vehicleId: strin
           // Who brought the vehicle in for each job — not always today's owner.
           customer: { select: { id: true, name: true } },
           diagnoses: { orderBy: { diagnosedAt: 'desc' }, take: 1, select: { findings: true } },
+          // The job's quotation: the version that counts, not the highest number.
           estimates: {
-            orderBy: [{ version: 'desc' }],
+            where: { kind: 'ORIGINAL' },
+            orderBy: [{ isCurrent: 'desc' }, { version: 'desc' }],
             take: 1,
             select: { estimateNumber: true, status: true, totalAmount: true },
           },
