@@ -1,7 +1,7 @@
 import { formatAed } from '@/lib/documents/model';
 
 /*
- * WhatsApp sharing by deep link (wa.me): the app prepares the message and
+ * WhatsApp sharing by deep link (api.whatsapp.com): the app prepares the message and
  * WhatsApp opens with it filled in, for a staff member to review and send.
  * Nothing is sent automatically and no WhatsApp API is involved.
  *
@@ -15,7 +15,7 @@ import { formatAed } from '@/lib/documents/model';
  */
 
 /**
- * The international number wa.me expects (digits only, no "+" or leading
+ * The international number WhatsApp expects (digits only, no "+" or leading
  * zeros). Local UAE numbers are assumed when no country code is given:
  * "050 123 4567" → "971501234567". Returns null when the number can't be a
  * real mobile number — WhatsApp then opens without a recipient.
@@ -43,10 +43,15 @@ export function normalizeWhatsAppNumber(
   return digits.length >= 10 && digits.length <= 15 ? digits : null;
 }
 
-/** https://wa.me/<number>?text=<message>, with the message fully URL-encoded. */
+/**
+ * https://api.whatsapp.com/send?phone=<number>&text=<message>, the message
+ * fully URL-encoded. Not wa.me: wa.me forwards to this address and encodes
+ * the text again on the way, which broke emojis into "�" (seen in WhatsApp
+ * on Windows, 27 Oct 2026). Opening it directly keeps them.
+ */
 export function whatsAppUrl(phone: string | null | undefined, message: string): string {
   const number = normalizeWhatsAppNumber(phone);
-  return `https://wa.me/${number ?? ''}?text=${encodeURIComponent(message)}`;
+  return `https://api.whatsapp.com/send?${number ? `phone=${number}&` : ''}text=${encodeURIComponent(message)}`;
 }
 
 export interface ShareMessageInput {

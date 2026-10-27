@@ -164,7 +164,12 @@ export function CustomerDocumentActions({
           </Button>
         }
         onWhatsApp={() =>
-          window.open(`https://wa.me/?text=${encodeURIComponent(message())}`, '_blank', 'noopener')
+          // api.whatsapp.com, not wa.me: wa.me's forwarding breaks emojis (lib/sharing/whatsapp.ts).
+          window.open(
+            `https://api.whatsapp.com/send?text=${encodeURIComponent(message())}`,
+            '_blank',
+            'noopener',
+          )
         }
         onCopyLink={async () => {
           if (await copyText(window.location.href)) toast.success('Link copied');

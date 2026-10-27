@@ -149,10 +149,10 @@ describe('customer documents and sharing', () => {
     );
     assert.match(shared.link, /^https:\/\/workshop\.example\/customer\/quote\/[A-Za-z0-9_-]{43}$/);
     assert.ok(
-      shared.whatsappUrl.startsWith('https://wa.me/971501234567?text='),
+      shared.whatsappUrl.startsWith('https://api.whatsapp.com/send?phone=971501234567&text='),
       'local mobile normalised to 971…',
     );
-    const decoded = decodeURIComponent(shared.whatsappUrl.split('?text=')[1]);
+    const decoded = decodeURIComponent(shared.whatsappUrl.split('text=')[1]);
     assert.equal(decoded, shared.message);
     for (const expected of [
       'Hello Ahmed Al Marzooqi 👋',
@@ -525,7 +525,7 @@ describe('customer documents and sharing', () => {
     assert.equal(normalizeWhatsAppNumber('123'), null);
     assert.equal(normalizeWhatsAppNumber(''), null);
     assert.ok(
-      whatsAppUrl('123', 'hi').startsWith('https://wa.me/?text='),
+      whatsAppUrl('123', 'hi').startsWith('https://api.whatsapp.com/send?text='),
       'no recipient when the number is unusable',
     );
 

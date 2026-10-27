@@ -279,6 +279,23 @@
     margin-inline-start: 0.5rem;
     cursor: pointer;
   }
+  /*
+   * iPhone and iPad: Safari draws date fields with its own control, which
+   * ignores width: 100%, keeps a minimum width of its own and sets its own
+   * height — so a date field ran past the form's edge and stood taller than
+   * the fields beside it. Without the native look it sizes like any field
+   * (the picker still opens on tap). Only where iOS is (-webkit-touch-callout
+   * exists nowhere else), so desktop and Android keep their calendar icon.
+   */
+  @supports (-webkit-touch-callout: none) {
+    input:is([type='date'], [type='datetime-local'], [type='month'], [type='time'], [type='week']) {
+      -webkit-appearance: none;
+      appearance: none;
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+    }
+  }
 
   body {
     @apply bg-background text-foreground antialiased;
