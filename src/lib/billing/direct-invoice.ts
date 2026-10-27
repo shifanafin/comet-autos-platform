@@ -140,7 +140,10 @@ async function linesFromEstimate(
   });
   if (!estimate) throw new DomainError('That quotation was not found.', 'estimateId');
   if (!estimate.isCurrent) {
-    throw new DomainError('A newer version of this quotation exists. Invoice that one instead.', 'estimateId');
+    throw new DomainError(
+      'A newer version of this quotation exists. Invoice that one instead.',
+      'estimateId',
+    );
   }
   if (estimate.customerId !== customerId) {
     throw new DomainError('That quotation belongs to a different customer.', 'estimateId');
@@ -333,11 +336,11 @@ export async function createDirectInvoice(
             await resolveTaxCodes(tx, user.organizationId, input.items ?? []),
           );
     const { totals } = priced;
-    // Every Parts line names its part and cost — except, billing a job card
-    // whose parts were fitted through its repair records, those parts.
+    // A Parts line picked from the list carries its part and cost; one typed
+    // stays as typed (lib/billing/part-lines.ts).
     const fitted = await partsFittedOnJob(tx, user.organizationId, jobCard?.id ?? null);
     const lines = await resolvePartLines(tx, user.organizationId, priced.lines, {
-      required: () => fitted.size === 0,
+      required: () => false,
     });
     assertNotFitted(lines, fitted);
     await assertIncomeAccounts(tx, user.organizationId, lines);

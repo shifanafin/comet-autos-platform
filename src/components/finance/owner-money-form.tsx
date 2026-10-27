@@ -13,10 +13,15 @@ import type { ActionResult } from '@/lib/errors';
 import { formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { OWNER_MONEY_LABEL, type OwnerMoneyKindKey } from '@/lib/finance/owner-money-labels';
-import type { OwnerMoneyForm as FormOptions, OwnerMoneyHow } from '@/lib/finance/owner-money';
+import type {
+  OwnerMoneyEntry,
+  OwnerMoneyForm as FormOptions,
+  OwnerMoneyHow,
+} from '@/lib/finance/owner-money';
 import {
   addPartnerAction,
   recordOwnerMoneyAction,
+  updateOwnerMoneyAction,
   voidOwnerMoneyAction,
 } from '@/app/(app)/finance/money/actions';
 
@@ -70,17 +75,32 @@ const aed = (fils: number) => formatMoney((fils / 100).toFixed(2));
 /**
  * An owner putting money into the business or taking it out — with the
  * journal entry it will book shown as it is filled in, before it is saved.
+ * Given an entry, it opens filled in and saves a correction of it.
  */
-export function OwnerMoneyForm({ options }: { options: FormOptions }) {
+export function OwnerMoneyForm({
+  options,
+  entry,
+}: {
+  options: FormOptions;
+  entry?: OwnerMoneyEntry;
+}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const cashId = options.accounts.find((account) => account.kind === 'cash')?.id ?? '';
-  const [kind, setKind] = useState<OwnerMoneyKindKey>('CAPITAL_IN');
-  const [how, setHow] = useState<OwnerMoneyHow>('money');
-  const [accountId, setAccountId] = useState(cashId);
-  const [amount, setAmount] = useState('');
+  const [kind, setKind] = useState<OwnerMoneyKindKey>(entry?.kind ?? 'CAPITAL_IN');
+  const [how, setHow] = useState<OwnerMoneyHow>(entry?.how ?? 'money');
+  const [accountId, setAccountId] = useState(entry?.accountId ?? cashId);
+  const [amount, setAmount] = useState(entry?.amount ?? '');
   const [state, onSubmit, isPending] = useFormAction<ActionResult>(
     async (prev, formData) => {
+      if (entry) {
+        const result = await updateOwnerMoneyAction(entry.id, prev, formData);
+        if (result.ok) {
+          toast.success(`${entry.entryNumber} corrected`);
+          router.push('/finance/money/owner');
+        }
+        return result;
+      }
       const result = await recordOwnerMoneyAction(prev, formData);
       if (result.ok) {
         toast.success(`${OWNER_MONEY_LABEL[kind]} recorded`);
@@ -227,7 +247,13 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
             <NativeSelect
               id="owner-money-partner"
               name="partnerId"
-              defaultValue={options.partners.length === 1 ? options.partners[0].id : ''}
+              defaultValue={
+                entry
+                  ? entry.partnerId
+                  : options.partners.length === 1
+                    ? options.partners[0].id
+                    : ''
+              }
               className="h-11"
             >
               <option value="">Not said</option>
@@ -256,7 +282,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
           id="owner-money-date"
           type="date"
           required
-          defaultValue={options.today}
+          defaultValue={entry?.movedOn ?? options.today}
           max={options.today}
           error={errors.movedOn}
           className="[&_input]:h-11"
@@ -265,6 +291,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
           label="Reference"
           name="reference"
           id="owner-money-reference"
+          defaultValue={entry?.reference}
           error={errors.reference}
           hint="Optional: a deposit slip or transfer number."
           className="[&_input]:h-11"
@@ -273,6 +300,7 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
           label="Notes"
           name="notes"
           id="owner-money-notes"
+          defaultValue={entry?.notes}
           error={errors.notes}
           hint="Optional: e.g. money for parts and running costs."
           className="[&_input]:h-11"
@@ -334,7 +362,9 @@ export function OwnerMoneyForm({ options }: { options: FormOptions }) {
       <div>
         <SubmitButton pending={isPending} className="h-11" pendingLabel="Saving…">
           <HandCoins />
-          {`Record — ${OWNER_MONEY_LABEL[kind].toLowerCase()}`}
+          {entry
+            ? `Save changes to ${entry.entryNumber}`
+            : `Record — ${OWNER_MONEY_LABEL[kind].toLowerCase()}`}
         </SubmitButton>
       </div>
     </form>

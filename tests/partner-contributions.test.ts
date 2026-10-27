@@ -25,9 +25,14 @@ import {
   getOwnerMoneyForm,
   listOwnerMoney,
   recordOwnerMoney,
+  updateOwnerMoney,
   voidOwnerMoney,
 } from '@/lib/finance/owner-money';
-import { recordBusinessPurchasePayment } from '@/lib/finance/business-purchase';
+import {
+  getBusinessPurchasePayment,
+  recordBusinessPurchasePayment,
+  updateBusinessPurchasePayment,
+} from '@/lib/finance/business-purchase';
 import { getPartnerContributions } from '@/lib/finance/partner-contributions';
 import { createTestOrg, expectDomainError, RUN, type TestOrg } from './support';
 
@@ -215,5 +220,89 @@ describe('a partner’s whole investment', () => {
 
     const other = await getPartnerContributions(a.owner, shahid);
     assert.equal(other.totals.invested, '2000.00');
+  });
+});
+
+describe('correcting an entry where it stands', () => {
+  test('owner’s money: same number, its journal entry corrected in place, the old version audited', async () => {
+    const cash = form.accounts.find((account) => account.kind === 'cash')!;
+    const row = await recordOwnerMoney(a.owner, {
+      kind: 'CAPITAL_IN',
+      accountId: cash.id,
+      partnerId: shahid,
+      amount: '2433.33',
+      movedOn: '2026-10-18',
+    });
+    const entriesBefore = await prisma.journalEntry.count({
+      where: { organizationId: a.organizationId, sourceType: 'OWNER_MONEY', sourceId: row.id },
+    });
+    const fixed = await updateOwnerMoney(a.owner, row.id, {
+      kind: 'CAPITAL_IN',
+      how: 'money',
+      accountId: cash.id,
+      partnerId: shahid,
+      amount: '3933.34',
+      movedOn: '2026-10-18',
+      notes: 'Equal share of 11,800',
+    });
+    assert.equal(fixed.entryNumber, row.entryNumber, 'keeps its number');
+    const entries = await prisma.journalEntry.findMany({
+      where: { organizationId: a.organizationId, sourceType: 'OWNER_MONEY', sourceId: row.id },
+      select: { id: true },
+    });
+    assert.equal(entries.length, entriesBefore, 'no reversal, no second entry');
+    const entry = await entryOf(row.id);
+    assert.deepEqual(entry.lines['3000'], ['0.00', '3933.34']);
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        organizationId: a.organizationId,
+        entityId: row.id,
+        action: 'owner_money.corrected',
+      },
+      select: { beforeData: true },
+    });
+    assert.equal((audit?.beforeData as { amount?: string } | null)?.amount, '2433.33');
+
+    await voidOwnerMoney(a.owner, row.id, { reason: 'Test' });
+    await expectDomainError(
+      updateOwnerMoney(a.owner, row.id, {
+        kind: 'CAPITAL_IN',
+        accountId: cash.id,
+        partnerId: shahid,
+        amount: '1',
+        movedOn: '2026-10-18',
+      }),
+      /void entry can’t be changed/,
+    );
+  });
+
+  test('buying the business: corrected, still outside the books', async () => {
+    const linesBefore = await prisma.journalEntryLine.count({
+      where: { organizationId: a.organizationId },
+    });
+    const row = await recordBusinessPurchasePayment(a.owner, {
+      partnerId: afin,
+      amount: '104.03',
+      paidOn: '2026-09-14',
+      paidTo: 'Tasheel',
+      description: 'Establishment card',
+    });
+    await updateBusinessPurchasePayment(a.owner, row.id, {
+      partnerId: afin,
+      amount: '523.46',
+      paidOn: '2026-09-14',
+      paidTo: 'Tasheel',
+      description: 'MOHRE transfer fees',
+      notes: 'Investments sheet #8',
+    });
+    const after = await getBusinessPurchasePayment(a.owner, row.id);
+    assert.equal(after.amount, '523.46');
+    assert.equal(after.description, 'MOHRE transfer fees');
+    assert.equal(after.notes, 'Investments sheet #8');
+    assert.equal(
+      await prisma.journalEntryLine.count({ where: { organizationId: a.organizationId } }),
+      linesBefore,
+      'nothing booked',
+    );
   });
 });

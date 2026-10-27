@@ -5,6 +5,7 @@ import type { JobCardStatus } from '@/generated/prisma/enums';
 import { JobStatusBadge } from '@/components/shared/job-status-badge';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { PrintJobCard } from '@/components/documents/print-job-card';
+import { ShareJobCard } from '@/components/documents/share-job-card';
 import { formatDateTime, formatKm } from '@/lib/format';
 
 /**
@@ -93,6 +94,7 @@ export function JobHero({
             {jobCard.customer.phone}
           </a>
           <PrintJobCard jobCardId={jobCard.id} />
+          <ShareJobCard jobCardId={jobCard.id} />
         </div>
       </div>
 

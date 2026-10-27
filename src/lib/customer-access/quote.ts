@@ -22,14 +22,40 @@ export type { OrganizationBranding };
 export type QuoteAccess = CustomerAccess;
 
 /** Resolves the quotation link: open, expired or invalid. */
-export function getQuoteAccess(rawToken: string): Promise<QuoteAccess> {
-  return getCustomerAccess(rawToken, 'ESTIMATE');
+export async function getQuoteAccess(rawToken: string): Promise<QuoteAccess> {
+  const access = await getCustomerAccess(rawToken, 'ESTIMATE');
+  if (access.state !== 'expired') return access;
+  // A quotation already decided, or replaced by a newer version, stays
+  // readable on its link after the link's date (the owners, 27 Oct 2026):
+  // the customer sees what was agreed; nothing can be decided on it.
+  const resolved = await resolveAccessToken(rawToken, 'ESTIMATE');
+  if (!resolved.token || !(await settled(resolved.token))) return access;
+  return {
+    state: 'open',
+    tokenHash: resolved.token.tokenHash,
+    organization: access.organization,
+    organizationId: resolved.token.organizationId,
+    resourceId: resolved.token.resourceId,
+  };
+}
+
+/** Approved, rejected, or replaced by a newer version: nothing left to decide on it. */
+async function settled(token: { organizationId: string; resourceId: string }) {
+  const estimate = await prisma.estimate.findFirst({
+    where: { id: token.resourceId, organizationId: token.organizationId },
+    select: { status: true, replacedAt: true },
+  });
+  return Boolean(
+    estimate &&
+    (estimate.status === 'APPROVED' || estimate.status === 'REJECTED' || estimate.replacedAt),
+  );
 }
 
 /** The quotation as the customer sees it. Call only after getQuoteAccess returned "open". */
 export async function loadCustomerQuote(rawToken: string) {
   const resolved = await resolveAccessToken(rawToken, 'ESTIMATE');
-  if (resolved.state !== 'valid' || !resolved.token) return null;
+  if (resolved.state === 'invalid' || !resolved.token) return null;
+  if (resolved.state === 'expired' && !(await settled(resolved.token))) return null;
   const { organizationId, resourceId } = resolved.token;
 
   const estimate = await prisma.estimate.findFirst({
@@ -45,6 +71,7 @@ export async function loadCustomerQuote(rawToken: string) {
       totalAmount: true,
       validUntil: true,
       sentAt: true,
+      replacedAt: true,
       items: {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: {

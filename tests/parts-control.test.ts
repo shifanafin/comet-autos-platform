@@ -1,7 +1,8 @@
 /**
  * Integration tests for controlled parts, stock and cost of sales:
  *
- *  - an invoice's Parts line must name a part from the list, in stock;
+ *  - an invoice's Parts line may be typed (nothing leaves stock), and one
+ *    picked from the list must be in stock;
  *  - a part bought for the job from an invoice line: the part (new, after a
  *    duplicate check), its purchase received into stock and paid in cash,
  *    its input VAT held as "awaiting tax invoice";
@@ -45,11 +46,17 @@ before(async () => {
   roles = await prisma.$transaction((tx) => ensureChart(tx, a.organizationId));
   customerId = (
     await prisma.customer.create({
-      data: { organizationId: a.organizationId, name: `Parts customer ${RUN}`, phone: '0500000000' },
+      data: {
+        organizationId: a.organizationId,
+        name: `Parts customer ${RUN}`,
+        phone: '0500000000',
+      },
     })
   ).id;
   shopId = (
-    await prisma.supplier.create({ data: { organizationId: a.organizationId, name: `Nearby shop ${RUN}` } })
+    await prisma.supplier.create({
+      data: { organizationId: a.organizationId, name: `Nearby shop ${RUN}` },
+    })
   ).id;
 });
 
@@ -84,14 +91,17 @@ const partLine = (partId: string, quantity: string, unitCost?: string) => ({
   ...(unitCost ? { unitCost } : {}),
 });
 
-describe('an invoice sells only parts from the list, in stock', () => {
-  test('a Parts line typed without a part is refused', async () => {
-    await expectDomainError(
-      createDirectInvoice(a.owner, {
-        customerId,
-        items: [{ itemType: 'PART', description: 'Some part', quantity: '1', unitPrice: '50' }],
+describe('an invoice sells parts typed, or from the list and in stock', () => {
+  test('a Parts line typed without a part is accepted, and nothing leaves stock', async () => {
+    const result = await createDirectInvoice(a.owner, {
+      customerId,
+      items: [{ itemType: 'PART', description: 'Some part', quantity: '1', unitPrice: '50' }],
+    });
+    assert.equal(
+      await prisma.inventoryTransaction.count({
+        where: { organizationId: a.organizationId, invoiceId: result.invoiceId },
       }),
-      /pick the part from the list/,
+      0,
     );
   });
 
@@ -157,7 +167,10 @@ describe('a part bought for the job, then sold on the invoice', () => {
     invoiceId = result.invoiceId;
     assert.equal(await onHand(pad()), 0);
     assert.equal(await onHand(oil()), 9);
-    const items = await prisma.invoiceItem.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
+    const items = await prisma.invoiceItem.findMany({
+      where: { invoiceId },
+      orderBy: { createdAt: 'asc' },
+    });
     assert.deepEqual(
       items.map((item) => [item.partId, item.unitCost?.toFixed(2)]),
       [
@@ -170,7 +183,10 @@ describe('a part bought for the job, then sold on the invoice', () => {
   });
 
   test('correcting the invoice moves only the difference', async () => {
-    const before = await prisma.invoiceItem.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
+    const before = await prisma.invoiceItem.findMany({
+      where: { invoiceId },
+      orderBy: { createdAt: 'asc' },
+    });
     await updateInvoice(a.owner, invoiceId, {
       items: [
         { ...partLine(pad(), '1', '45.00'), sourceId: before[0].id },

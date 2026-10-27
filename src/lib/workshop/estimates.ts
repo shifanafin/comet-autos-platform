@@ -180,12 +180,8 @@ async function chooseVersion(
       data: { replacedAt: now },
     });
   }
-  await revokeAccessTokens(
-    tx,
-    organizationId,
-    'ESTIMATE',
-    others.filter((version) => version.status !== 'DRAFT').map((version) => version.id),
-  );
+  // Their links keep working, read-only: closed above, none of them can be
+  // decided any more (applyEstimateDecision).
   await tx.estimate.updateMany({
     where: {
       organizationId,
@@ -422,6 +418,143 @@ export async function createQuotation(user: AuthenticatedUser, rawInput: unknown
   });
 }
 
+const linkSchema = z.object({
+  jobCardId: z.uuid({ error: 'Choose the job card.' }),
+});
+
+/**
+ * Job cards a quotation raised without one could be tied to: the same
+ * customer's (and vehicle's, when the quotation names one), still before
+ * their quotation step, with no quotation of their own.
+ */
+export async function jobsForQuotation(user: AuthenticatedUser, estimateId: string) {
+  requirePermission(user, 'quotation.view');
+  const estimate = await prisma.estimate.findFirst({
+    where: { id: estimateId, organizationId: user.organizationId },
+    select: { jobCardId: true, kind: true, customerId: true, vehicleId: true, branchId: true },
+  });
+  if (!estimate || estimate.jobCardId || estimate.kind !== 'ORIGINAL') return [];
+  return prisma.jobCard.findMany({
+    where: {
+      organizationId: user.organizationId,
+      customerId: estimate.customerId,
+      branchId: estimate.branchId,
+      status: { in: [...QUOTABLE_STATUSES] },
+      ...(estimate.vehicleId ? { vehicleId: estimate.vehicleId } : {}),
+      estimates: { none: { kind: 'ORIGINAL' } },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      jobNumber: true,
+      status: true,
+      vehicle: { select: { make: true, model: true, plateNumber: true } },
+    },
+  });
+}
+
+/**
+ * Ties a quotation raised without a job card to one, afterwards — every
+ * version of it. The same checks as raising it against the job: the same
+ * customer (and vehicle, when the quotation names one), the job still before
+ * its quotation step and without a quotation of its own. The job then moves
+ * to where the quotation stands: approved, waiting for the customer's
+ * answer, or at the quotation step.
+ */
+export async function linkQuotationToJob(
+  user: AuthenticatedUser,
+  estimateId: string,
+  rawInput: unknown,
+) {
+  const input = parseInput(linkSchema, rawInput);
+  return prisma.$transaction(async (tx) => {
+    await lockJob(tx, user.organizationId, input.jobCardId);
+    const estimate = await loadEstimate(tx, user.organizationId, estimateId);
+    requirePermission(user, 'quotation.edit', { branchId: estimate.branchId });
+    if (estimate.jobCardId) throw new DomainError('This quotation is already on a job card.');
+    if (estimate.kind !== 'ORIGINAL') {
+      throw new DomainError('Only a quotation, not a request for additional work, can be linked.');
+    }
+    const job = await tx.jobCard.findFirst({
+      where: { id: input.jobCardId, organizationId: user.organizationId },
+      select: {
+        id: true,
+        jobNumber: true,
+        branchId: true,
+        status: true,
+        customerId: true,
+        vehicleId: true,
+      },
+    });
+    if (!job) throw new DomainError('That job card was not found.', 'jobCardId');
+    requirePermission(user, 'quotation.edit', { branchId: job.branchId });
+    if (job.customerId !== estimate.customerId) {
+      throw new DomainError('That job card belongs to a different customer.', 'jobCardId');
+    }
+    if (estimate.vehicleId && job.vehicleId !== estimate.vehicleId) {
+      throw new DomainError('That job card is for a different vehicle.', 'jobCardId');
+    }
+    if (job.branchId !== estimate.branchId) {
+      throw new DomainError('That job card is at another branch.', 'jobCardId');
+    }
+    const own = await tx.estimate.findFirst({
+      where: { jobCardId: job.id, organizationId: user.organizationId, kind: 'ORIGINAL' },
+      select: { estimateNumber: true },
+    });
+    if (own) {
+      throw new DomainError(
+        `That job card already has quotation ${own.estimateNumber}.`,
+        'jobCardId',
+      );
+    }
+    const from = normalizeStatus(job.status);
+    if (!QUOTABLE_STATUSES.includes(from as (typeof QUOTABLE_STATUSES)[number])) {
+      throw new DomainError('That job card has moved past the quotation stage.', 'jobCardId');
+    }
+
+    // Every version moves together: on a job, versions are grouped by the job.
+    const versions = await versionsOf(tx, user.organizationId, estimate);
+    const ids = versions.map((version) => version.id);
+    await tx.estimate.updateMany({
+      where: { organizationId: user.organizationId, id: { in: ids } },
+      data: { jobCardId: job.id },
+    });
+    await tx.estimate.updateMany({
+      where: { organizationId: user.organizationId, id: { in: ids }, vehicleId: null },
+      data: { vehicleId: job.vehicleId },
+    });
+
+    // The job goes to where the quotation stands.
+    const approved = versions.some((version) => version.status === 'APPROVED');
+    const waiting = !approved && versions.some(isOpenVersion);
+    const steps: ('ESTIMATE' | 'WAITING_APPROVAL' | 'APPROVED')[] = ['ESTIMATE'];
+    if (approved || waiting) steps.push('WAITING_APPROVAL');
+    if (approved) steps.push('APPROVED');
+    for (const toStatus of steps) {
+      await applyJobStatusChange(tx, {
+        organizationId: user.organizationId,
+        jobCardId: job.id,
+        toStatus,
+        actor: { userId: user.id },
+        source: 'workflow',
+        metadata: { estimateId: estimate.id, linkedQuotation: true, from },
+      });
+    }
+
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: estimate.branchId,
+      actorUserId: user.id,
+      action: 'estimate.linked_to_job',
+      entityType: 'Estimate',
+      entityId: estimate.id,
+      beforeData: { jobCardId: null },
+      afterData: { jobCardId: job.id, jobNumber: job.jobNumber, versions: ids.length },
+    });
+    return { jobCardId: job.id, jobNumber: job.jobNumber };
+  });
+}
+
 const draftSchema = z.object({
   items: z.array(lineSchema).max(100, 'An estimate can have at most 100 lines.'),
   /** A discount on the whole quotation, after the lines' own. */
@@ -549,31 +682,29 @@ export async function sendEstimate(user: AuthenticatedUser, estimateId: string) 
       data: { status: 'SENT', sentAt, sentByUserId: user.id },
     });
 
-    // Revoke links to other versions of the same quotation only — except
-    // versions left open as options, which the customer may still choose.
-    // An additional-work request never invalidates the original quotation's
-    // link.
-    const siblings =
-      fresh.kind === 'ADDITIONAL' && estimate.jobCardId
-        ? await tx.estimate.findMany({
-            where: {
-              jobCardId: estimate.jobCardId,
-              organizationId: user.organizationId,
-              id: { not: estimate.id },
-              kind: 'ADDITIONAL',
-              status: { in: ['DRAFT', 'SENT'] },
-            },
-            select: { id: true },
-          })
-        : (await versionsOf(tx, user.organizationId, fresh)).filter(
-            (version) => version.id !== estimate.id && !isOpenVersion(version),
-          );
-    await revokeAccessTokens(
-      tx,
-      user.organizationId,
-      'ESTIMATE',
-      siblings.map((s) => s.id),
-    );
+    // Another additional-work request still waiting is withdrawn by this one.
+    // Other versions of a quotation keep their links (the owners, 27 Oct
+    // 2026): the customer can still open them and see what was decided —
+    // only an open version can be decided (applyEstimateDecision). An
+    // additional-work request never touches the original quotation's link.
+    if (fresh.kind === 'ADDITIONAL' && estimate.jobCardId) {
+      const siblings = await tx.estimate.findMany({
+        where: {
+          jobCardId: estimate.jobCardId,
+          organizationId: user.organizationId,
+          id: { not: estimate.id },
+          kind: 'ADDITIONAL',
+          status: { in: ['DRAFT', 'SENT'] },
+        },
+        select: { id: true },
+      });
+      await revokeAccessTokens(
+        tx,
+        user.organizationId,
+        'ESTIMATE',
+        siblings.map((s) => s.id),
+      );
+    }
     const { rawToken, tokenId } = await issueAccessToken(tx, {
       organizationId: user.organizationId,
       resourceType: 'ESTIMATE',
@@ -774,14 +905,19 @@ export async function approvedChangeBlocker(
       select: { status: true },
     });
     const status = normalizeStatus(job.status);
-    if (status === 'ON_HOLD') return 'The job is on hold. Resume it first, then change the quotation.';
+    if (status === 'ON_HOLD')
+      return 'The job is on hold. Resume it first, then change the quotation.';
     if (status !== 'APPROVED') {
       return 'Work on this job has started. Quote extra work as additional work — anything not done is not billed.';
     }
   }
   const booked =
-    (await client.labour.count({ where: { organizationId, estimateItem: { estimateId: estimate.id } } })) +
-    (await client.partUsage.count({ where: { organizationId, estimateItem: { estimateId: estimate.id } } }));
+    (await client.labour.count({
+      where: { organizationId, estimateItem: { estimateId: estimate.id } },
+    })) +
+    (await client.partUsage.count({
+      where: { organizationId, estimateItem: { estimateId: estimate.id } },
+    }));
   if (booked > 0) {
     return 'Labour or parts are already recorded against this quotation. Quote extra work as additional work instead.';
   }
@@ -912,8 +1048,9 @@ export async function reviseEstimate(
         },
       });
     }
-    // Replaced (a correction): its link stops working. Kept open: the
-    // customer may still choose it, on the link they already have.
+    // Replaced (a correction): its link still opens, read-only — it can no
+    // longer be decided (applyEstimateDecision). Kept open: the customer may
+    // still choose it, on the link they already have.
     await tx.estimate.update({
       where: { id: source.id },
       data: {
@@ -921,7 +1058,6 @@ export async function reviseEstimate(
         ...(source.status === 'SENT' && !keepOpen ? { replacedAt: new Date() } : {}),
       },
     });
-    if (!keepOpen) await revokeAccessTokens(tx, user.organizationId, 'ESTIMATE', [source.id]);
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
       branchId: source.branchId,
@@ -1225,10 +1361,13 @@ export async function switchApprovedVersion(
     if (target.jobCardId) await lockJob(tx, user.organizationId, target.jobCardId);
     const chosen = (await versionsOf(tx, user.organizationId, target)).find(
       (version) =>
-        version.isCurrent && (version.status === 'APPROVED' || version.status === 'PARTIALLY_APPROVED'),
+        version.isCurrent &&
+        (version.status === 'APPROVED' || version.status === 'PARTIALLY_APPROVED'),
     );
     if (!chosen) {
-      throw new DomainError('No version is approved yet — record the decision on this one instead.');
+      throw new DomainError(
+        'No version is approved yet — record the decision on this one instead.',
+      );
     }
     const blocker = await approvedChangeBlocker(tx, user.organizationId, {
       id: chosen.id,

@@ -10,27 +10,40 @@ import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
 import { ReasonAction } from '@/components/shared/reason-action';
 import type { ActionResult } from '@/lib/errors';
+import type { BusinessPurchaseEntry } from '@/lib/finance/business-purchase';
 import {
   recordBusinessPurchaseAction,
+  updateBusinessPurchaseAction,
   voidBusinessPurchaseAction,
 } from '@/app/(app)/finance/money/actions';
 
 /**
  * A partner's payment to buy the business — to its previous owner, or a fee
  * of transferring it. Kept outside the company's books
- * (lib/finance/business-purchase.ts).
+ * (lib/finance/business-purchase.ts). Given an entry, it opens filled in and
+ * saves a correction of it.
  */
 export function BusinessPurchaseForm({
   partners,
   today,
+  entry,
 }: {
   partners: { id: string; name: string }[];
   today: string;
+  entry?: BusinessPurchaseEntry;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [state, onSubmit, isPending] = useFormAction<ActionResult>(
     async (prev, formData) => {
+      if (entry) {
+        const result = await updateBusinessPurchaseAction(entry.id, prev, formData);
+        if (result.ok) {
+          toast.success('Payment corrected');
+          router.push('/finance/money/owner');
+        }
+        return result;
+      }
       const result = await recordBusinessPurchaseAction(prev, formData);
       if (result.ok) {
         toast.success('Payment recorded');
@@ -50,7 +63,7 @@ export function BusinessPurchaseForm({
           <NativeSelect
             id="purchase-partner"
             name="partnerId"
-            defaultValue={partners.length === 1 ? partners[0].id : ''}
+            defaultValue={entry ? entry.partnerId : partners.length === 1 ? partners[0].id : ''}
             className="h-11"
             required
           >
@@ -70,6 +83,7 @@ export function BusinessPurchaseForm({
           id="purchase-amount"
           numeric="money"
           required
+          defaultValue={entry?.amount}
           error={errors.amount}
           className="[&_input]:h-11"
         />
@@ -78,6 +92,7 @@ export function BusinessPurchaseForm({
           name="paidTo"
           id="purchase-paid-to"
           required
+          defaultValue={entry?.paidTo}
           error={errors.paidTo}
           hint="The previous owner, Tasheel, a typing centre…"
           className="[&_input]:h-11"
@@ -88,7 +103,7 @@ export function BusinessPurchaseForm({
           id="purchase-date"
           type="date"
           required
-          defaultValue={today}
+          defaultValue={entry?.paidOn ?? today}
           max={today}
           error={errors.paidOn}
           className="[&_input]:h-11"
@@ -98,6 +113,7 @@ export function BusinessPurchaseForm({
           name="description"
           id="purchase-description"
           required
+          defaultValue={entry?.description}
           error={errors.description}
           hint="e.g. Payout for the company, ownership transfer fee."
           className="[&_input]:h-11"
@@ -106,16 +122,26 @@ export function BusinessPurchaseForm({
           label="Reference"
           name="reference"
           id="purchase-reference"
+          defaultValue={entry?.reference}
           error={errors.reference}
           hint="Optional: cheque, transfer or receipt number."
           className="[&_input]:h-11"
+        />
+        <TextField
+          label="Notes"
+          name="notes"
+          id="purchase-notes"
+          defaultValue={entry?.notes}
+          error={errors.notes}
+          hint="Optional: e.g. which line of the investments sheet."
+          className="@xl:col-span-2 [&_input]:h-11"
         />
       </div>
       <FormError message={Object.keys(errors).length ? undefined : state.error} />
       <div>
         <SubmitButton pending={isPending} className="h-11" pendingLabel="Saving…">
           <Handshake />
-          Record payment
+          {entry ? 'Save changes' : 'Record payment'}
         </SubmitButton>
       </div>
     </form>

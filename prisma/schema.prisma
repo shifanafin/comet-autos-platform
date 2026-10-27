@@ -66,6 +66,7 @@ enum AssignmentRole {
 enum CustomerAccessResourceType {
   ESTIMATE
   INVOICE
+  JOB_CARD
 }
 
 enum InspectionStatus {

@@ -6,9 +6,15 @@ import { runAction, toClientResult } from '@/lib/action';
 import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
 import { recordMoneyTransfer, voidMoneyTransfer } from '@/lib/finance/money';
-import { addPartner, recordOwnerMoney, voidOwnerMoney } from '@/lib/finance/owner-money';
+import {
+  addPartner,
+  recordOwnerMoney,
+  updateOwnerMoney,
+  voidOwnerMoney,
+} from '@/lib/finance/owner-money';
 import {
   recordBusinessPurchasePayment,
+  updateBusinessPurchasePayment,
   voidBusinessPurchasePayment,
 } from '@/lib/finance/business-purchase';
 
@@ -50,6 +56,18 @@ export async function recordOwnerMoneyAction(
   return toClientResult(result);
 }
 
+/** Corrects an entry where it stands (bound to the entry's id on the edit page). */
+export async function updateOwnerMoneyAction(
+  id: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => updateOwnerMoney(user, id, formDataToObject(formData)));
+  if (result.ok) refresh();
+  return toClientResult(result);
+}
+
 export async function voidOwnerMoneyAction(
   id: string,
   input: { reason: string; requestKey: string },
@@ -80,6 +98,20 @@ export async function recordBusinessPurchaseAction(
     recordBusinessPurchasePayment(user, formDataToObject(formData)),
   );
   if (result.ok || result.duplicate) revalidatePath('/finance/money/owner');
+  return toClientResult(result);
+}
+
+/** Corrects a payment where it stands (bound to its id on the edit page). */
+export async function updateBusinessPurchaseAction(
+  id: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    updateBusinessPurchasePayment(user, id, formDataToObject(formData)),
+  );
+  if (result.ok) revalidatePath('/finance/money/owner', 'layout');
   return toClientResult(result);
 }
 

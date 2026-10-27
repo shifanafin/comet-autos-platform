@@ -210,9 +210,9 @@ export function DocumentLinesEditor({
    */
   catalog?: PartCatalog;
   /**
-   * Invoices: every Parts line must name a part from the list, and have it
-   * in stock — each shows its part, cost and stock, and a part not in stock
-   * (or not in the list) is recorded as bought for the job right there.
+   * Invoices: each Parts line shows its part, cost and stock, and a part not
+   * in stock (or not in the list) can be recorded as bought for the job right
+   * there. A line may also stay typed, with no part from the list.
    */
   requireParts?: boolean;
   /** Editing an issued invoice: what it already took out of stock, per part (thousandths). */
@@ -280,7 +280,13 @@ export function DocumentLinesEditor({
   const addNew = (line: EditableLine) =>
     requireParts && catalog?.canBuy
       ? (typed: string) =>
-          setBuying({ key: line.key, part: null, name: typed, quantity: line.quantity, price: line.unitPrice })
+          setBuying({
+            key: line.key,
+            part: null,
+            name: typed,
+            quantity: line.quantity,
+            price: line.unitPrice,
+          })
       : undefined;
   const picks = (line: EditableLine) => Boolean(catalog) && line.itemType === 'PART';
   const add = (itemType: LineType) => {
@@ -702,9 +708,9 @@ export function useCatalogParts(catalog: PartCatalog | undefined) {
 
 /** "2 lines need a part from the list" / "1 part is short of stock", or null. */
 export function partIssueMessage(issues: { unlinked: number; short: number }) {
-  if (issues.unlinked) {
-    return `${issues.unlinked} Parts line${issues.unlinked === 1 ? ' needs' : 's need'} a part from the list — pick it, or add it as bought for this job.`;
-  }
+  // A Parts line may be typed without a part from the list (the owners, 26 Oct
+  // 2026: parts are often bought only after the customer says yes); only a
+  // part picked from the list with too little in stock holds the document back.
   if (issues.short) {
     return `${issues.short} part${issues.short === 1 ? ' is' : 's are'} short of stock — record it as bought for this job on the line.`;
   }
@@ -735,7 +741,8 @@ export function partLineIssues(
   const unlinked = used.filter((line) => !line.partId && !line.sourceId).length;
   const need = new Map<string, number>();
   for (const line of used) {
-    if (line.partId) need.set(line.partId, (need.get(line.partId) ?? 0) + quantityMilli(line.quantity));
+    if (line.partId)
+      need.set(line.partId, (need.get(line.partId) ?? 0) + quantityMilli(line.quantity));
   }
   let short = 0;
   for (const [partId, milli] of need) {
@@ -774,15 +781,15 @@ function PartLineInfo({
     // Kept from an invoice issued before parts were tied to stock, or quoted.
     if (!required || line.sourceId) return null;
     return (
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-warning">
-        <span>Not from the parts list — pick it above</span>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span>Typed, not from the parts list: it won’t come out of stock.</span>
         {catalog?.canBuy ? (
           <button
             type="button"
             onClick={() => onBuy(null, line.quantity)}
             className="font-medium text-primary hover:underline"
           >
-            or add it as bought for this job
+            Add it as bought for this job
           </button>
         ) : null}
       </p>

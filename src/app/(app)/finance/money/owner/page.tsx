@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { HandCoins } from 'lucide-react';
+import { HandCoins, Pencil } from 'lucide-react';
+import { LinkButton } from '@/components/shared/link-button';
 import { AuthError, requireUser } from '@/lib/auth/authorize';
 import { getOwnerMoneyForm, listOwnerMoney } from '@/lib/finance/owner-money';
 import { listBusinessPurchasePayments } from '@/lib/finance/business-purchase';
@@ -205,7 +206,17 @@ export default async function OwnerMoneyPage({
                         >
                           {formatMoney(row.amount)}
                         </td>
-                        <td className="px-4 py-3 pr-6 text-right">
+                        <td className="px-4 py-3 pr-6 text-right whitespace-nowrap">
+                          {purchase.canEdit && !isVoid ? (
+                            <LinkButton
+                              href={`/finance/money/owner/purchase/${row.id}/edit`}
+                              variant="ghost"
+                              size="sm"
+                            >
+                              <Pencil />
+                              Edit
+                            </LinkButton>
+                          ) : null}
                           {purchase.canVoid && !isVoid ? (
                             <VoidBusinessPurchaseButton id={row.id} label={row.description} />
                           ) : null}
@@ -306,7 +317,17 @@ export default async function OwnerMoneyPage({
                           {row.kind === 'DRAWINGS' ? '−' : ''}
                           {formatMoney(row.amount.toString())}
                         </td>
-                        <td className="px-4 py-3 pr-6 text-right">
+                        <td className="px-4 py-3 pr-6 text-right whitespace-nowrap">
+                          {list.canEdit && !isVoid ? (
+                            <LinkButton
+                              href={`/finance/money/owner/entries/${row.id}/edit`}
+                              variant="ghost"
+                              size="sm"
+                            >
+                              <Pencil />
+                              Edit
+                            </LinkButton>
+                          ) : null}
                           {list.canVoid && !isVoid ? (
                             <VoidOwnerMoneyButton id={row.id} label={row.entryNumber} />
                           ) : null}

@@ -60,7 +60,10 @@ export interface ShareMessageInput {
 const greeting = (name: string) => `Hello ${name.trim() || 'there'} 👋`;
 
 /** The close: an open door, then who it is from. */
-const signOff = (workshop: string) => ['Any questions? Just reply to this message.', `*${workshop}*`];
+const signOff = (workshop: string) => [
+  'Any questions? Just reply to this message.',
+  `*${workshop}*`,
+];
 
 /** "🚗 *Toyota Camry* · A 12345" — the car, as the customer knows it. */
 const vehicleLine = (input: ShareMessageInput) => {
@@ -86,7 +89,9 @@ export function quotationMessage(
     `🧾 Quotation *${input.number}*`,
     `💰 Total *${formatAed(input.total)}*`,
     '',
-    tapLine(input.awaitingDecision ? 'Tap below to view and approve' : 'Tap below to view your quotation'),
+    tapLine(
+      input.awaitingDecision ? 'Tap below to view and approve' : 'Tap below to view your quotation',
+    ),
     input.link,
     '',
     ...signOff(input.workshopName),
@@ -136,6 +141,25 @@ export function receiptMessage(
       : `⏳ Remaining balance *${formatAed(input.balance)}*`,
     '',
     tapLine('Tap below to view your invoice and receipts'),
+    input.link,
+    '',
+    ...signOff(input.workshopName),
+  ].join('\n');
+}
+
+export function jobCardMessage(
+  input: ShareMessageInput & { number: string; stage: string },
+): string {
+  return [
+    greeting(input.customerName),
+    '',
+    `Here is the job card for your vehicle at *${input.workshopName}*.`,
+    '',
+    ...vehicleLine(input),
+    `🛠️ Job card *${input.number}*`,
+    `📍 Now: *${input.stage}*`,
+    '',
+    tapLine('Tap below to see where your job is'),
     input.link,
     '',
     ...signOff(input.workshopName),

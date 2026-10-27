@@ -8,8 +8,10 @@ import { parseInput } from '@/lib/form-data';
 import { endOfLocalDay, localDateString } from '@/lib/format';
 import { invoiceBalance, receiptBalances } from '@/lib/billing/invoice';
 import { issueAccessToken } from '@/lib/customer-access/tokens';
+import { customerStage } from '@/lib/customer-access/job';
 import {
   invoiceMessage,
+  jobCardMessage,
   quotationMessage,
   receiptMessage,
   whatsAppUrl,
@@ -29,11 +31,13 @@ import {
 
 const INVOICE_LINK_DAYS = 90;
 const DECIDED_QUOTATION_LINK_DAYS = 30;
+const JOB_CARD_LINK_DAYS = 60;
 
 export const shareTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('quotation'), id: z.uuid() }),
   z.object({ kind: z.literal('invoice'), id: z.uuid() }),
   z.object({ kind: z.literal('receipt'), id: z.uuid() }),
+  z.object({ kind: z.literal('job_card'), id: z.uuid() }),
 ]);
 export type ShareTarget = z.infer<typeof shareTargetSchema>;
 
@@ -57,9 +61,67 @@ export async function createShareLink(
     where: { id: user.organizationId },
     select: { name: true },
   });
-  return target.kind === 'quotation'
-    ? shareQuotation(user, target.id, organization.name)
-    : shareInvoice(user, target, organization.name);
+  if (target.kind === 'quotation') return shareQuotation(user, target.id, organization.name);
+  if (target.kind === 'job_card') return shareJobCard(user, target.id, organization.name);
+  return shareInvoice(user, target, organization.name);
+}
+
+/** A job card: where the job is and the work approved (lib/customer-access/job.ts). */
+async function shareJobCard(
+  user: AuthenticatedUser,
+  jobCardId: string,
+  workshopName: string,
+): Promise<SharedDocument> {
+  return prisma.$transaction(async (tx) => {
+    const job = await tx.jobCard.findFirst({
+      where: { id: jobCardId, organizationId: user.organizationId },
+      select: {
+        id: true,
+        branchId: true,
+        jobNumber: true,
+        status: true,
+        customer: { select: { name: true, phone: true } },
+        vehicle: { select: { plateNumber: true, make: true, model: true } },
+      },
+    });
+    if (!job) throw new NotFoundError('job card');
+    requirePermission(user, 'job_card.view', { branchId: job.branchId });
+    const expiresAt = new Date(Date.now() + JOB_CARD_LINK_DAYS * 86_400_000);
+    const { rawToken, tokenId } = await issueAccessToken(tx, {
+      organizationId: user.organizationId,
+      resourceType: 'JOB_CARD',
+      resourceId: job.id,
+      createdByUserId: user.id,
+      expiresAt,
+    });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      branchId: job.branchId,
+      actorUserId: user.id,
+      action: 'customer_access.link_shared',
+      entityType: 'JobCard',
+      entityId: job.id,
+      metadata: {
+        customerAccessTokenId: tokenId,
+        document: 'job_card',
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+    return {
+      path: `/customer/job/${rawToken}`,
+      phone: job.customer.phone,
+      buildMessage: (link) =>
+        jobCardMessage({
+          customerName: job.customer.name,
+          workshopName,
+          vehicle: job.vehicle ? vehicleLabel(job.vehicle) : null,
+          plateNumber: job.vehicle?.plateNumber ?? null,
+          number: job.jobNumber,
+          stage: customerStage(job.status).label,
+          link,
+        }),
+    };
+  });
 }
 
 async function shareQuotation(

@@ -7,20 +7,18 @@ import { withNetQuantities } from '@/lib/inventory/stock';
 /*
  * The parts on an invoice or a quotation, tied to the catalogue.
  *
- * An invoice sells parts out of stock, so every Parts line typed on one
- * names the catalogue part it is (partId) and what one of it cost (unitCost
- * — decided by whoever writes the invoice, the part's last purchase cost
- * when left blank). That is what takes it out of stock (lib/inventory/
- * invoice-stock.ts) and books its cost of sales (lib/accounting/postings.ts).
- * A line typed with no part is refused: it is the hole that let parts be
- * sold without ever being bought.
+ * A Parts line picked from the catalogue names the part it is (partId) and
+ * what one of it cost (unitCost — decided by whoever writes the invoice, the
+ * part's last purchase cost when left blank). That is what takes it out of
+ * stock (lib/inventory/invoice-stock.ts) and books its cost of sales
+ * (lib/accounting/postings.ts).
  *
- * Two kinds of Parts line stay free of it: a line billed from a job's repair
- * records (its part left stock when it was fitted), and a line already on an
- * invoice issued before parts were tied to stock, kept as it was.
- *
- * Quotations may name the part too (it is carried onto the invoice), but
- * need not: a part can be quoted before it is ever bought.
+ * Naming a part is never required (the owners, 26 Oct 2026: parts are often
+ * bought only after the customer says yes). A line typed without one stays
+ * as typed: it takes nothing out of stock and books no cost of sales — the
+ * part's cost is wherever it was recorded as bought (an expense, a voucher).
+ * Quotations work the same way, and a part they name is carried onto the
+ * invoice.
  */
 
 interface PartLine {
@@ -90,8 +88,12 @@ export async function resolvePartLines<Line extends PartLine>(
  * ones billed from a job's repair records, and the ones that were already
  * without a part before (an invoice from before parts were tied to stock).
  */
-export function unlinkedAllowed(previous: { id: string; partId: string | null; partUsageId: string | null }[]) {
-  const free = new Set(previous.filter((item) => item.partUsageId || !item.partId).map((item) => item.id));
+export function unlinkedAllowed(
+  previous: { id: string; partId: string | null; partUsageId: string | null }[],
+) {
+  const free = new Set(
+    previous.filter((item) => item.partUsageId || !item.partId).map((item) => item.id),
+  );
   return (line: { sourceId?: string }) => Boolean(line.sourceId && free.has(line.sourceId));
 }
 

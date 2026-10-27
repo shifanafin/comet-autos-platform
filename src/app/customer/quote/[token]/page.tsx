@@ -81,7 +81,9 @@ export default async function CustomerQuotePage({
   const decision = quote.approvals[0];
   const inspection = jobCard?.inspections[0];
   const recommendation = jobCard?.diagnoses[0]?.recommendedAction;
-  const awaiting = !decision && quote.status === 'SENT' && !quote.expired;
+  // Replaced by a newer version: still shown, but there is nothing to decide on it.
+  const replaced = !decision && Boolean(quote.replacedAt);
+  const awaiting = !decision && !replaced && quote.status === 'SENT' && !quote.expired;
   const additional = quote.kind === 'ADDITIONAL';
 
   return (
@@ -126,6 +128,17 @@ export default async function CustomerQuotePage({
                 {decision.status === 'APPROVED'
                   ? "Thank you — we'll get started and keep you updated."
                   : "We've let the workshop know. They may contact you with other options."}
+              </p>
+            </div>
+          </div>
+        ) : replaced ? (
+          <div role="status" className="flex items-start gap-4 rounded-2xl bg-muted px-5 py-5">
+            <Clock className="size-6 shrink-0 text-muted-foreground" />
+            <div className="flex flex-col gap-1">
+              <p className="font-semibold">This version has been replaced.</p>
+              <p className="text-sm text-muted-foreground">
+                The workshop has sent a newer version of this quotation. Please ask them for its
+                link{access.organization.phone ? ` — call ${access.organization.phone}` : ''}.
               </p>
             </div>
           </div>

@@ -100,6 +100,112 @@ export async function recordBusinessPurchasePayment(user: AuthenticatedUser, raw
   });
 }
 
+/** One payment as its edit form needs it — only one that stands. */
+export async function getBusinessPurchasePayment(user: AuthenticatedUser, id: string) {
+  requirePermission(user, 'money.view');
+  const row = await prisma.businessPurchasePayment.findFirst({
+    where: { id, organizationId: user.organizationId, voidedAt: null },
+    select: {
+      id: true,
+      partnerId: true,
+      amount: true,
+      paidOn: true,
+      paidTo: true,
+      description: true,
+      reference: true,
+      notes: true,
+    },
+  });
+  if (!row) throw new NotFoundError('payment');
+  return {
+    ...row,
+    amount: row.amount.toFixed(2),
+    paidOn: row.paidOn.toISOString().slice(0, 10),
+    reference: row.reference ?? '',
+    notes: row.notes ?? '',
+  };
+}
+
+export type BusinessPurchaseEntry = Awaited<ReturnType<typeof getBusinessPurchasePayment>>;
+
+/** Corrects a payment where it stands; the audit log keeps what it said before. Books nothing. */
+export async function updateBusinessPurchasePayment(
+  user: AuthenticatedUser,
+  id: string,
+  rawInput: unknown,
+) {
+  const input = parseInput(recordSchema, rawInput);
+  requirePermission(user, 'money.create');
+  const amountFils = toFils(input.amount);
+  if (amountFils <= 0) throw new DomainError('Enter an amount above zero.', 'amount');
+  const paidOn = parseCalendarDate(input.paidOn);
+  if (!paidOn || input.paidOn > localDateString()) {
+    throw new DomainError('Enter the date — not a future one.', 'paidOn');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.businessPurchasePayment.findFirst({
+      where: { id, organizationId: user.organizationId },
+      select: {
+        id: true,
+        voidedAt: true,
+        partnerId: true,
+        amount: true,
+        paidOn: true,
+        paidTo: true,
+        description: true,
+        reference: true,
+        notes: true,
+      },
+    });
+    if (!before) throw new NotFoundError('payment');
+    if (before.voidedAt) throw new DomainError('A void payment can’t be changed.');
+    const partner = await tx.partner.findFirst({
+      where: { id: input.partnerId, organizationId: user.organizationId, isActive: true },
+      select: { id: true, name: true },
+    });
+    if (!partner) throw new DomainError('Choose a partner from the list.', 'partnerId');
+    await tx.businessPurchasePayment.update({
+      where: { id },
+      data: {
+        partnerId: partner.id,
+        amount: filsToString(amountFils),
+        paidOn,
+        paidTo: input.paidTo,
+        description: input.description,
+        reference: input.reference || null,
+        notes: input.notes || null,
+      },
+    });
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'business_purchase.corrected',
+      entityType: 'BusinessPurchasePayment',
+      entityId: id,
+      beforeData: {
+        partnerId: before.partnerId,
+        amount: before.amount.toString(),
+        paidOn: before.paidOn.toISOString().slice(0, 10),
+        paidTo: before.paidTo,
+        description: before.description,
+        reference: before.reference,
+        notes: before.notes,
+      },
+      afterData: {
+        partner: partner.name,
+        amount: filsToString(amountFils),
+        paidOn: input.paidOn,
+        paidTo: input.paidTo,
+        description: input.description,
+        reference: input.reference || null,
+        notes: input.notes || null,
+      },
+    });
+    return { id };
+  });
+}
+
 const voidSchema = z.object({
   reason: z.string({ error: 'Say why.' }).trim().min(3, 'Say why, in a few words.').max(300),
   requestKey: z.string().optional(),
@@ -173,5 +279,6 @@ export async function listBusinessPurchasePayments(user: AuthenticatedUser) {
     byPartner,
     canRecord: hasPermission(user, 'money.create'),
     canVoid: hasPermission(user, 'money.delete'),
+    canEdit: hasPermission(user, 'money.create'),
   };
 }

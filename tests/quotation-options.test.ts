@@ -110,7 +110,8 @@ describe('a version kept open as an option', () => {
     const second = await row(v2.id);
     assert.equal(second.isCurrent, false, 'version 2 no longer counts');
     assert.ok(second.replacedAt, 'version 2 closed as not chosen');
-    assert.equal((await getQuoteAccess(link2)).state, 'invalid', 'its link is withdrawn');
+    assert.equal((await getQuoteAccess(link2)).state, 'open', 'its link still opens, read-only');
+    await expectDomainError(decideQuoteAsCustomer(link2, 'APPROVED', null), /replaced/);
     assert.equal(await jobStatus(jobCardId), 'APPROVED');
     assert.equal((await getQuotation(org.owner, v1)).isLatest, true);
   });
@@ -148,11 +149,12 @@ describe('a version kept open as an option', () => {
 });
 
 describe('a version replaced by a correction', () => {
-  test('its link stops working and it can no longer be approved', async () => {
+  test('its link still opens, read-only, and it can no longer be approved', async () => {
     const { v1 } = await quotedJob('250');
     const { rawToken: link1 } = await sendEstimate(org.owner, v1);
     await reviseEstimate(org.owner, v1);
-    assert.equal((await getQuoteAccess(link1)).state, 'invalid');
+    assert.equal((await getQuoteAccess(link1)).state, 'open');
+    await expectDomainError(decideQuoteAsCustomer(link1, 'APPROVED', null), /replaced/);
     assert.ok((await row(v1)).replacedAt);
     await expectDomainError(
       recordCustomerDecision(org.owner, v1, { decision: 'APPROVED', method: 'PHONE' }),

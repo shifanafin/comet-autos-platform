@@ -9,7 +9,8 @@ import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { formatCalendarDate, formatDateTime, formatMoney, localDateString } from '@/lib/format';
 import { getQuotation } from '@/lib/workshop/quotations';
-import { approvedChangeBlocker, isOpenVersion } from '@/lib/workshop/estimates';
+import { approvedChangeBlocker, isOpenVersion, jobsForQuotation } from '@/lib/workshop/estimates';
+import { LinkQuotationJob } from '@/components/workshop/link-quotation-job';
 import { prisma } from '@/lib/prisma';
 import { resolveDefaultVatRate } from '@/lib/tax';
 import { Grid, PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
@@ -67,6 +68,9 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
   const { customer, vehicle, jobCard, expired, isLatest, isOpenOption, versions } = quotation;
   const current = versions.find((version) => version.isCurrent);
   const canEdit = hasPermission(user, 'quotation.edit', { branchId: quotation.branchId });
+  // No job card behind it: one of the customer's can still be linked.
+  const canLinkJob = !jobCard && quotation.kind === 'ORIGINAL' && canEdit;
+  const linkableJobs = canLinkJob ? await jobsForQuotation(user, quotation.id) : [];
   // Replaced (or not chosen) while nothing is approved yet: it can be opened again.
   const canReopen =
     canEdit &&
@@ -101,7 +105,9 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
     canEdit &&
     isLatest &&
     quotation.kind !== 'ADDITIONAL' &&
-    (quotation.status === 'SENT' || quotation.status === 'REJECTED' || (approved && !changeBlocker));
+    (quotation.status === 'SENT' ||
+      quotation.status === 'REJECTED' ||
+      (approved && !changeBlocker));
   // Another version is approved and nothing is built on it yet: the
   // customer may still change their mind to this one.
   const currentApproved =
@@ -218,7 +224,9 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
 
       {changeBlocker ? (
         <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">Need to change this approved quotation? </span>
+          <span className="font-medium text-foreground">
+            Need to change this approved quotation?{' '}
+          </span>
           {changeBlocker}
         </p>
       ) : null}
@@ -340,6 +348,20 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                       <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
                     </Link>
                   </li>
+                ) : canLinkJob ? (
+                  <li className="flex flex-col gap-2 px-4 py-3 sm:px-6">
+                    <span className="flex items-center gap-3 text-sm font-medium">
+                      <ClipboardList className="size-4 shrink-0 text-muted-foreground" />
+                      No job card yet
+                    </span>
+                    <LinkQuotationJob
+                      estimateId={quotation.id}
+                      jobs={linkableJobs.map((job) => ({
+                        id: job.id,
+                        label: `${job.jobNumber}${job.vehicle ? ` · ${job.vehicle.make} ${job.vehicle.model}${job.vehicle.plateNumber ? ` ${job.vehicle.plateNumber}` : ''}` : ''}`,
+                      }))}
+                    />
+                  </li>
                 ) : null}
               </ul>
             </Panel>
@@ -352,7 +374,11 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
             quotation={
               jobCard
                 ? undefined
-                : { customerId: customer.id, vehicleId: vehicle?.id ?? null, branchId: quotation.branchId }
+                : {
+                    customerId: customer.id,
+                    vehicleId: vehicle?.id ?? null,
+                    branchId: quotation.branchId,
+                  }
             }
           />
 
@@ -458,7 +484,10 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
               {switchable.map((version, index) => (
                 <span key={version.id}>
                   {index > 0 ? ' or ' : ''}
-                  <Link href={`/quotations/${version.id}`} className="font-medium text-primary hover:underline">
+                  <Link
+                    href={`/quotations/${version.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
                     version {version.version}
                   </Link>
                 </span>

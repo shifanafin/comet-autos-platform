@@ -9,10 +9,13 @@ import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { filsToString, toFils } from '@/lib/money';
 import { localDateString, parseCalendarDate } from '@/lib/format';
 import { allocateDocumentNumber } from '@/lib/numbering';
-import { syncPosting } from '@/lib/accounting/journal';
+import { syncPosting, whyNotCorrectable } from '@/lib/accounting/journal';
 import { checkMoneyAccount } from '@/lib/accounting/chart';
 import { getTransferAccounts } from '@/lib/finance/money';
 import { OWNER_MONEY_LABEL, type OwnerMoneyKindKey } from '@/lib/finance/owner-money-labels';
+import type { Prisma } from '@/generated/prisma/client';
+
+type Tx = Prisma.TransactionClient;
 
 /*
  * Owner's money (OWN-) — an owner putting money into the business, or taking
@@ -168,10 +171,8 @@ const recordSchema = z.object({
   requestKey: z.string().optional(),
 });
 
-/** Records an owner putting money in or taking it out, and books it. */
-export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknown) {
-  const input = parseInput(recordSchema, rawInput);
-  requirePermission(user, 'money.create');
+/** What an entry says, checked the same way when it is recorded and when it is corrected. */
+async function checkEntry(user: AuthenticatedUser, input: z.infer<typeof recordSchema>) {
   const amountFils = toFils(input.amount);
   if (amountFils <= 0) throw new DomainError('Enter an amount above zero.', 'amount');
   const movedOn = parseCalendarDate(input.movedOn);
@@ -200,19 +201,30 @@ export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknow
     // A cost paid or an amount left in is always someone's: it counts in their contribution.
     if (!input.partnerId) throw new DomainError('Choose the partner.', 'partnerId');
   }
+  return { amountFils, movedOn, how };
+}
+
+/** The partner named, checked to be one of the business's. */
+async function resolvePartner(tx: Tx, organizationId: string, partnerId: string | undefined) {
+  if (!partnerId) return null;
+  const partner = await tx.partner.findFirst({
+    where: { id: partnerId, organizationId, isActive: true },
+    select: { id: true, name: true },
+  });
+  if (!partner) throw new DomainError('Choose a partner from the list.', 'partnerId');
+  return partner;
+}
+
+/** Records an owner putting money in or taking it out, and books it. */
+export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknown) {
+  const input = parseInput(recordSchema, rawInput);
+  requirePermission(user, 'money.create');
+  const { amountFils, movedOn, how } = await checkEntry(user, input);
 
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, rawInput, 'owner_money.record');
     if (how === 'money') await checkMoneyAccount(tx, user.organizationId, input.accountId);
-    const partner = input.partnerId
-      ? await tx.partner.findFirst({
-          where: { id: input.partnerId, organizationId: user.organizationId, isActive: true },
-          select: { id: true, name: true },
-        })
-      : null;
-    if (input.partnerId && !partner) {
-      throw new DomainError('Choose a partner from the list.', 'partnerId');
-    }
+    const partner = await resolvePartner(tx, user.organizationId, input.partnerId);
     const entryNumber = await allocateDocumentNumber(tx, user.organizationId, null, 'OWNER_MONEY');
     const row = await tx.ownerMoney.create({
       data: {
@@ -250,6 +262,134 @@ export async function recordOwnerMoney(user: AuthenticatedUser, rawInput: unknow
     });
     await settleRequestKey(tx, user, rawInput, row.id);
     return row;
+  });
+}
+
+/** One entry as its edit form needs it — only one that stands. */
+export async function getOwnerMoneyEntry(user: AuthenticatedUser, id: string) {
+  requirePermission(user, 'money.view');
+  const row = await prisma.ownerMoney.findFirst({
+    where: { id, organizationId: user.organizationId },
+    select: {
+      id: true,
+      entryNumber: true,
+      status: true,
+      kind: true,
+      accountId: true,
+      partnerId: true,
+      amount: true,
+      movedOn: true,
+      reference: true,
+      notes: true,
+      account: { select: { isPaymentAccount: true, accountType: true } },
+    },
+  });
+  if (!row || row.status !== 'POSTED') throw new NotFoundError("owner's money entry");
+  return {
+    id: row.id,
+    entryNumber: row.entryNumber,
+    kind: row.kind,
+    how: ownerMoneyHow(row.account) as OwnerMoneyHow,
+    accountId: row.accountId,
+    partnerId: row.partnerId ?? '',
+    amount: row.amount.toFixed(2),
+    movedOn: row.movedOn.toISOString().slice(0, 10),
+    reference: row.reference ?? '',
+    notes: row.notes ?? '',
+  };
+}
+
+export type OwnerMoneyEntry = Awaited<ReturnType<typeof getOwnerMoneyEntry>>;
+
+/**
+ * Corrects an entry where it stands: the record changes and its journal
+ * entry is corrected in place — no void, no second entry. The audit log
+ * keeps what it said before. Once its month is closed or its money line is
+ * ticked off on a reconciliation, it can't be changed: void it instead.
+ */
+export async function updateOwnerMoney(user: AuthenticatedUser, id: string, rawInput: unknown) {
+  const input = parseInput(recordSchema, rawInput);
+  requirePermission(user, 'money.create');
+  const { amountFils, movedOn, how } = await checkEntry(user, input);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM owner_money WHERE id = ${id}::uuid AND organization_id = ${user.organizationId}::uuid FOR UPDATE`;
+    const before = await tx.ownerMoney.findFirst({
+      where: { id, organizationId: user.organizationId },
+      select: {
+        id: true,
+        entryNumber: true,
+        status: true,
+        kind: true,
+        accountId: true,
+        partnerId: true,
+        amount: true,
+        movedOn: true,
+        reference: true,
+        notes: true,
+      },
+    });
+    if (!before) throw new NotFoundError("owner's money entry");
+    if (before.status !== 'POSTED') throw new DomainError('A void entry can’t be changed.');
+    const entry = await tx.journalEntry.findFirst({
+      where: {
+        organizationId: user.organizationId,
+        sourceType: 'OWNER_MONEY',
+        sourceId: id,
+        reversalOfJournalEntryId: null,
+        reversals: { none: {} },
+      },
+      select: { id: true, organizationId: true, entryDate: true },
+    });
+    const locked = entry ? await whyNotCorrectable(tx, entry, movedOn) : null;
+    if (locked) {
+      throw new DomainError(
+        `${before.entryNumber} can’t be changed: ${locked}. Void it and record it again.`,
+      );
+    }
+    if (how === 'money') await checkMoneyAccount(tx, user.organizationId, input.accountId);
+    const partner = await resolvePartner(tx, user.organizationId, input.partnerId);
+    await tx.ownerMoney.update({
+      where: { id },
+      data: {
+        kind: input.kind,
+        accountId: input.accountId,
+        partnerId: partner?.id ?? null,
+        amount: filsToString(amountFils),
+        movedOn,
+        reference: input.reference || null,
+        notes: input.notes || null,
+      },
+    });
+    await syncPosting(tx, user.organizationId, 'OWNER_MONEY', id, user.id);
+    await writeAuditLog(tx, {
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: 'owner_money.corrected',
+      entityType: 'OwnerMoney',
+      entityId: id,
+      beforeData: {
+        kind: before.kind,
+        accountId: before.accountId,
+        partnerId: before.partnerId,
+        amount: before.amount.toString(),
+        movedOn: before.movedOn.toISOString().slice(0, 10),
+        reference: before.reference,
+        notes: before.notes,
+      },
+      afterData: {
+        kind: input.kind,
+        how,
+        accountId: input.accountId,
+        partner: partner?.name ?? null,
+        amount: filsToString(amountFils),
+        movedOn: input.movedOn,
+        reference: input.reference || null,
+        notes: input.notes || null,
+      },
+      metadata: { entryNumber: before.entryNumber },
+    });
+    return { id, entryNumber: before.entryNumber };
   });
 }
 
@@ -381,6 +521,7 @@ export async function listOwnerMoney(user: AuthenticatedUser) {
     }),
     canRecord: hasPermission(user, 'money.create'),
     canVoid: hasPermission(user, 'money.delete'),
+    canEdit: hasPermission(user, 'money.create'),
   };
 }
 

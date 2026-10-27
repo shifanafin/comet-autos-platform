@@ -27,12 +27,7 @@ import { dueFils, paidFils, settlementStatus, takePayment } from '@/lib/billing/
 import { readDueDate } from '@/lib/billing/direct-invoice';
 import { syncPosting } from '@/lib/accounting/journal';
 import { syncInvoiceStock } from '@/lib/inventory/invoice-stock';
-import {
-  assertNotFitted,
-  partsFittedOnJob,
-  resolvePartLines,
-  unlinkedAllowed,
-} from '@/lib/billing/part-lines';
+import { assertNotFitted, partsFittedOnJob, resolvePartLines } from '@/lib/billing/part-lines';
 import {
   assertIncomeAccounts,
   discountFields,
@@ -248,13 +243,11 @@ export async function updateInvoice(user: AuthenticatedUser, invoiceId: string, 
       await resolveTaxCodes(tx, user.organizationId, input.items),
     );
     const { totals } = priced;
-    // Parts lines name their part and cost, as on a new invoice — but a line
-    // billed from the repair records, or kept from before parts were tied to
-    // stock, may stay as it was.
+    // As on a new invoice: a Parts line picked from the list carries its part
+    // and cost; one typed stays as typed (lib/billing/part-lines.ts).
     const fitted = await partsFittedOnJob(tx, user.organizationId, invoice.jobCardId);
-    const free = unlinkedAllowed(invoice.items);
     const lines = await resolvePartLines(tx, user.organizationId, priced.lines, {
-      required: (_line, index) => fitted.size === 0 && !free(input.items[index]),
+      required: () => false,
       keep: new Set(invoice.items.flatMap((item) => (item.partId ? [item.partId] : []))),
     });
     assertNotFitted(lines, fitted);

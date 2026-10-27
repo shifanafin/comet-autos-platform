@@ -12,6 +12,7 @@ import { quotationWhatsApp } from '@/lib/customer-access/share';
 import {
   createQuotation,
   deleteDraftQuotation,
+  linkQuotationToJob,
   recordCustomerDecision,
   reissueEstimateLink,
   reopenVersion,
@@ -146,6 +147,23 @@ export async function reopenQuotationVersionAction(estimateId: string): Promise<
   const user = await requireUser();
   const result = await runAction(() => reopenVersion(user, estimateId));
   if (result.ok) await refreshQuotation(estimateId);
+  return toClientResult(result);
+}
+
+/** Ties a quotation raised without a job card to one (bound to the quotation's id). */
+export async function linkQuotationToJobAction(
+  estimateId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    linkQuotationToJob(user, estimateId, formDataToObject(formData)),
+  );
+  if (result.ok) {
+    await refreshQuotation(estimateId);
+    revalidatePath('/job-cards', 'layout');
+  }
   return toClientResult(result);
 }
 
