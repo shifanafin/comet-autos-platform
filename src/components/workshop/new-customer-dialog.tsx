@@ -25,7 +25,7 @@ import { getCustomerOptionAction } from '@/app/(app)/customers/search-action';
 const INPUT = '[&_input]:h-11 [&_input]:text-base md:[&_input]:text-sm';
 
 /** What was searched for: digits are a mobile number, anything else a name. */
-function startFrom(query: string) {
+export function startFrom(query: string) {
   const text = query.trim();
   return /^[+\d\s()-]{5,}$/.test(text) ? { name: '', phone: text } : { name: text, phone: '' };
 }

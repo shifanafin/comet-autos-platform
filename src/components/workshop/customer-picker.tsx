@@ -34,6 +34,8 @@ export function CustomerPicker({
   /** A job card opened from its own page, offered even when it is no longer open. */
   pinnedJobCard,
   autoFocus,
+  ownerOnly = false,
+  onAddNew,
 }: {
   value: PickedParty | null;
   onChange: (picked: PickedParty | null) => void;
@@ -41,6 +43,10 @@ export function CustomerPicker({
   requireJobCard?: boolean;
   pinnedJobCard?: { id: string; jobNumber: string; vehicleId: string } | null;
   autoFocus?: boolean;
+  /** Only the customer is chosen (the owner of a new vehicle): no vehicle or job card. */
+  ownerOnly?: boolean;
+  /** The page adds the new customer itself, with what was searched for, instead of the popup. */
+  onAddNew?: (query: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<CustomerOption[]>([]);
@@ -49,6 +55,7 @@ export function CustomerPicker({
   /** The "new customer" popup, open with what was searched for. */
   const [adding, setAdding] = useState<string | null>(null);
   const trimmed = query.trim();
+  const addNew = (text: string) => (onAddNew ? onAddNew(text) : setAdding(text));
 
   useEffect(() => {
     if (trimmed.length < 2) return;
@@ -64,26 +71,30 @@ export function CustomerPicker({
 
   if (value) {
     const { customer, vehicleId, jobCardId } = value;
+    const chosen = (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-4">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{customer.name}</p>
+          <p className="truncate text-sm text-muted-foreground">{customer.phone}</p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-11"
+          onClick={() => {
+            onChange(null);
+            setQuery('');
+          }}
+        >
+          <X />
+          Change customer
+        </Button>
+      </div>
+    );
+    if (ownerOnly) return chosen;
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-4">
-          <div className="min-w-0">
-            <p className="truncate font-medium">{customer.name}</p>
-            <p className="truncate text-sm text-muted-foreground">{customer.phone}</p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-11"
-            onClick={() => {
-              onChange(null);
-              setQuery('');
-            }}
-          >
-            <X />
-            Change customer
-          </Button>
-        </div>
+        {chosen}
 
         <fieldset className="flex flex-col gap-3">
           <legend className="text-sm font-medium">
@@ -196,7 +207,7 @@ export function CustomerPicker({
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <span>Not on file yet?</span>
-        <Button type="button" variant="outline" className="h-11" onClick={() => setAdding(trimmed)}>
+        <Button type="button" variant="outline" className="h-11" onClick={() => addNew(trimmed)}>
           <UserPlus />
           Add new customer
         </Button>
@@ -238,7 +249,7 @@ export function CustomerPicker({
             type="button"
             variant="outline"
             className="h-11"
-            onClick={() => setAdding(trimmed)}
+            onClick={() => addNew(trimmed)}
           >
             <UserPlus />
             Add “{trimmed}” as a new customer

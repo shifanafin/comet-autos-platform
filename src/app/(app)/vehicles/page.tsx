@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Car, UserPlus } from 'lucide-react';
+import { Car, Plus, UserPlus } from 'lucide-react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { canExport } from '@/lib/data-transfer/exports';
 import { pageVehicles } from '@/lib/vehicles/service';
@@ -73,6 +73,13 @@ export default async function VehiclesPage({
                 New customer &amp; vehicle
               </LinkButton>
             ) : null}
+            {canImport ? (
+              // The owner is chosen first: usually a customer already on file.
+              <LinkButton href="/vehicles/new" size="lg">
+                <Plus />
+                New vehicle
+              </LinkButton>
+            ) : null}
           </>
         }
       />
@@ -97,7 +104,7 @@ export default async function VehiclesPage({
                   ? 'No deleted vehicles'
                   : 'No vehicles yet'
             }
-            description="Vehicles are added from a customer's page or during Quick Check-In."
+            description="Add one with New vehicle, from a customer's page, or during Quick Check-In."
           />
         ) : (
           <RecordSelection entity="vehicles" enabled={canRemove}>

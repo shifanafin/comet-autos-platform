@@ -3,12 +3,17 @@
 import Link from 'next/link';
 import { useFormAction } from '@/components/forms/use-form-action';
 import { useState } from 'react';
-import { ArrowRight, CalendarDays, Camera, CheckCircle2, TriangleAlert, UserPlus } from 'lucide-react';
+import { ArrowRight, CalendarDays, Camera, CarFront, CheckCircle2, TriangleAlert, UserCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Field, FormError, NativeSelect, TextField, TextareaField } from '@/components/forms/fields';
 import { SubmitButton } from '@/components/forms/submit-button';
 import { VehiclePlate } from '@/components/shared/vehicle-plate';
 import { VehiclePicker } from '@/components/workshop/vehicle-picker';
+import { CustomerPicker, type PickedParty } from '@/components/workshop/customer-picker';
+import { startFrom } from '@/components/workshop/new-customer-dialog';
+import { checkDuplicatePhoneAction } from '@/app/(app)/customers/actions';
+import { getCustomerOptionAction } from '@/app/(app)/customers/search-action';
 import type { VehicleSummary } from '@/lib/vehicles/summary';
 import type { ActionResult } from '@/lib/errors';
 import type { CheckInResult } from '@/lib/workshop/check-in';
@@ -56,6 +61,10 @@ export function CheckInForm({
   const [state, onSubmit, isPending] = useFormAction<ActionResult<CheckInResult>>(checkInAction, { ok: false });
   const [vehicle, setVehicle] = useState<VehicleSummary | null>(initialVehicle);
   const [creatingNew, setCreatingNew] = useState(false);
+  /** A new vehicle's owner: a customer on file, or (newOwner) one typed in now. */
+  const [owner, setOwner] = useState<PickedParty | null>(null);
+  const [newOwner, setNewOwner] = useState(false);
+  const [ownerStart, setOwnerStart] = useState('');
   const [customerConfirmed, setCustomerConfirmed] = useState(Boolean(initialVehicle && initialAppointment));
   const errors = state.fieldErrors ?? {};
 
@@ -134,40 +143,82 @@ export function CheckInForm({
     return (
       <form onSubmit={onSubmit} className="flex flex-col gap-10">
         <input type="hidden" name="mode" value="new" />
-        <Step number={1} title="New customer">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <TextField label="Customer name" name="name" required error={errors.name} autoFocus />
-            <TextField label="Mobile number" name="phone" type="tel" required error={errors.phone} placeholder="050 123 4567" />
-            <TextField label="Email" name="email" type="email" error={errors.email} hint="Optional" className="sm:col-span-2" />
-          </div>
+        <input type="hidden" name="customerId" value={owner?.customer.id ?? ''} />
+        {/* Many owners are already on file with another car: choose them, or add a new one. */}
+        <Step number={1} title="Owner" done={Boolean(owner)}>
+          {newOwner ? (
+            <NewOwnerFields
+              errors={errors}
+              start={ownerStart}
+              onUseExisting={(picked) => {
+                setOwner(picked);
+                setNewOwner(false);
+              }}
+              onSearchInstead={() => setNewOwner(false)}
+            />
+          ) : (
+            <CustomerPicker
+              value={owner}
+              onChange={setOwner}
+              ownerOnly
+              allowJobCard={false}
+              autoFocus
+              onAddNew={(text) => {
+                setOwner(null);
+                setOwnerStart(text);
+                setNewOwner(true);
+              }}
+            />
+          )}
+          {owner && owner.customer.vehicles.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {`On file for ${owner.customer.name}: ${owner.customer.vehicles.map((v) => v.plateNumber).join(', ')}. `}
+              If the car is one of these,{' '}
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={() => setCreatingNew(false)}
+              >
+                find it instead
+              </button>
+              .
+            </p>
+          ) : null}
+          <FormError message={errors.customerId} />
         </Step>
-        <Step number={2} title="Vehicle">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <TextField label="Registration number" name="plateNumber" required error={errors.plateNumber} placeholder="A 12345" />
-            <Field label="Emirate" htmlFor="plateEmirate" hint="Optional">
-              <NativeSelect id="plateEmirate" name="plateEmirate" defaultValue="Dubai">
-                <option value="">—</option>
-                {PLATE_EMIRATES.map((emirate) => (
-                  <option key={emirate} value={emirate}>
-                    {emirate}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <TextField label="Make" name="make" required error={errors.make} placeholder="Toyota" />
-            <TextField label="Model" name="model" required error={errors.model} placeholder="Land Cruiser" />
-            <TextField label="Year" name="year" inputMode="numeric" error={errors.year} hint="Optional" />
-            <TextField label="VIN" name="vin" error={errors.vin} hint="Optional" />
-          </div>
-        </Step>
-        <VisitStep number={3} errors={errors} lastMileage={null} today={today} />
-        <FormError message={state.error} />
+        {owner || newOwner ? (
+          <>
+            <Step number={2} title="Vehicle">
+              <div className="grid gap-6 sm:grid-cols-2">
+                <TextField label="Registration number" name="plateNumber" required error={errors.plateNumber} placeholder="A 12345" />
+                <Field label="Emirate" htmlFor="plateEmirate" hint="Optional">
+                  <NativeSelect id="plateEmirate" name="plateEmirate" defaultValue="Dubai">
+                    <option value="">—</option>
+                    {PLATE_EMIRATES.map((emirate) => (
+                      <option key={emirate} value={emirate}>
+                        {emirate}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <TextField label="Make" name="make" required error={errors.make} placeholder="Toyota" />
+                <TextField label="Model" name="model" required error={errors.model} placeholder="Land Cruiser" />
+                <TextField label="Year" name="year" inputMode="numeric" error={errors.year} hint="Optional" />
+                <TextField label="VIN" name="vin" error={errors.vin} hint="Optional" />
+              </div>
+            </Step>
+            <VisitStep number={3} errors={errors} lastMileage={null} today={today} />
+          </>
+        ) : null}
+        <FormError message={errors.customerId ? undefined : state.error} />
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-6">
-          <SubmitButton pending={isPending} size="lg" pendingLabel="Creating…">
-            Create job card
-          </SubmitButton>
+          {owner || newOwner ? (
+            <SubmitButton pending={isPending} size="lg" pendingLabel="Creating…">
+              Create job card
+            </SubmitButton>
+          ) : null}
           <Button type="button" variant="ghost" size="lg" onClick={() => setCreatingNew(false)}>
-            Search instead
+            Search vehicles instead
           </Button>
         </div>
       </form>
@@ -215,10 +266,10 @@ export function CheckInForm({
             }}
             footer={
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                <span>First visit?</span>
+                <span>Vehicle not on file?</span>
                 <Button type="button" variant="outline" onClick={() => setCreatingNew(true)}>
-                  <UserPlus />
-                  New customer &amp; vehicle
+                  <CarFront />
+                  New vehicle
                 </Button>
               </div>
             }
@@ -300,6 +351,89 @@ export function CheckInForm({
         </>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * A new vehicle's owner who is not on file yet, created with the vehicle and
+ * its job card. If the mobile already belongs to a customer, that customer is
+ * offered instead, so nobody is entered twice.
+ */
+function NewOwnerFields({
+  errors,
+  start,
+  onUseExisting,
+  onSearchInstead,
+}: {
+  errors: Record<string, string>;
+  /** What was searched for: a name or a mobile to start with. */
+  start: string;
+  onUseExisting: (picked: PickedParty) => void;
+  onSearchInstead: () => void;
+}) {
+  const initial = startFrom(start);
+  const [existing, setExisting] = useState<{ id: string; name: string; phone: string }[]>([]);
+
+  async function pickExisting(id: string) {
+    const customer = await getCustomerOptionAction(id);
+    if (customer) onUseExisting({ customer, vehicleId: '', jobCardId: '' });
+    else toast.error('That customer could not be opened — search for them instead.');
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-6 sm:grid-cols-2">
+        <TextField
+          label="Customer name"
+          name="name"
+          required
+          defaultValue={initial.name}
+          error={errors.name}
+          autoFocus={!initial.name}
+        />
+        <TextField
+          label="Mobile number"
+          name="phone"
+          type="tel"
+          required
+          defaultValue={initial.phone}
+          error={errors.phone}
+          placeholder="050 123 4567"
+          autoFocus={Boolean(initial.name)}
+          onBlur={async (event) => setExisting(await checkDuplicatePhoneAction(event.target.value))}
+        />
+        <TextField
+          label="Email"
+          name="email"
+          type="email"
+          error={errors.email}
+          hint="Optional"
+          className="sm:col-span-2"
+        />
+      </div>
+      {existing.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+          <p>This mobile is already on file — use that customer instead of adding them again:</p>
+          {existing.map((customer) => (
+            <Button
+              key={customer.id}
+              type="button"
+              variant="outline"
+              className="h-11 justify-start"
+              onClick={() => pickExisting(customer.id)}
+            >
+              <UserCheck />
+              Use {customer.name} · {customer.phone}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      <div>
+        <Button type="button" variant="ghost" onClick={onSearchInstead}>
+          Search customers instead
+        </Button>
+      </div>
+    </div>
   );
 }
 

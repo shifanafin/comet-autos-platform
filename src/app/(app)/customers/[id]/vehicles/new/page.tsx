@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { AccessDenied } from '@/components/shared/access-denied';
@@ -12,7 +13,7 @@ export default async function NewVehiclePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ new?: string }>;
+  searchParams: Promise<{ new?: string; from?: string }>;
 }) {
   const user = await requireUser();
   if (
@@ -25,7 +26,10 @@ export default async function NewVehiclePage({
     return <AccessDenied what="adding vehicles" />;
   }
   const { id } = await params;
-  const isNewCustomer = (await searchParams).new === '1';
+  const query = await searchParams;
+  const isNewCustomer = query.new === '1';
+  // Started from Vehicles › New vehicle, where the owner was chosen first.
+  const fromVehicles = query.from === 'vehicles';
   let detail;
   try {
     detail = await getCustomerDetail(user, id);
@@ -38,12 +42,26 @@ export default async function NewVehiclePage({
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
       <PageHeader
-        eyebrow={isNewCustomer ? 'New customer · step 2 of 2' : 'Customers'}
+        eyebrow={
+          isNewCustomer
+            ? 'New customer · step 2 of 2'
+            : fromVehicles
+              ? 'New vehicle · step 2 of 2'
+              : 'Customers'
+        }
         title="Add vehicle"
         description={
           <>
             Owner: <span className="font-medium text-foreground">{customer.name}</span> ·{' '}
             {customer.phone}
+            {fromVehicles ? (
+              <>
+                {' · '}
+                <Link href="/vehicles/new" className="font-medium text-primary hover:underline">
+                  Change owner
+                </Link>
+              </>
+            ) : null}
           </>
         }
       />
@@ -51,7 +69,7 @@ export default async function NewVehiclePage({
         <VehicleForm
           action={createVehicleAction.bind(null, customer.id)}
           submitLabel="Save vehicle"
-          cancelHref={`/customers/${customer.id}`}
+          cancelHref={fromVehicles ? '/vehicles' : `/customers/${customer.id}`}
           offerCheckIn
         />
       </Panel>

@@ -42,22 +42,32 @@ export async function checkInAction(
     return { ok: false, error: 'The other vehicles could not be read. Refresh and try again.' };
   }
 
+  const vehicle = {
+    plateNumber: input.plateNumber,
+    plateEmirate: input.plateEmirate,
+    vin: input.vin,
+    make: input.make,
+    model: input.model,
+    year: input.year,
+  };
   const result = await runAction(() =>
     input.mode === 'new'
-      ? checkInVehicle(user, {
-          mode: 'new',
-          customer: { name: input.name, phone: input.phone, email: input.email },
-          vehicle: {
-            plateNumber: input.plateNumber,
-            plateEmirate: input.plateEmirate,
-            vin: input.vin,
-            make: input.make,
-            model: input.model,
-            year: input.year,
-          },
-          visit,
-          requestKey: input.requestKey,
-        })
+      ? // A new vehicle: for a customer chosen from the list, or a new customer typed in.
+        input.customerId
+        ? checkInVehicle(user, {
+            mode: 'new',
+            customerId: input.customerId,
+            vehicle,
+            visit,
+            requestKey: input.requestKey,
+          })
+        : checkInVehicle(user, {
+            mode: 'new',
+            customer: { name: input.name, phone: input.phone, email: input.email },
+            vehicle,
+            visit,
+            requestKey: input.requestKey,
+          })
       : checkInVehicle(user, {
           mode: 'existing',
           vehicleId: input.vehicleId ?? '',

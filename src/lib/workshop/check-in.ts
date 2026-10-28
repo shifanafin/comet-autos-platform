@@ -87,9 +87,10 @@ export interface AdditionalVehicle {
 export const MAX_VEHICLES_PER_CHECK_IN = 20;
 
 /**
- * Checks a vehicle in and opens its Job Card (status ARRIVED). Either an existing vehicle is chosen, or a new customer and
- * vehicle are created in the same transaction — never a half-created
- * customer without a job.
+ * Checks a vehicle in and opens its Job Card (status ARRIVED). Either an
+ * existing vehicle is chosen, or a new vehicle is created in the same
+ * transaction — for a customer already on file, or with a new customer made
+ * alongside it (never a half-created customer without a job).
  */
 export async function checkInVehicle(
   user: AuthenticatedUser,
@@ -105,6 +106,14 @@ export async function checkInVehicle(
     | {
         mode: 'new';
         customer: CustomerInput;
+        vehicle: VehicleInput;
+        visit: Record<string, string | undefined>;
+        requestKey?: string;
+      }
+    | {
+        mode: 'new';
+        /** A new vehicle for a customer already on file. */
+        customerId: string;
         vehicle: VehicleInput;
         visit: Record<string, string | undefined>;
         requestKey?: string;
@@ -147,6 +156,8 @@ export async function checkInVehicle(
     if (new Set(ids).size !== ids.length) {
       throw new DomainError('The same vehicle is listed twice.', 'alsoVehicles');
     }
+  } else if ('customerId' in input && !z.uuid().safeParse(input.customerId).success) {
+    throw new DomainError('Choose the customer who owns this vehicle.', 'customerId');
   }
 
   return prisma.$transaction(async (tx) => {
@@ -155,8 +166,12 @@ export async function checkInVehicle(
     if (input.mode === 'existing') {
       vehicleId = input.vehicleId;
     } else {
-      const customer = await createCustomer(tx, user, input.customer);
-      const vehicle = await createVehicle(tx, user, customer.id, input.vehicle);
+      // The owner: one already on file (createVehicle checks it), or a new one made now.
+      const customerId =
+        'customerId' in input
+          ? input.customerId
+          : (await createCustomer(tx, user, input.customer)).id;
+      const vehicle = await createVehicle(tx, user, customerId, input.vehicle);
       vehicleId = vehicle.id;
     }
 
