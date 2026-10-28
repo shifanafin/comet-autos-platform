@@ -8,7 +8,8 @@ import { storageKey, type StorageFolder } from '@/lib/storage/keys';
 
 /*
  * Files kept with a record — the supplier's bill behind an expense or a
- * purchase. One set of rules for every record that can hold a file:
+ * purchase, the copies of an employee's passport or visa. One set of rules
+ * for every record that can hold a file:
  *
  * - a photo (JPEG, PNG, WebP) or a PDF, told by its bytes, never its name;
  * - 10 MB at most;
@@ -23,18 +24,20 @@ import { storageKey, type StorageFolder } from '@/lib/storage/keys';
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
-export type AttachmentEntity = 'Expense' | 'Purchase' | 'OwnerReimbursement';
+export type AttachmentEntity = 'Expense' | 'Purchase' | 'OwnerReimbursement' | 'EmployeeDocument';
 
 interface EntityRules {
   /** What the record is called in messages. */
   noun: string;
   folder: StorageFolder;
-  category: 'SUPPLIER_BILL' | 'OTHER';
+  category: 'SUPPLIER_BILL' | 'EMPLOYEE_DOCUMENT' | 'OTHER';
   view: string;
   attach: string;
   remove: string;
   /** The audit action prefix: `expense.bill_attached`. */
   audit: string;
+  /** What a file is called in the audit action: `bill` (the default) or `file`. */
+  auditNoun?: 'bill' | 'file';
   load(organizationId: string, id: string): Promise<{ id: string; branchId: string | null } | null>;
 }
 
@@ -82,6 +85,25 @@ const RULES: Record<AttachmentEntity, EntityRules> = {
         select: { id: true },
       });
       return row ? { id: row.id, branchId: null } : null;
+    },
+  },
+  // Passports, visas, IDs: kept to those who manage employee records, not
+  // everyone who can see the team list.
+  EmployeeDocument: {
+    noun: 'employee document',
+    folder: 'staff-documents',
+    category: 'EMPLOYEE_DOCUMENT',
+    view: 'employee.edit',
+    attach: 'employee.edit',
+    remove: 'employee.edit',
+    audit: 'employee_document',
+    auditNoun: 'file',
+    load: async (organizationId, id) => {
+      const row = await prisma.employeeDocument.findFirst({
+        where: { id, organizationId, deletedAt: null },
+        select: { id: true, employee: { select: { branchId: true } } },
+      });
+      return row ? { id: row.id, branchId: row.employee.branchId } : null;
     },
   },
 };
@@ -151,7 +173,7 @@ export async function attachFile(
       organizationId: user.organizationId,
       branchId: record.branchId,
       actorUserId: user.id,
-      action: `${rules.audit}.bill_attached`,
+      action: `${rules.audit}.${rules.auditNoun ?? 'bill'}_attached`,
       entityType: entity,
       entityId: record.id,
       afterData: { documentId: document.id, fileName: file.name, size: file.bytes.length, note },
@@ -256,7 +278,7 @@ export async function removeAttachment(
       organizationId: user.organizationId,
       branchId: document.branchId,
       actorUserId: user.id,
-      action: `${rules.audit}.bill_removed`,
+      action: `${rules.audit}.${rules.auditNoun ?? 'bill'}_removed`,
       entityType: entity,
       entityId: document.entityId,
       beforeData: { documentId: document.id, fileName: document.fileName },

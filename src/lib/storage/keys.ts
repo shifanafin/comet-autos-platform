@@ -14,6 +14,7 @@ import { localDateString } from '@/lib/format';
  *   comet-autos/job-photos/2026-09/…   photos taken on a job
  *   comet-autos/signatures/2026-09/…   customer signatures
  *   comet-autos/team/2026-09/…         photos and voice notes on staff tasks
+ *   comet-autos/staff-documents/2026-09/…  employees' passports, visas, IDs, contracts
  *   comet-autos/accounts/2026-09/…     journals, fixed assets, payroll, VAT
  *   comet-autos/other/2026-09/…        anything else
  *
@@ -29,6 +30,7 @@ export type StorageFolder =
   | 'job-photos'
   | 'signatures'
   | 'team'
+  | 'staff-documents'
   | 'accounts'
   | 'other';
 

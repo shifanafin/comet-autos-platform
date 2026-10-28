@@ -19,6 +19,8 @@ import { ResetLoginButton } from '@/components/hr/reset-login-button';
 import { PrepareSettlementForm } from '@/components/hr/settlement-forms';
 import { getEmployeeLeaveSummary } from '@/lib/hr/leave';
 import { getEmployeeSettlement } from '@/lib/hr/settlement';
+import { DOCUMENT_KINDS, daysUntil, getEmployeeDocuments } from '@/lib/hr/employee-documents';
+import { EmployeeDocuments } from '@/components/hr/employee-documents';
 
 export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -39,10 +41,13 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     hasPermission(user, 'user.edit') && !!employee.user && employee.user.id !== user.id;
   // Pay is shown only to those who prepare or approve payroll.
   const pay = canSeePay(user) ? await getSalaryHistory(user, employee.id) : null;
-  const [leave, settlement] = await Promise.all([
+  const [leave, settlement, papers] = await Promise.all([
     hasPermission(user, 'leave.view') ? getEmployeeLeaveSummary(user, employee.id) : null,
     pay ? getEmployeeSettlement(user, employee.id) : null,
+    // Passports, visas, IDs: only for those who manage employee records.
+    canManage ? getEmployeeDocuments(user, employee.id) : null,
   ]);
+  const kindOptions = DOCUMENT_KINDS.map(({ kind, label, expires }) => ({ kind, label, expires }));
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -75,6 +80,40 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
 
       <Grid gap="xl" className="items-start xl:grid-cols-12">
         <Stack gap="2xl" className="xl:col-span-8">
+          {papers ? (
+            <div id="documents" className="scroll-mt-24">
+              <Section
+                title="Documents"
+                description="Copies of their passport, visa, Emirates ID, work permit, contract and insurance — with the dates each one expires."
+              >
+                <Panel padding="none" className="overflow-hidden">
+                  <EmployeeDocuments
+                    employeeId={employee.id}
+                    kinds={kindOptions}
+                    missing={papers.missing.map(({ kind, label, expires }) => ({
+                      kind,
+                      label,
+                      expires,
+                    }))}
+                    documents={papers.documents.map((row) => ({
+                      id: row.id,
+                      kind: row.kind,
+                      label: row.label,
+                      documentNumber: row.documentNumber,
+                      issueDate: row.issueDate,
+                      expiryDate: row.expiryDate,
+                      notes: row.notes,
+                      status: row.status,
+                      replaced: row.replaced,
+                      days: row.expiryDate ? daysUntil(row.expiryDate, papers.today) : null,
+                      files: row.files.map((file) => ({ id: file.id, fileName: file.fileName })),
+                    }))}
+                  />
+                </Panel>
+              </Section>
+            </div>
+          ) : null}
+
           <Section
             title="Jobs in progress"
             description="Vehicles this person is responsible for right now."

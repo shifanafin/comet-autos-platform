@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { ArrowRight, IdCard, Plus } from 'lucide-react';
+import { ArrowRight, FileWarning, IdCard, Plus } from 'lucide-react';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { listEmployees } from '@/lib/hr/employees';
-import { formatDate } from '@/lib/format';
+import { getExpiringEmployeeDocuments } from '@/lib/hr/employee-documents';
+import { formatCalendarDate, formatDate } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -40,6 +41,8 @@ export default async function EmployeesPage({
   );
   const canManage = hasPermission(user, 'employee.create');
   const filtered = Boolean(query) || show !== 'active';
+  // Papers past or near their expiry — only for those who keep employees' papers.
+  const expiring = await getExpiringEmployeeDocuments(user);
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -56,6 +59,37 @@ export default async function EmployeesPage({
           ) : null
         }
       />
+
+      {expiring.length > 0 ? (
+        <Panel padding="none" className="overflow-hidden border-warning/40">
+          <p className="flex items-center gap-2 border-b border-border bg-warning/5 px-4 py-3 text-sm font-medium sm:px-6">
+            <FileWarning className="size-4 shrink-0 text-warning" />
+            Documents to renew
+          </p>
+          <ul className="divide-y divide-border">
+            {expiring.map((row) => (
+              <li key={row.id}>
+                <Link
+                  href={`/hr/employees/${row.employeeId}#documents`}
+                  className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm hover:bg-muted/60 sm:px-6"
+                >
+                  <span className="min-w-0">
+                    <span className="font-medium">{row.employeeName}</span>
+                    <span className="text-muted-foreground"> · {row.label}</span>
+                  </span>
+                  <StatusPill tone={row.status === 'expired' ? 'danger' : 'warning'}>
+                    {row.status === 'expired'
+                      ? `Expired ${formatCalendarDate(row.expiryDate)}`
+                      : row.days === 0
+                        ? 'Expires today'
+                        : `Expires in ${row.days} days`}
+                  </StatusPill>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <Stack gap="base">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

@@ -8,6 +8,12 @@ import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
 import { createEmployee, resetEmployeeLogin, updateEmployee } from '@/lib/hr/employees';
 import { createDesignation, updateDesignation } from '@/lib/hr/designations';
+import {
+  addEmployeeDocument,
+  removeEmployeeDocument,
+  updateEmployeeDocument,
+} from '@/lib/hr/employee-documents';
+import { removeAttachment } from '@/lib/documents/attachments';
 
 function refreshTeam() {
   revalidatePath('/hr', 'layout');
@@ -72,6 +78,51 @@ export async function resetEmployeeLoginAction(
   if (!result.ok || !result.data) return { ...toClientResult(result), data: undefined };
   refreshTeam();
   return { ok: true, data: result.data };
+}
+
+/** Records one of an employee's papers; returns its id so the copies can be uploaded to it. */
+export async function addEmployeeDocumentAction(
+  employeeId: string,
+  _prev: ActionResult<{ id: string }>,
+  formData: FormData,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    addEmployeeDocument(user, employeeId, formDataToObject(formData)),
+  );
+  // A repeat of the same submission answers with the document it already made.
+  const id = result.data?.id ?? (result.duplicate ? result.duplicateOf : null);
+  if (!result.ok || !id) return { ...toClientResult(result), data: undefined };
+  refreshTeam();
+  return { ok: true, data: { id } };
+}
+
+export async function updateEmployeeDocumentAction(
+  documentId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() =>
+    updateEmployeeDocument(user, documentId, formDataToObject(formData)),
+  );
+  if (result.ok) refreshTeam();
+  return toClientResult(result);
+}
+
+export async function removeEmployeeDocumentAction(documentId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => removeEmployeeDocument(user, documentId));
+  if (result.ok) refreshTeam();
+  return toClientResult(result);
+}
+
+/** Removes one copy (a file) from an employee's document. */
+export async function removeEmployeeDocumentFileAction(fileId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => removeAttachment(user, 'EmployeeDocument', fileId));
+  if (result.ok) refreshTeam();
+  return toClientResult(result);
 }
 
 export async function createDesignationAction(
