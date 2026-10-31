@@ -21,6 +21,8 @@ import {
 import { formatMoney } from '@/lib/format';
 import type { BillDiscount, EditableLine, LineType } from '@/lib/billing/editable-lines';
 import { rateFor, VAT_TREATMENTS, type VatTreatment } from '@/lib/vat-treatment';
+import { fitInclusivePrice, inclusiveOf, type PriceBasis } from '@/lib/vat-entry';
+import { PriceBasisToggle } from '@/components/forms/price-basis-toggle';
 import type { TaxCodeOption } from '@/lib/accounting/tax-codes';
 import { cn } from '@/lib/utils';
 import type { PartCatalog, PartOption } from '@/lib/inventory/part-options';
@@ -238,8 +240,62 @@ export function DocumentLinesEditor({
       ?.focus();
   }, [lines]);
 
-  const update = (key: string, patch: Partial<EditableLine>) =>
-    onChange(lines.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+  // Prices typed with VAT: what was typed is kept here, and each line carries
+  // the price before VAT that comes to it, which is all the server ever sees.
+  const [basis, setBasis] = useState<PriceBasis>('EXCLUSIVE');
+  const [typedPrices, setTypedPrices] = useState<Record<string, string>>({});
+  const fitted = (line: EditableLine, typed: string) =>
+    fitInclusivePrice(typed, line.quantity, lineRate(line, defaultVatRate));
+  const update = (key: string, patch: Partial<EditableLine>) => {
+    // A price from elsewhere (a part picked) replaces what was typed.
+    if (patch.unitPrice !== undefined && typedPrices[key] !== undefined) {
+      setTypedPrices((current) => {
+        const rest = { ...current };
+        delete rest[key];
+        return rest;
+      });
+    }
+    onChange(
+      lines.map((line) => {
+        if (line.key !== key) return line;
+        const next = { ...line, ...patch };
+        const typed = typedPrices[key];
+        // A new quantity or VAT code: the same price with VAT, so a new price before it.
+        if (basis === 'INCLUSIVE' && typed !== undefined && patch.unitPrice === undefined) {
+          next.unitPrice = fitted(next, typed)?.unitPrice ?? next.unitPrice;
+        }
+        return next;
+      }),
+    );
+  };
+  const typePrice = (line: EditableLine, value: string) => {
+    if (basis === 'EXCLUSIVE') {
+      update(line.key, { unitPrice: value });
+      return;
+    }
+    setTypedPrices((current) => ({ ...current, [line.key]: value }));
+    onChange(
+      lines.map((entry) =>
+        entry.key === line.key
+          ? { ...entry, unitPrice: fitted(entry, value)?.unitPrice ?? value }
+          : entry,
+      ),
+    );
+  };
+  const shownPrice = (line: EditableLine) =>
+    basis === 'EXCLUSIVE'
+      ? line.unitPrice
+      : (typedPrices[line.key] ??
+        (line.unitPrice ? inclusiveOf(line.unitPrice, lineRate(line, defaultVatRate)) : ''));
+  /** Lines that VAT rounding can't bring to the fil typed. */
+  const offLines =
+    basis === 'INCLUSIVE'
+      ? lines.flatMap((line, index) => {
+          const typed = typedPrices[line.key];
+          const fit = typed ? fitted(line, typed) : null;
+          return fit && !fit.exact ? [{ n: index + 1, ...fit }] : [];
+        })
+      : [];
   const remove = (key: string) => onChange(lines.filter((line) => line.key !== key));
   /** A part picked for a line: its name, its selling price when it has one, and its last cost. */
   const pick = (line: EditableLine, part: PartOption) =>
@@ -321,6 +377,14 @@ export function DocumentLinesEditor({
 
   const editor = (
     <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-4">
+      <PriceBasisToggle
+        label="Prices are"
+        value={basis}
+        onChange={(next) => {
+          setBasis(next);
+          setTypedPrices({});
+        }}
+      />
       {/* Phone: each line a small card with labelled fields — never a sideways table. */}
       <ol data-layout="cards" className="flex flex-col gap-3 md:hidden">
         {priced.map(({ line, amounts }, index) => {
@@ -397,10 +461,10 @@ export function DocumentLinesEditor({
                   numeric="quantity"
                 />
                 <LabelledInput
-                  label="Price"
+                  label={basis === 'INCLUSIVE' ? 'Price incl. VAT' : 'Price'}
                   aria={`Line ${n} price`}
-                  value={line.unitPrice}
-                  onChange={(value) => update(line.key, { unitPrice: value })}
+                  value={shownPrice(line)}
+                  onChange={(value) => typePrice(line, value)}
                   placeholder="0.00"
                   numeric="money"
                 />
@@ -464,7 +528,9 @@ export function DocumentLinesEditor({
               <th className="px-2 py-2.5">Description</th>
               {incomeAccounts ? <th className="w-44 px-2 py-2.5">Account</th> : null}
               <th className="w-20 px-2 py-2.5 text-right">Qty</th>
-              <th className="w-28 px-2 py-2.5 text-right">Price</th>
+              <th className="w-28 px-2 py-2.5 text-right">
+                {basis === 'INCLUSIVE' ? 'Price incl. VAT' : 'Price'}
+              </th>
               <th className="w-32 px-2 py-2.5">VAT</th>
               <th className="w-36 px-2 py-2.5 text-right">Discount</th>
               <th className="w-28 px-3 py-2.5 text-right">Amount</th>
@@ -543,9 +609,9 @@ export function DocumentLinesEditor({
                   <td className="px-2 py-2">
                     <NumberInput
                       aria-label={`Line ${n} price`}
-                      value={line.unitPrice}
+                      value={shownPrice(line)}
                       placeholder="0.00"
-                      onChange={(event) => update(line.key, { unitPrice: event.target.value })}
+                      onChange={(event) => typePrice(line, event.target.value)}
                       className="text-right tabular-nums"
                     />
                   </td>
@@ -640,6 +706,11 @@ export function DocumentLinesEditor({
             {billError}
           </p>
         ) : null}
+        {offLines.map((line) => (
+          <p key={line.n} className="text-right text-xs text-warning">
+            {`Line ${line.n} comes to ${formatMoney(line.actual)}, not ${formatMoney(line.wanted)}: VAT rounds to the fil.${onRoundingChange ? ' Use the round-off if the bill must match.' : ''}`}
+          </p>
+        ))}
         <div className="flex justify-between gap-4">
           <dt className="text-muted-foreground">Total excl. VAT</dt>
           <dd className="tabular-nums">{formatMoney(totals.subtotal)}</dd>

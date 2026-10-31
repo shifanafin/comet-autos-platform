@@ -30,6 +30,8 @@ import { calculateLine, filsToString } from '@/lib/money';
 import { formatMoney, localDateString } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { buyPartForJobAction, type BoughtPart } from '@/app/(app)/inventory/actions';
+import { PriceBasisToggle } from '@/components/forms/price-basis-toggle';
+import { fitInclusivePrice, inclusiveOf, type PriceBasis } from '@/lib/vat-entry';
 
 /*
  * "Bought for this job" — from an invoice line, when the part is not in
@@ -93,12 +95,17 @@ export function BuyPartDialog({
   const [supplierId, setSupplierId] = useState(part?.supplierId ?? '');
   const [addingSupplier, setAddingSupplier] = useState<string | null>(null);
   const [count, setCount] = useState(quantity || '1');
-  const [cost, setCost] = useState(part?.cost ?? '');
+  const [typedCost, setTypedCost] = useState(part?.cost ?? '');
+  const [basis, setBasis] = useState<PriceBasis>('EXCLUSIVE');
   const rate = catalog?.defaultVat || '5';
   const standardVat = rate.includes('.') ? rate.replace(/\.?0+$/, '') : rate;
   const [vat, setVat] = useState(
     part?.taxRate && Number(part.taxRate) === 0 ? '0' : standardVat,
   );
+  const inclusive = basis === 'INCLUSIVE';
+  const fit = inclusive ? fitInclusivePrice(typedCost, count, vat) : null;
+  /** The price for one before VAT, as it is sent. */
+  const cost = inclusive ? (fit?.unitPrice ?? '') : typedCost;
   const [paid, setPaid] = useState<Paid>(canPay ? 'cash' : 'later');
   const [unit, setUnit] = useState(part?.unit ?? 'piece');
 
@@ -221,6 +228,17 @@ export function BuyPartDialog({
                 ))}
               </NativeSelect>
             </Field>
+            <PriceBasisToggle
+              label="The shop's price is"
+              value={basis}
+              className="sm:col-span-2"
+              onChange={(next) => {
+                if (next === basis) return;
+                setTypedCost(next === 'INCLUSIVE' && cost ? inclusiveOf(cost, vat) : cost);
+                setBasis(next);
+              }}
+            />
+            {inclusive ? <input type="hidden" name="unitCost" value={cost} /> : null}
             <TextField
               id="buy-part-quantity"
               label={`How many (${unit})`}
@@ -235,14 +253,20 @@ export function BuyPartDialog({
             <TextField
               id="buy-part-cost"
               label="Price paid for one"
-              name="unitCost"
+              name={inclusive ? 'unitCostIncludingVat' : 'unitCost'}
               numeric="money"
               required
               placeholder="0.00"
-              value={cost}
-              onChange={(event) => setCost(event.target.value)}
+              value={typedCost}
+              onChange={(event) => setTypedCost(event.target.value)}
               error={errors.unitCost}
-              hint="Before VAT."
+              hint={
+                !inclusive
+                  ? 'Before VAT.'
+                  : fit && !fit.exact
+                    ? `Includes VAT. Comes to ${formatMoney(fit.actual)}, not ${formatMoney(fit.wanted)}: VAT rounds to the fil.`
+                    : 'Includes VAT.'
+              }
               className={INPUT}
             />
             <Field label="VAT on the shop's bill" htmlFor="buy-part-vat" error={errors.taxRate}>

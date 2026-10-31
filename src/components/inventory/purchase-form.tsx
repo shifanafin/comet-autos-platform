@@ -44,6 +44,8 @@ import {
   owedHint,
   type ReceiptOptions,
 } from '@/components/inventory/receipt-settlement';
+import { PriceBasisToggle } from '@/components/forms/price-basis-toggle';
+import { fitInclusivePrice, inclusiveOf, type PriceBasis } from '@/lib/vat-entry';
 
 /** A part a purchase line can be for — with its stock, as the part picker shows it. */
 export type PurchasePart = PartOption;
@@ -239,10 +241,44 @@ function PurchaseFormBody({
     ]);
     setSearch('');
   }
+  // Costs typed with VAT, as on the supplier's bill: what was typed is kept
+  // here, and each line carries the cost before VAT that comes to it.
+  const [basis, setBasis] = useState<PriceBasis>('EXCLUSIVE');
+  const [typedCosts, setTypedCosts] = useState<Record<number, string>>({});
+  const fitted = (line: Pick<Line, 'quantity' | 'taxRate'>, typed: string) =>
+    fitInclusivePrice(typed, line.quantity, line.taxRate || '0');
   const update = (key: number, change: Partial<Line>) =>
     setLines((current) =>
-      current.map((line) => (line.key === key ? { ...line, ...change } : line)),
+      current.map((line) => {
+        if (line.key !== key) return line;
+        const next = { ...line, ...change };
+        const typed = typedCosts[key];
+        // A new quantity or tax code: the same cost with VAT, so a new cost before it.
+        if (basis === 'INCLUSIVE' && typed !== undefined) {
+          next.unitCost = fitted(next, typed)?.unitPrice ?? next.unitCost;
+        }
+        return next;
+      }),
     );
+  const typeCost = (line: Line, value: string) => {
+    if (basis === 'EXCLUSIVE') {
+      update(line.key, { unitCost: value });
+      return;
+    }
+    setTypedCosts((current) => ({ ...current, [line.key]: value }));
+    setLines((current) =>
+      current.map((entry) =>
+        entry.key === line.key
+          ? { ...entry, unitCost: fitted(entry, value)?.unitPrice ?? value }
+          : entry,
+      ),
+    );
+  };
+  const shownCost = (line: Line) =>
+    basis === 'EXCLUSIVE'
+      ? line.unitCost
+      : (typedCosts[line.key] ??
+        (line.unitCost ? inclusiveOf(line.unitCost, line.taxRate || '0') : ''));
 
   const amounts = lines.map(preview);
   let totals: DocumentTotals | null = null;
@@ -384,6 +420,15 @@ function PurchaseFormBody({
           </div>
         </div>
 
+        <PriceBasisToggle
+          label="Unit costs are"
+          value={basis}
+          className="mb-3"
+          onChange={(next) => {
+            setBasis(next);
+            setTypedCosts({});
+          }}
+        />
         {lines.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
             No parts yet. Search above to add the first line.
@@ -396,6 +441,8 @@ function PurchaseFormBody({
               const part = byId.get(line.partId);
               const amount = amounts[index];
               const error = lineError(index);
+              const typedCost = basis === 'INCLUSIVE' ? typedCosts[line.key] : undefined;
+              const fit = typedCost ? fitted(line, typedCost) : null;
               return (
                 <li key={line.key} className="flex flex-col gap-3 p-4">
                   {/* The part and its total always have the whole width. */}
@@ -404,6 +451,11 @@ function PurchaseFormBody({
                       <p className="truncate font-medium">{part?.name ?? 'Unknown part'}</p>
                       <p className="font-mono text-xs text-muted-foreground">{part?.sku}</p>
                       {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
+                      {fit && !fit.exact ? (
+                        <p className="mt-1 text-xs text-warning">
+                          {`Comes to ${formatMoney(fit.actual)}, not ${formatMoney(fit.wanted)}: VAT rounds to the fil. Use the round-off to match the bill.`}
+                        </p>
+                      ) : null}
                     </div>
                     <p className="shrink-0 text-right text-sm font-medium tabular-nums">
                       {amount ? formatMoney(amount.lineTotal) : '—'}
@@ -434,10 +486,10 @@ function PurchaseFormBody({
                       />
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      Unit cost
+                      {basis === 'INCLUSIVE' ? 'Unit cost incl. VAT' : 'Unit cost'}
                       <NumberInput
-                        value={line.unitCost}
-                        onChange={(event) => update(line.key, { unitCost: event.target.value })}
+                        value={shownCost(line)}
+                        onChange={(event) => typeCost(line, event.target.value)}
                         className="h-11 text-right text-base tabular-nums md:text-sm"
                       />
                     </label>

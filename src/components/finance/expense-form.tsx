@@ -24,6 +24,8 @@ import type { TaxCodeOption } from '@/lib/accounting/tax-codes';
 import type { JobChoice } from '@/lib/finance/job-costing';
 import type { PaymentModeOption } from '@/lib/accounting/payment-modes';
 import { modeFor, PaymentModeField } from '@/components/accounting/payment-mode-field';
+import { PriceBasisToggle } from '@/components/forms/price-basis-toggle';
+import { splitInclusive, type PriceBasis } from '@/lib/vat-entry';
 
 /** An expense being corrected, as the form's starting values. */
 export interface ExpenseDraft {
@@ -189,7 +191,11 @@ export function ExpenseForm({
     expense ? expense.taxRate : defaultVatRate.replace(/\.?0+$/, ''),
   );
   const rate = taxCodes.length ? rateOfCode(taxCodes, codeId) : typedRate;
-  const calculated = vatOn(amount, rate);
+  // The bill's total typed instead: the VAT is the share inside it, the amount what remains.
+  const [basis, setBasis] = useState<PriceBasis>('EXCLUSIVE');
+  const [grossText, setGrossText] = useState('');
+  const inclusive = basis === 'INCLUSIVE';
+  const calculated = inclusive ? (splitInclusive(grossText, rate)?.vat ?? '') : vatOn(amount, rate);
   const [ownVat, setOwnVat] = useState<string | null>(() => {
     // A figure from the bill (or saved earlier) that differs from the rate's stays as it is.
     const given = start?.taxAmount;
@@ -203,9 +209,18 @@ export function ExpenseForm({
   );
   const [referenceNeeded, setReferenceNeeded] = useState(false);
   const vat = ownVat ?? calculated;
-  const total =
-    MONEY.test(amount.trim()) && MONEY.test(vat.trim())
+  const total = inclusive
+    ? grossText
+    : MONEY.test(amount.trim()) && MONEY.test(vat.trim())
       ? filsToString(toFils(amount.trim()) + toFils(vat.trim()))
+      : '';
+  /** The amount before VAT, as it is sent: blank until the figures make sense. */
+  const net = !inclusive
+    ? amount
+    : MONEY.test(grossText.trim()) &&
+        MONEY.test(vat.trim()) &&
+        toFils(vat.trim()) <= toFils(grossText.trim())
+      ? filsToString(toFils(grossText.trim()) - toFils(vat.trim()))
       : '';
 
   /** A VAT figure entered by hand. On a code without VAT, the standard VAT code is chosen. */
@@ -220,6 +235,10 @@ export function ExpenseForm({
   }
 
   function onTotal(value: string) {
+    if (inclusive) {
+      setGrossText(value);
+      return;
+    }
     setTotalText(value);
     if (MONEY.test(amount.trim()) && MONEY.test(value.trim())) {
       const difference = toFils(value.trim()) - toFils(amount.trim());
@@ -296,18 +315,32 @@ export function ExpenseForm({
         />
       </div>
 
+      <PriceBasisToggle
+        label="The amount I'm typing is"
+        value={basis}
+        onChange={(next) => {
+          if (next === basis) return;
+          if (next === 'INCLUSIVE') setGrossText(total);
+          else setAmount(net);
+          setTotalText(null);
+          setBasis(next);
+        }}
+      />
+      {inclusive ? <input type="hidden" name="amount" value={net} /> : null}
       <div className="grid gap-6 sm:grid-cols-2">
         <TextField
-          label="Amount excluding VAT"
+          label={inclusive ? 'Amount including VAT' : 'Amount excluding VAT'}
           id={id('amount')}
-          name="amount"
+          name={inclusive ? 'amountIncludingVat' : 'amount'}
           numeric="money"
           required
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
+          value={inclusive ? grossText : amount}
+          onChange={(event) =>
+            inclusive ? setGrossText(event.target.value) : setAmount(event.target.value)
+          }
           placeholder="0.00"
           error={errors.amount}
-          hint={flags.amount ?? 'In AED.'}
+          hint={flags.amount ?? (inclusive && net ? `Before VAT: ${formatMoney(net)}.` : 'In AED.')}
           className={`${INPUT} [&_input]:text-right [&_input]:tabular-nums${amber('amount')}`}
         />
         {taxCodes.length ? (

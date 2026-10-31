@@ -12,6 +12,8 @@ import { Panel } from '@/components/layout/primitives';
 import { formatMoney } from '@/lib/format';
 import { filsToString, prorateFils, toFils } from '@/lib/money';
 import { VAT_TREATMENT_LABEL, type VatTreatment } from '@/lib/vat-treatment';
+import { splitInclusive, type PriceBasis } from '@/lib/vat-entry';
+import { PriceBasisToggle } from '@/components/forms/price-basis-toggle';
 import { createCreditNoteAction } from '@/app/(app)/finance/credit-notes/actions';
 
 /*
@@ -81,6 +83,10 @@ export function CreditNoteForm({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isPending, startTransition] = useTransition();
+  // Credits typed with VAT: what was typed is kept here; `amounts` stays before VAT.
+  const [basis, setBasis] = useState<PriceBasis>('EXCLUSIVE');
+  const [typedCredits, setTypedCredits] = useState<Record<string, string>>({});
+  const inclusive = basis === 'INCLUSIVE';
 
   const open = lines.filter((line) => toFils(line.remaining) > 0);
   const valid = (value: string | undefined) => (value && AMOUNT.test(value) ? toFils(value) : 0);
@@ -100,10 +106,40 @@ export function CreditNoteForm({
   function creditAll() {
     setAmounts(Object.fromEntries(open.map((line) => [line.id, line.remaining])));
     setQuantities({});
+    setTypedCredits({});
+  }
+
+  /** A credit typed for a line: before VAT, or with it when typing with VAT. */
+  function typeCredit(line: CreditableLine, value: string) {
+    let credit = value;
+    if (inclusive) {
+      setTypedCredits((current) => ({ ...current, [line.id]: value }));
+      // The whole of what is left stays exact, whatever the rounding on the way.
+      const everything = toFils(line.remaining) + toFils(line.remainingTax);
+      credit =
+        AMOUNT.test(value) && toFils(value) === everything
+          ? line.remaining
+          : (splitInclusive(value, line.taxRate)?.net ?? '');
+    }
+    setAmounts((current) => ({ ...current, [line.id]: credit }));
+    setQuantities((current) => ({ ...current, [line.id]: '' }));
+  }
+
+  function shownCredit(line: CreditableLine) {
+    if (!inclusive) return amounts[line.id] ?? '';
+    const typed = typedCredits[line.id];
+    if (typed !== undefined) return typed;
+    const amount = Math.min(valid(amounts[line.id]), toFils(line.remaining));
+    return amount > 0 ? filsToString(amount + vatOn(line, amount)) : '';
   }
 
   function setQuantity(line: CreditableLine, value: string) {
     setQuantities((current) => ({ ...current, [line.id]: value }));
+    setTypedCredits((current) => {
+      const rest = { ...current };
+      delete rest[line.id];
+      return rest;
+    });
     const qty = milli(value);
     if (!Number.isFinite(qty) || qty <= 0) return;
     // Units coming back from a part sold from stock go back on the shelf,
@@ -163,11 +199,21 @@ export function CreditNoteForm({
       <Panel padding="none" className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
           <p className="text-sm text-muted-foreground">
-            Enter what each line is credited by, before VAT — or how many of its units come back.
+            Enter what each line is credited by — or how many of its units come back.
           </p>
-          <Button type="button" variant="outline" size="sm" onClick={creditAll}>
-            Credit everything left
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <PriceBasisToggle
+              label="Credits are"
+              value={basis}
+              onChange={(next) => {
+                setBasis(next);
+                setTypedCredits({});
+              }}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={creditAll}>
+              Credit everything left
+            </Button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
@@ -176,7 +222,9 @@ export function CreditNoteForm({
                 <th className="px-4 py-3 pl-6">Line</th>
                 <th className="w-28 px-2 py-3 text-right">Left to credit</th>
                 <th className="w-24 px-2 py-3 text-right">Qty back</th>
-                <th className="w-36 px-2 py-3 text-right">Credit (excl. VAT)</th>
+                <th className="w-36 px-2 py-3 text-right">
+                  {inclusive ? 'Credit (incl. VAT)' : 'Credit (excl. VAT)'}
+                </th>
                 <th className="w-28 px-4 py-3 pr-6 text-right">VAT</th>
               </tr>
             </thead>
@@ -198,7 +246,13 @@ export function CreditNoteForm({
                       ) : null}
                     </td>
                     <td className="px-2 py-3 text-right tabular-nums">
-                      {left === 0 ? 'Credited' : formatMoney(line.remaining)}
+                      {left === 0
+                        ? 'Credited'
+                        : formatMoney(
+                            inclusive
+                              ? filsToString(left + toFils(line.remainingTax))
+                              : line.remaining,
+                          )}
                     </td>
                     <td className="px-2 py-3">
                       {left > 0 ? (
@@ -231,12 +285,8 @@ export function CreditNoteForm({
                         <NumberInput
                           aria-label={`${line.description}: amount to credit`}
                           placeholder="0.00"
-                          value={amounts[line.id] ?? ''}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setAmounts((current) => ({ ...current, [line.id]: value }));
-                            setQuantities((current) => ({ ...current, [line.id]: '' }));
-                          }}
+                          value={shownCredit(line)}
+                          onChange={(event) => typeCredit(line, event.target.value)}
                           className="text-right tabular-nums"
                         />
                       ) : null}
