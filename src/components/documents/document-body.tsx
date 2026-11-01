@@ -1,5 +1,6 @@
 import type { CustomerDocumentModel, DocumentTone } from '@/lib/documents/model';
-import { formatAed, formatQuantity } from '@/lib/documents/model';
+import { aedInWords } from '@/lib/documents/amount-words';
+import { formatAed, formatAmount, formatQuantity } from '@/lib/documents/model';
 import { StatusPill, type PillTone } from '@/components/shared/status-pill';
 import { cn } from '@/lib/utils';
 
@@ -58,13 +59,13 @@ export function DocumentItems({ document }: { document: CustomerDocumentModel })
                       </span>
                     ) : null}
                     <span>
-                      {formatQuantity(line.quantity)} × {formatAed(line.unitPrice)}
+                      {formatQuantity(line.quantity)} × {formatAmount(line.unitPrice)}
                     </span>
-                    {line.discount ? <span>less {formatAed(line.discount)}</span> : null}
+                    {line.discount ? <span>less {formatAmount(line.discount)}</span> : null}
                   </span>
                 </span>
                 <span className="shrink-0 text-[0.95rem] font-medium tabular-nums">
-                  {formatAed(line.lineTotal)}
+                  {formatAmount(line.lineTotal)}
                 </span>
               </li>
             ))}
@@ -76,21 +77,30 @@ export function DocumentItems({ document }: { document: CustomerDocumentModel })
 }
 
 export function DocumentTotals({ document }: { document: CustomerDocumentModel }) {
+  const payable = document.totals.find((total) => total.emphasis === 'total')?.amount;
   return (
-    <dl className="flex flex-col gap-2.5 rounded-2xl bg-muted/70 px-4 py-4 text-sm">
-      {document.totals.map((total) => (
-        <div
-          key={total.label}
-          className={cn(
-            'flex items-baseline justify-between gap-4',
-            total.emphasis === 'total' && 'border-t border-border pt-3 text-lg font-semibold',
-            total.emphasis === 'balance' && 'text-base font-semibold text-primary',
-          )}
-        >
-          <dt className={cn(!total.emphasis && 'text-muted-foreground')}>{total.label}</dt>
-          <dd className="tabular-nums">{formatAed(total.amount)}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="flex flex-col gap-2">
+      <dl className="flex flex-col gap-2.5 rounded-2xl bg-muted/70 px-4 py-4 text-sm">
+        {document.totals.map((total) => (
+          <div
+            key={total.label}
+            className={cn(
+              'flex items-baseline justify-between gap-4',
+              total.emphasis === 'total' && 'border-t border-border pt-3 text-lg font-semibold',
+              total.emphasis === 'balance' && 'text-base font-semibold text-primary',
+            )}
+          >
+            <dt className={cn(!total.emphasis && 'text-muted-foreground')}>{total.label}</dt>
+            <dd className="tabular-nums">
+              {total.emphasis ? formatAed(total.amount) : formatAmount(total.amount)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="px-1 text-xs text-muted-foreground">
+        {payable && !payable.startsWith('-') ? `${aedInWords(payable)}. ` : ''}
+        All amounts are in UAE Dirhams (AED).
+      </p>
+    </div>
   );
 }

@@ -277,6 +277,21 @@ async function refusal(tx: Tx, organizationId: string, entry: LoadedEntry, from:
 }
 
 /**
+ * Why a booked entry can't move between two days, or null — the same rules,
+ * for a record that moves its entries itself (a purchase and its receipt).
+ */
+export async function whyEntryCantMove(
+  tx: Tx,
+  organizationId: string,
+  entryId: string,
+  from: Date,
+  to: Date,
+) {
+  const entry = await loadEntry(tx, organizationId, entryId);
+  return refusal(tx, organizationId, entry, from, to);
+}
+
+/**
  * Changes the date of a journal entry — through its record when it was
  * booked from one — within the rules above. Returns the record's
  * description and the old and new dates.

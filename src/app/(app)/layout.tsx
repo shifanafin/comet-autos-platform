@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { hasPermission, requireUser } from '@/lib/auth/authorize';
 import { prisma } from '@/lib/prisma';
@@ -8,6 +9,7 @@ import { countUnread } from '@/lib/notifications/service';
 import { vapidPublicKey } from '@/lib/notifications/push';
 import { getWorkshopPreferences } from '@/lib/organization/settings';
 import { getBrand } from '@/lib/brand/brand';
+import { SIDEBAR_COOKIE } from '@/lib/theme';
 import { SidebarNav } from '@/components/shell/sidebar-nav';
 import { BottomNav } from '@/components/shell/bottom-nav';
 import { Topbar } from '@/components/shell/topbar';
@@ -24,6 +26,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // few hours per workshop — so they arrive even with no scheduler set up.
   after(() => maybeRunComplianceReminders(user.organizationId));
   const keepsBooks = hasPermission(user, 'accounting.view');
+  const sidebarCollapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === 'collapsed';
   const [branch, preferences, brand, myDay, unread, urgent] = await Promise.all([
     user.primaryBranchId
       ? prisma.branch.findUnique({
@@ -40,21 +43,26 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     keepsBooks ? urgentDeadlines(user.organizationId).catch(() => []) : [],
   ]);
   const employee = myDay?.employee ?? null;
-  const attendance = SELF_CHECK_IN && myDay
-    ? {
-        date: myDay.date,
-        firstName: myDay.employee.firstName,
-        next: myDay.next,
-        recordId: myDay.record?.id ?? null,
-        clockInAt: myDay.record?.clockInAt ?? null,
-        away: !!myDay.record && ['ABSENT', 'ON_LEAVE', 'HOLIDAY'].includes(myDay.record.status),
-        fenceSet: myDay.fence !== null,
-        shiftEndTime: myDay.shiftEndTime,
-        openEarlier: myDay.openEarlier
-          ? { id: myDay.openEarlier.id, date: myDay.openEarlier.date, clockInAt: myDay.openEarlier.clockInAt }
-          : null,
-      }
-    : null;
+  const attendance =
+    SELF_CHECK_IN && myDay
+      ? {
+          date: myDay.date,
+          firstName: myDay.employee.firstName,
+          next: myDay.next,
+          recordId: myDay.record?.id ?? null,
+          clockInAt: myDay.record?.clockInAt ?? null,
+          away: !!myDay.record && ['ABSENT', 'ON_LEAVE', 'HOLIDAY'].includes(myDay.record.status),
+          fenceSet: myDay.fence !== null,
+          shiftEndTime: myDay.shiftEndTime,
+          openEarlier: myDay.openEarlier
+            ? {
+                id: myDay.openEarlier.id,
+                date: myDay.openEarlier.date,
+                clockInAt: myDay.openEarlier.clockInAt,
+              }
+            : null,
+        }
+      : null;
   // Navigation shows only what the user's permissions allow and the workshop
   // chose to show. Convenience only: every page and action checks
   // permissions again on the server.
@@ -72,7 +80,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen bg-background">
       <SessionGuard />
       <RowLinks />
-      <SidebarNav allowedHrefs={allowedHrefs} brand={brand} />
+      <SidebarNav allowedHrefs={allowedHrefs} brand={brand} initialCollapsed={sidebarCollapsed} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           user={{ fullName: user.fullName, email: user.email, roleNames: user.roleNames }}

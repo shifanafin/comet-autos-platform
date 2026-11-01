@@ -214,7 +214,7 @@ describe('customer documents and sharing', () => {
       'Ahmed Al Marzooqi',
       `Registration ${plate}`,
       'AED 897.75',
-      'AED 42.75',
+      '42.75',
       'VAT 5%',
       'Mohammed Mowla Auto Garage',
       'Valid until',
@@ -370,7 +370,7 @@ describe('customer documents and sharing', () => {
       invoice.invoiceNumber,
       'AED 897.75',
       'Amount paid',
-      'AED 300.00',
+      '300.00',
       'Balance due',
       'AED 597.75',
       'TRN 100200300400003',
@@ -390,12 +390,12 @@ describe('customer documents and sharing', () => {
     const second = await getReceiptDocument(a.owner, secondPaymentId);
     const details = (doc: typeof first) =>
       Object.fromEntries(doc.details.map((d) => [d.label, d.value]));
-    assert.equal(details(first)['Balance before this payment'], 'AED 897.75');
-    assert.equal(details(first)['Remaining balance'], 'AED 597.75');
+    assert.equal(details(first)['Balance before this payment'], '897.75');
+    assert.equal(details(first)['Remaining balance'], '597.75');
     assert.equal(details(first)['Reference'], 'SLIP-9');
     assert.equal(first.status?.label, 'Partially paid');
-    assert.equal(details(second)['Balance before this payment'], 'AED 597.75');
-    assert.equal(details(second)['Remaining balance'], 'AED 0.00');
+    assert.equal(details(second)['Balance before this payment'], '597.75');
+    assert.equal(details(second)['Remaining balance'], '0.00');
     assert.equal(second.status?.label, 'Paid in full');
     assert.match(first.number, /^RCT-\d{6}$/);
     const receiptPdf = renderDocumentPdf(second);

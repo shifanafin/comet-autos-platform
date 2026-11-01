@@ -15,6 +15,7 @@ import {
 import { FormError, TextareaField, TextField } from '@/components/forms/fields';
 import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
+import { formatCalendarDate } from '@/lib/format';
 import type { ActionResult } from '@/lib/errors';
 import { updatePurchaseDetailsAction } from '@/app/(app)/inventory/actions';
 
@@ -36,6 +37,8 @@ export function EditPurchaseDetailsButton({
     supplierInvoiceDate: string | null;
     dueDate: string | null;
     notes: string | null;
+    /** The day the goods were booked in, "YYYY-MM-DD"; null if there was more than one. */
+    receivedOn: string | null;
   };
   today: string;
 }) {
@@ -54,6 +57,9 @@ export function EditPurchaseDetailsButton({
     { ok: false },
   );
   const errors = state.fieldErrors ?? {};
+  const [date, setDate] = useState(purchase.supplierInvoiceDate ?? '');
+  // The books say another day than the purchase date: offer to bring them to it.
+  const offerMove = Boolean(date && purchase.receivedOn && date !== purchase.receivedOn);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -66,7 +72,7 @@ export function EditPurchaseDetailsButton({
           <DialogTitle>{purchase.purchaseNumber} — details</DialogTitle>
           <DialogDescription>
             The supplier&apos;s invoice number, its date, the due date and notes. The parts and
-            amounts stay as received, and the books keep the day the goods arrived.
+            amounts stay as received.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="flex flex-col gap-5">
@@ -83,7 +89,8 @@ export function EditPurchaseDetailsButton({
               name="supplierInvoiceDate"
               type="date"
               max={today}
-              defaultValue={purchase.supplierInvoiceDate ?? ''}
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
               error={errors.supplierInvoiceDate}
               hint="The date on the supplier's bill."
               className={INPUT}
@@ -98,6 +105,25 @@ export function EditPurchaseDetailsButton({
               className={INPUT}
             />
           </div>
+          {offerMove ? (
+            <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <input
+                type="checkbox"
+                name="moveBooks"
+                defaultChecked
+                className="mt-0.5 size-4 accent-primary"
+              />
+              <span>
+                <span className="font-medium">
+                  {`Move the stock and payment to ${formatCalendarDate(date)}`}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {`They are booked on ${formatCalendarDate(purchase.receivedOn!)}. Untick if the goods really came that day. A payment made on any other day stays as it is.`}
+                </span>
+              </span>
+            </label>
+          ) : null}
+          <FormError message={errors.moveBooks} />
           <TextareaField
             label="Notes"
             name="notes"

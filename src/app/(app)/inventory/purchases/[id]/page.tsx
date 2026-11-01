@@ -140,6 +140,7 @@ export default async function PurchaseDetailPage({ params }: { params: Promise<{
                     purchase.supplierInvoiceDate?.toISOString().slice(0, 10) ?? null,
                   dueDate: purchase.dueDate?.toISOString().slice(0, 10) ?? null,
                   notes: purchase.notes,
+                  receivedOn: purchase.receivedAt ? localDateString(purchase.receivedAt) : null,
                 }}
               />
             ) : null}

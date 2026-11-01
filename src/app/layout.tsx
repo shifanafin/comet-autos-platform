@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { headers } from 'next/headers';
 import { Toaster } from 'sonner';
 import { APP_BACKGROUND } from '@/lib/brand/app-icon';
 import { getBrand } from '@/lib/brand/brand';
 import { ServiceWorkerRegistration } from '@/components/shell/install-app';
+import { THEME_SCRIPT } from '@/lib/theme';
 import './globals.css';
 
 const geistSans = Geist({
@@ -38,9 +40,23 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default async function RootLayout({ children }: LayoutProps<'/'>) {
+  // The page's security policy allows inline script only with this request's nonce.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    // The theme script sets the theme on <html> before React takes over.
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        <script
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}
+        />
+      </head>
       <body>
         {children}
         <Toaster position="top-right" />

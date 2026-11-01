@@ -17,6 +17,8 @@ import { logout } from '@/lib/auth/logout-action';
 import type { Brand } from '@/lib/brand/brand';
 import { AttendanceControl, type AttendanceStatus } from '@/components/team/attendance-control';
 import { NotificationBell } from '@/components/shell/notification-bell';
+import { SidebarToggle } from '@/components/shell/sidebar-nav';
+import { ThemeMenu } from '@/components/shell/theme-menu';
 
 function initials(fullName: string): string {
   return fullName
@@ -55,6 +57,7 @@ export function Topbar({
         >
           {brand.initial}
         </Link>
+        <SidebarToggle />
         <div className="min-w-0 flex-1">
           <GlobalSearch />
         </div>
@@ -72,6 +75,8 @@ export function Topbar({
           {notifications ? (
             <NotificationBell unread={notifications.unread} vapidKey={notifications.vapidKey} />
           ) : null}
+
+          <ThemeMenu />
 
           <InstallAppButton appName={brand.shortName} />
 

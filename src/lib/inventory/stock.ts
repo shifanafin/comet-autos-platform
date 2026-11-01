@@ -100,6 +100,8 @@ export interface MovementInput {
   reversalOfTransactionId?: string | null;
   performedByUserId: string;
   note: string;
+  /** The day it really happened, for goods recorded after they came in; blank: now. */
+  at?: Date;
 }
 
 /**
@@ -140,6 +142,7 @@ export async function postMovement(tx: Prisma.TransactionClient, input: Movement
       reversalOfTransactionId: input.reversalOfTransactionId ?? null,
       performedByUserId: input.performedByUserId,
       note: input.note,
+      ...(input.at ? { createdAt: input.at } : {}),
     },
   });
   // Stock in or out of the workshop's value is booked now; a part fitted to

@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '@/lib/auth/session';
 import { getPaymentVoucher } from '@/lib/finance/payment-vouchers';
 import { METHOD_LABEL } from '@/lib/accounting/payment-modes';
 import { fileName, loadSeller } from '@/lib/documents/build';
-import { formatAed, type CustomerDocumentModel, type DocumentField } from '@/lib/documents/model';
+import { formatAmount, type CustomerDocumentModel, type DocumentField } from '@/lib/documents/model';
 import { aedInWords } from '@/lib/documents/amount-words';
 
 /*
@@ -32,20 +32,20 @@ export async function getPaymentVoucherDocument(
       ? [
           {
             label: 'Card payment collected',
-            value: `${formatAed(voucher.collectedAmount!.toString())} on ${formatCalendarDate(voucher.collectedOn!)}${voucher.cardReference ? ` · slip ${voucher.cardReference}` : ''}`,
+            value: `${formatAmount(voucher.collectedAmount!.toString())} on ${formatCalendarDate(voucher.collectedOn!)}${voucher.cardReference ? ` · slip ${voucher.cardReference}` : ''}`,
           },
           ...(toFils(voucher.feeAmount.toString()) > 0
             ? [
                 {
                   label: `Bank's card fee${voucher.feeRate ? ` (${voucher.feeRate.toString().replace(/\.?0+$/, '')}%)` : ''}`,
-                  value: `- ${formatAed(voucher.feeAmount.toString())}`,
+                  value: `- ${formatAmount(voucher.feeAmount.toString())}`,
                 },
               ]
             : []),
           ...(toFils(voucher.feeVatAmount.toString()) > 0
-            ? [{ label: 'VAT on the bank’s fee', value: `- ${formatAed(voucher.feeVatAmount.toString())}` }]
+            ? [{ label: 'VAT on the bank’s fee', value: `- ${formatAmount(voucher.feeVatAmount.toString())}` }]
             : []),
-          { label: 'Amount paid', value: paid ? formatAed(paid) : 'Not paid yet' },
+          { label: 'Amount paid', value: paid ? formatAmount(paid) : 'Not paid yet' },
         ]
       : [
           { label: 'For', value: voucher.expense?.chartOfAccount?.accountName ?? 'Outside work' },
@@ -59,7 +59,7 @@ export async function getPaymentVoucherDocument(
             : voucher.expense?.invoice
               ? [{ label: 'Invoice', value: voucher.expense.invoice.invoiceNumber }]
               : []),
-          { label: 'Amount paid', value: paid ? formatAed(paid) : '—' },
+          { label: 'Amount paid', value: paid ? formatAmount(paid) : '—' },
         ];
   if (paid) details.push({ label: 'Amount in words', value: aedInWords(paid) });
   if (paidFrom) details.push({ label: 'Paid by', value: paidFrom });
@@ -104,7 +104,7 @@ export async function getPaymentVoucherDocument(
           amount: voucher.collectedAmount!.toString(),
           caption: 'To be paid over, less the bank’s fee',
         },
-    detailsTitle: 'Payment details',
+    detailsTitle: 'Payment details (AED)',
     details,
     notes: [
       ...(voucher.status === 'VOID'

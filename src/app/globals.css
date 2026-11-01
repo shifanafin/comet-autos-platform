@@ -27,6 +27,7 @@
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-highlight: var(--sidebar-highlight);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
@@ -94,14 +95,14 @@
    */
   --shadow-control: 0 1px 2px var(--shadow-tint), inset 0 1px 0 rgb(255 255 255 / 0.6);
   --shadow-primary:
-    0 1px 2px rgb(76 29 149 / 0.3), 0 4px 12px -4px rgb(124 58 237 / 0.45),
+    0 1px 2px color-mix(in srgb, var(--primary-hover) 30%, transparent), 0 4px 12px -4px color-mix(in srgb, var(--primary) 45%, transparent),
     inset 0 1px 0 rgb(255 255 255 / 0.22);
   --shadow-primary-hover:
-    0 2px 4px rgb(76 29 149 / 0.32), 0 10px 22px -6px rgb(124 58 237 / 0.5),
+    0 2px 4px color-mix(in srgb, var(--primary-hover) 32%, transparent), 0 10px 22px -6px color-mix(in srgb, var(--primary) 50%, transparent),
     inset 0 1px 0 rgb(255 255 255 / 0.26);
   --shadow-inset-field: inset 0 1px 2px rgb(20 20 40 / 0.06);
   /* The violet halo used for brand marks and the signed-in avatar. */
-  --shadow-glow: 0 2px 10px -2px rgb(124 58 237 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.25);
+  --shadow-glow: 0 2px 10px -2px color-mix(in srgb, var(--primary) 50%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.25);
 }
 
 /*
@@ -120,7 +121,7 @@
   --card: #ffffff;
   --card-foreground: #14141a;
   --surface: #ffffff;
-  --ground-wash: rgb(124 58 237 / 0.06);
+  --ground-wash: color-mix(in srgb, var(--primary) 6%, transparent);
   --scrollbar-thumb: rgb(20 20 40 / 0.16);
   --scrollbar-thumb-hover: rgb(20 20 40 / 0.3);
   --shadow-tint: rgb(20 20 40 / 0.07);
@@ -147,7 +148,7 @@
   --info-foreground: #ffffff;
   --border: #e6e7ee;
   --input: #cbd5e1;
-  --ring: rgb(124 58 237 / 0.55);
+  --ring: color-mix(in srgb, var(--primary) 55%, transparent);
   --chart-1: #7c3aed;
   --chart-2: #5b21b6;
   --chart-3: #64748b;
@@ -161,15 +162,17 @@
   --sidebar-accent: #1c1c24;
   --sidebar-accent-foreground: #f4f4f5;
   --sidebar-border: rgb(255 255 255 / 8%);
-  --sidebar-ring: rgb(124 58 237 / 0.55);
+  --sidebar-ring: color-mix(in srgb, var(--sidebar-primary) 55%, transparent);
+  --sidebar-highlight: #a78bfa;
 }
 
 .dark {
+  color-scheme: dark;
   --background: #111118;
   --foreground: #f4f4f5;
   --card: #18181f;
   --card-foreground: #f4f4f5;
-  --ground-wash: rgb(139 92 246 / 0.1);
+  --ground-wash: color-mix(in srgb, var(--primary) 10%, transparent);
   --scrollbar-thumb: rgb(255 255 255 / 0.16);
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.3);
   --shadow-tint: rgb(0 0 0 / 0.4);
@@ -179,9 +182,9 @@
   --surface: #18181f;
   --popover: #18181f;
   --popover-foreground: #f4f4f5;
-  --primary: #8b5cf6;
-  --primary-hover: #7c3aed;
-  --primary-foreground: #f8f8fa;
+  --primary: #a78bfa;
+  --primary-hover: #c4b5fd;
+  --primary-foreground: #1c1130;
   --secondary: #1c1c24;
   --secondary-foreground: #f4f4f5;
   --muted: #1c1c24;
@@ -199,20 +202,147 @@
   --info-foreground: #ffffff;
   --border: rgb(255 255 255 / 10%);
   --input: rgb(255 255 255 / 12%);
-  --ring: rgb(139 92 246 / 0.55);
-  --chart-1: #8b5cf6;
+  --ring: color-mix(in srgb, var(--primary) 55%, transparent);
+  --chart-1: #a78bfa;
   --chart-2: #cbd5e1;
   --chart-3: #64748b;
   --chart-4: #5b21b6;
   --chart-5: #f4f4f5;
   --sidebar: #0b0b10;
   --sidebar-foreground: #f4f4f5;
-  --sidebar-primary: #8b5cf6;
-  --sidebar-primary-foreground: #f8f8fa;
+  --sidebar-primary: #a78bfa;
+  --sidebar-primary-foreground: #1c1130;
   --sidebar-accent: #18181f;
   --sidebar-accent-foreground: #f4f4f5;
   --sidebar-border: rgb(255 255 255 / 8%);
-  --sidebar-ring: rgb(139 92 246 / 0.55);
+  --sidebar-ring: color-mix(in srgb, var(--sidebar-primary) 55%, transparent);
+}
+
+/*
+ * Colour themes (lib/theme.ts). Only the brand accent moves: status colours
+ * keep their meaning, and the sidebar stays graphite. In dark mode the accent
+ * is a lighter shade with dark text on it, so buttons and links both stay
+ * readable (checked against WCAG AA).
+ */
+[data-accent='blue'] {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --accent: #dbeafe;
+  --accent-foreground: #1e40af;
+  --chart-1: #2563eb;
+  --chart-2: #1e40af;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-highlight: #93c5fd;
+}
+[data-accent='teal'] {
+  --primary: #0f766e;
+  --primary-hover: #115e59;
+  --primary-foreground: #ffffff;
+  --accent: #ccfbf1;
+  --accent-foreground: #115e59;
+  --chart-1: #0f766e;
+  --chart-2: #134e4a;
+  --sidebar-primary: #0f766e;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-highlight: #5eead4;
+}
+[data-accent='orange'] {
+  --primary: #c2410c;
+  --primary-hover: #9a3412;
+  --primary-foreground: #ffffff;
+  --accent: #ffedd5;
+  --accent-foreground: #9a3412;
+  --chart-1: #c2410c;
+  --chart-2: #7c2d12;
+  --sidebar-primary: #c2410c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-highlight: #fdba74;
+}
+[data-accent='rose'] {
+  --primary: #be123c;
+  --primary-hover: #9f1239;
+  --primary-foreground: #ffffff;
+  --accent: #ffe4e6;
+  --accent-foreground: #9f1239;
+  --chart-1: #be123c;
+  --chart-2: #881337;
+  --sidebar-primary: #be123c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-highlight: #fda4af;
+}
+[data-accent='graphite'] {
+  --primary: #334155;
+  --primary-hover: #1e293b;
+  --primary-foreground: #ffffff;
+  --accent: #e2e8f0;
+  --accent-foreground: #1e293b;
+  --chart-1: #334155;
+  --chart-2: #0f172a;
+  --sidebar-primary: #475569;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-highlight: #cbd5e1;
+}
+.dark[data-accent='blue'] {
+  --primary: #60a5fa;
+  --primary-hover: #93c5fd;
+  --primary-foreground: #0b1b33;
+  --accent: #172554;
+  --accent-foreground: #bfdbfe;
+  --chart-1: #60a5fa;
+  --chart-2: #cbd5e1;
+  --chart-4: #1e40af;
+  --sidebar-primary: #60a5fa;
+  --sidebar-primary-foreground: #0b1b33;
+}
+.dark[data-accent='teal'] {
+  --primary: #2dd4bf;
+  --primary-hover: #5eead4;
+  --primary-foreground: #04211e;
+  --accent: #042f2e;
+  --accent-foreground: #99f6e4;
+  --chart-1: #2dd4bf;
+  --chart-2: #cbd5e1;
+  --chart-4: #115e59;
+  --sidebar-primary: #2dd4bf;
+  --sidebar-primary-foreground: #04211e;
+}
+.dark[data-accent='orange'] {
+  --primary: #fb923c;
+  --primary-hover: #fdba74;
+  --primary-foreground: #2a1204;
+  --accent: #431407;
+  --accent-foreground: #fed7aa;
+  --chart-1: #fb923c;
+  --chart-2: #cbd5e1;
+  --chart-4: #9a3412;
+  --sidebar-primary: #fb923c;
+  --sidebar-primary-foreground: #2a1204;
+}
+.dark[data-accent='rose'] {
+  --primary: #fb7185;
+  --primary-hover: #fda4af;
+  --primary-foreground: #2a0710;
+  --accent: #4c0519;
+  --accent-foreground: #fecdd3;
+  --chart-1: #fb7185;
+  --chart-2: #cbd5e1;
+  --chart-4: #9f1239;
+  --sidebar-primary: #fb7185;
+  --sidebar-primary-foreground: #2a0710;
+}
+.dark[data-accent='graphite'] {
+  --primary: #cbd5e1;
+  --primary-hover: #e2e8f0;
+  --primary-foreground: #0f172a;
+  --accent: #1e293b;
+  --accent-foreground: #e2e8f0;
+  --chart-1: #cbd5e1;
+  --chart-2: #cbd5e1;
+  --chart-4: #475569;
+  --sidebar-primary: #94a3b8;
+  --sidebar-primary-foreground: #0f172a;
 }
 
 @layer base {

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { activeNavHref, NAV_GROUPS, type NavGroup, type NavItem } from '@/lib/nav';
 
@@ -17,7 +17,8 @@ import { activeNavHref, NAV_GROUPS, type NavGroup, type NavItem } from '@/lib/na
  * permissions (`allowedHrefs`); a section with nothing allowed in it is not
  * shown at all. Open and closed are remembered in this browser. Until a
  * section has been opened or closed by hand, the one holding the current page
- * is open and the rest are closed.
+ * is open and the rest are closed. Every section can be opened or closed at
+ * once, and typing in the box above them narrows the menu to what matches.
  *
  * The narrow, icons-only sidebar shows every allowed link as before: there is
  * no heading there to open a section with.
@@ -65,7 +66,9 @@ export function NavList({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const [filter, setFilter] = useState('');
   const allowed = new Set(allowedHrefs);
   // One item is current: the most specific one matching the page.
   const active = activeNavHref(pathname, searchParams, allowedHrefs);
@@ -90,6 +93,24 @@ export function NavList({
     }, 0);
     return () => clearTimeout(timeout);
   }, []);
+
+  /** Opens or closes every section and sub-section, and remembers it. */
+  function setAll(open: boolean) {
+    const next: Record<string, boolean> = {};
+    for (const section of sections) {
+      if (section.label === null) continue;
+      next[section.key] = open;
+      if (section.nested) {
+        for (const group of section.groups) next[`${section.key}/${group.label}`] = open;
+      }
+    }
+    setChosen(next);
+    try {
+      window.localStorage.setItem(OPEN_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Per-viewer convenience only — fine if it doesn't persist.
+    }
+  }
 
   const holdsActive = (items: NavItem[]) => items.some((item) => item.href === active);
   const isOpen = (key: string, items: NavItem[]) => chosen[key] ?? holdsActive(items);
@@ -116,7 +137,7 @@ export function NavList({
         title={collapsed ? item.label : undefined}
         aria-current={isActive ? 'page' : undefined}
         className={cn(
-          'group/nav relative flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+          'group/nav relative flex h-10 shrink-0 items-center gap-3 rounded-lg px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-inset',
           'transition-[background-color,color,transform] duration-150 ease-out motion-reduce:transition-none',
           collapsed && 'justify-center px-0',
           indent && !collapsed && 'pl-5',
@@ -130,7 +151,7 @@ export function NavList({
           className={cn(
             'size-[18px] shrink-0 transition-colors',
             isActive
-              ? 'text-violet-400'
+              ? 'text-sidebar-highlight'
               : 'text-sidebar-foreground/55 group-hover/nav:text-sidebar-foreground/90',
           )}
         />
@@ -147,7 +168,6 @@ export function NavList({
   /** A heading that opens and closes what is under it. */
   const heading = (key: string, label: string, items: NavItem[], level: 'section' | 'sub') => {
     const open = isOpen(key, items);
-    const Chevron = open ? ChevronDown : ChevronRight;
     return (
       <button
         type="button"
@@ -162,9 +182,17 @@ export function NavList({
       >
         <span className="flex-1 truncate">{label}</span>
         {holdsActive(items) && !open ? (
-          <span className="size-1.5 rounded-full bg-violet-400" aria-label="Current page is here" />
+          <span
+            className="size-1.5 rounded-full bg-sidebar-highlight"
+            aria-label="Current page is here"
+          />
         ) : null}
-        <Chevron className="size-3.5 shrink-0" />
+        <ChevronRight
+          className={cn(
+            'size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
+            open && 'rotate-90',
+          )}
+        />
       </button>
     );
   };
@@ -185,8 +213,90 @@ export function NavList({
     );
   }
 
+  /** What is under a heading: folds smoothly, and can't be tabbed into while closed. */
+  const folding = (open: boolean, children: React.ReactNode) => (
+    <div
+      inert={!open}
+      className={cn(
+        'grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none',
+        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+      )}
+    >
+      <div className="flex min-h-0 flex-col gap-1 overflow-hidden">{children}</div>
+    </div>
+  );
+
+  const query = filter.trim().toLowerCase();
+  const matches = query
+    ? sections
+        .flatMap((section) => section.groups.flatMap((group) => group.items))
+        .filter((item) => item.label.toLowerCase().includes(query))
+    : [];
+  const toolbar = (
+    <div className="flex shrink-0 items-center gap-1 pb-1">
+      <div className="relative min-w-0 flex-1">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-sidebar-foreground/45" />
+        <input
+          type="search"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setFilter('');
+            if (event.key === 'Enter' && matches[0]) {
+              router.push(matches[0].href);
+              setFilter('');
+              onNavigate?.();
+            }
+          }}
+          placeholder="Find a menu"
+          aria-label="Find a menu"
+          className="h-8 w-full rounded-lg border border-sidebar-border bg-sidebar-accent/50 pr-7 pl-8 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/45 focus-visible:ring-2 focus-visible:ring-sidebar-ring [&::-webkit-search-cancel-button]:hidden"
+        />
+        {filter ? (
+          <button
+            type="button"
+            onClick={() => setFilter('')}
+            aria-label="Clear"
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-sidebar-foreground/55 hover:text-sidebar-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {[
+        { label: 'Expand all menus', icon: ChevronsUpDown, open: true },
+        { label: 'Collapse all menus', icon: ChevronsDownUp, open: false },
+      ].map(({ label, icon: Icon, open }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => setAll(open)}
+          aria-label={label}
+          title={label}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/55 outline-none transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <Icon className="size-4" />
+        </button>
+      ))}
+    </div>
+  );
+
+  if (query) {
+    return (
+      <nav className="scrollbar-none relative flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
+        {toolbar}
+        {matches.length ? (
+          matches.map((item) => link(item))
+        ) : (
+          <p className="px-3 py-2 text-xs text-sidebar-foreground/55">No menu matches.</p>
+        )}
+      </nav>
+    );
+  }
+
   return (
-    <nav className="scrollbar-none relative flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-5">
+    <nav className="scrollbar-none relative flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-4">
+      {toolbar}
       {sections.map((section) => {
         const items = section.groups.flatMap((group) => group.items);
         if (section.label === null) {
@@ -200,27 +310,25 @@ export function NavList({
         return (
           <div key={section.key} className="flex flex-col gap-1">
             {heading(section.key, section.label, items, 'section')}
-            {open ? (
-              section.nested ? (
-                <div className="flex flex-col gap-1">
-                  {section.groups.map((group) => {
+            {folding(
+              open,
+              section.nested
+                ? section.groups.map((group) => {
                     // A sub-section of one link needs no heading of its own.
                     if (group.items.length === 1) return link(group.items[0]);
                     const key = `${section.key}/${group.label}`;
                     return (
                       <div key={key} className="flex flex-col gap-1">
                         {heading(key, group.label ?? '', group.items, 'sub')}
-                        {isOpen(key, group.items)
-                          ? group.items.map((item) => link(item, true))
-                          : null}
+                        {folding(
+                          isOpen(key, group.items),
+                          group.items.map((item) => link(item, true)),
+                        )}
                       </div>
                     );
-                  })}
-                </div>
-              ) : (
-                items.map((item) => link(item))
-              )
-            ) : null}
+                  })
+                : items.map((item) => link(item)),
+            )}
           </div>
         );
       })}

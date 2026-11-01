@@ -13,8 +13,10 @@ import {
 } from '@/lib/money';
 import { invoiceBalance, receiptBalances } from '@/lib/billing/invoice';
 import { employeeName } from '@/lib/workshop/assignment';
+import { aedInWords } from '@/lib/documents/amount-words';
 import {
   formatAed,
+  formatAmount,
   formatRate,
   type CustomerDocumentModel,
   type DocumentLine,
@@ -496,10 +498,10 @@ function invoiceModel(invoice: InvoiceRecord, seller: DocumentSeller): CustomerD
       { label: 'Balance due', amount: balance.balance, emphasis: 'balance' },
     ],
     highlight: null,
-    detailsTitle: payments.length ? 'Payments received' : null,
+    detailsTitle: payments.length ? 'Payments received (AED)' : null,
     details: payments.map((p) => ({
       label: p.paymentNumber ?? 'Payment',
-      value: `${formatDate(p.receivedAt)} · ${PAYMENT_METHOD_LABEL[p.method]} · ${formatAed(p.amount.toString())}`,
+      value: `${formatDate(p.receivedAt)} · ${PAYMENT_METHOD_LABEL[p.method]} · ${formatAmount(p.amount.toString())}`,
     })),
     notes: [
       balance.state === 'PAID'
@@ -548,7 +550,7 @@ function receiptModel(
       amount: payment.amount.toString(),
       caption: PAYMENT_METHOD_LABEL[payment.method],
     },
-    detailsTitle: 'Payment details',
+    detailsTitle: 'Payment details (AED)',
     details: [
       { label: 'Receipt number', value: number },
       { label: 'Received on', value: formatDateTime(payment.receivedAt) },
@@ -556,11 +558,12 @@ function receiptModel(
       ...(payment.referenceNumber ? [{ label: 'Reference', value: payment.referenceNumber }] : []),
       {
         label: 'Invoice',
-        value: `${invoice.invoiceNumber} · total ${formatAed(invoice.totalAmount.toString())}`,
+        value: `${invoice.invoiceNumber} · total ${formatAmount(invoice.totalAmount.toString())}`,
       },
-      { label: 'Balance before this payment', value: formatAed(previousBalance) },
-      { label: 'Amount paid', value: formatAed(payment.amount.toString()) },
-      { label: 'Remaining balance', value: formatAed(remainingBalance) },
+      { label: 'Balance before this payment', value: formatAmount(previousBalance) },
+      { label: 'Amount paid', value: formatAmount(payment.amount.toString()) },
+      { label: 'Amount in words', value: aedInWords(payment.amount.toString()) },
+      { label: 'Remaining balance', value: formatAmount(remainingBalance) },
       { label: 'Payment status', value: settled ? 'Invoice paid in full' : 'Balance outstanding' },
     ],
     notes: ['Thank you for your payment. Please keep this receipt for your records.'],
@@ -602,7 +605,7 @@ function reversedReceiptModel(
       amount: payment.amount.toString(),
       caption: PAYMENT_METHOD_LABEL[payment.method],
     },
-    detailsTitle: 'Payment details',
+    detailsTitle: 'Payment details (AED)',
     details: [
       { label: 'Receipt number', value: number },
       { label: 'Received on', value: formatDateTime(payment.receivedAt) },
@@ -612,9 +615,9 @@ function reversedReceiptModel(
       ...(payment.referenceNumber ? [{ label: 'Reference', value: payment.referenceNumber }] : []),
       {
         label: 'Invoice',
-        value: `${invoice.invoiceNumber} · total ${formatAed(invoice.totalAmount.toString())}`,
+        value: `${invoice.invoiceNumber} · total ${formatAmount(invoice.totalAmount.toString())}`,
       },
-      { label: 'Invoice balance now', value: formatAed(balance.balance) },
+      { label: 'Invoice balance now', value: formatAmount(balance.balance) },
     ],
     notes: [
       'This payment was reversed and no longer counts towards the invoice. It is kept on record only.',
@@ -690,11 +693,11 @@ async function creditNoteModel(
         { label: 'Total credited', amount: note.totalAmount.toString(), emphasis: 'total' },
       ],
       highlight: null,
-      detailsTitle: refund > 0 ? 'Refund' : null,
+      detailsTitle: refund > 0 ? 'Refund (AED)' : null,
       details:
         refund > 0
           ? [
-              { label: 'Refunded to you', value: formatAed(note.refundAmount.toString()) },
+              { label: 'Refunded to you', value: formatAmount(note.refundAmount.toString()) },
               ...(note.refundedOn
                 ? [
                     { label: 'Refunded on', value: formatCalendarDate(note.refundedOn) },

@@ -1,3 +1,4 @@
+import { aedInWords } from '@/lib/documents/amount-words';
 import {
   A4,
   PdfDocument,
@@ -9,6 +10,7 @@ import {
 } from '@/lib/documents/pdf/writer';
 import {
   formatAed,
+  formatAmount,
   formatQuantity,
   formatRate,
   hasLineDiscounts,
@@ -50,7 +52,8 @@ const BOTTOM = A4.height - 70;
  * S.No · Type · Description · Qty · Price · Amount. A per-line VAT column
  * appears only when the lines are not all at one rate — otherwise the
  * totals already say "VAT 5%" — and a Discount column only when a line has
- * a discount. Numeric columns give their right edge.
+ * a discount. Numeric columns give their right edge. The currency is in the
+ * headings, not on every line, which leaves the description the room.
  */
 interface Columns {
   no: number;
@@ -68,12 +71,12 @@ function columns(withVat: boolean, withDiscount: boolean): Columns {
   const base = { no: MARGIN + 30, type: MARGIN + 40, desc: MARGIN + 92, amount: RIGHT - 12 };
   const numeric =
     withVat && withDiscount
-      ? { qty: MARGIN + 270, price: MARGIN + 338, vat: MARGIN + 370, discount: MARGIN + 425 }
+      ? { qty: MARGIN + 280, price: MARGIN + 335, vat: MARGIN + 368, discount: MARGIN + 425 }
       : withDiscount
-        ? { qty: MARGIN + 290, price: MARGIN + 360, vat: null, discount: MARGIN + 420 }
+        ? { qty: MARGIN + 290, price: MARGIN + 345, vat: null, discount: MARGIN + 420 }
         : withVat
-          ? { qty: MARGIN + 322, price: MARGIN + 392, vat: MARGIN + 428, discount: null }
-          : { qty: MARGIN + 350, price: MARGIN + 425, vat: null, discount: null };
+          ? { qty: MARGIN + 335, price: MARGIN + 390, vat: MARGIN + 425, discount: null }
+          : { qty: MARGIN + 365, price: MARGIN + 420, vat: null, discount: null };
   return { ...base, ...numeric, descWidth: numeric.qty - base.desc - 40 };
 }
 
@@ -247,10 +250,14 @@ function tableHeader(layout: Layout, col: Columns) {
   page.text('TYPE', col.type, y, style);
   page.text('DESCRIPTION', col.desc, y, style);
   page.text('QTY', col.qty, y, { ...style, align: 'right' });
-  page.text('PRICE', col.price, y, { ...style, align: 'right' });
+  page.text('PRICE (AED)', col.price, y, { ...style, align: 'right' });
   if (col.vat !== null) page.text('VAT', col.vat, y, { ...style, align: 'right' });
-  if (col.discount !== null) page.text('DISCOUNT', col.discount, y, { ...style, align: 'right' });
-  page.text('AMOUNT', col.amount, y, { ...style, align: 'right' });
+  if (col.discount !== null) {
+    // Beside a VAT column there is room only for the short form.
+    const heading = col.vat !== null ? 'DISC. (AED)' : 'DISCOUNT (AED)';
+    page.text(heading, col.discount, y, { ...style, align: 'right' });
+  }
+  page.text('AMOUNT (AED)', col.amount, y, { ...style, align: 'right' });
   layout.y += 30;
 }
 
@@ -289,7 +296,7 @@ function sections(layout: Layout, doc: CustomerDocumentModel) {
         color: INK,
         align: 'right',
       });
-      page.text(formatAed(line.unitPrice), col.price, base, {
+      page.text(formatAmount(line.unitPrice), col.price, base, {
         size: 9.5,
         color: INK,
         align: 'right',
@@ -302,13 +309,13 @@ function sections(layout: Layout, doc: CustomerDocumentModel) {
         });
       }
       if (col.discount !== null && line.discount !== null) {
-        page.text(`-${formatAed(line.discount)}`, col.discount, base, {
+        page.text(`-${formatAmount(line.discount)}`, col.discount, base, {
           size: 9.5,
           color: MUTED,
           align: 'right',
         });
       }
-      page.text(formatAed(line.lineTotal), col.amount, base, {
+      page.text(formatAmount(line.lineTotal), col.amount, base, {
         font: 'bold',
         size: 9.5,
         color: INK,
@@ -819,11 +826,30 @@ function signatures(layout: Layout, boxes = JOB_CARD_SIGNATURES) {
 function totals(layout: Layout, doc: CustomerDocumentModel) {
   if (doc.totals.length === 0) return;
   const rowHeight = 18;
-  const height = doc.totals.length * rowHeight + 20;
-  layout.ensure(height + 10);
   const left = RIGHT - 230;
+  // Beside the totals: the amount payable in words, and the document's currency.
+  const payable = doc.totals.find((total) => total.emphasis === 'total')?.amount;
+  const words =
+    payable && !payable.startsWith('-')
+      ? wrapText(aedInWords(payable), 'regular', 9, left - MARGIN - 16)
+      : [];
+  const wordsHeight = (words.length ? 24 + words.length * 12 : 0) + 14;
+  const boxHeight = doc.totals.length * rowHeight + 20;
+  const height = Math.max(boxHeight, wordsHeight);
+  layout.ensure(height + 10);
   const { page } = layout;
-  page.rect(left, layout.y, 230, height, { fill: SOFT, radius: 8 });
+  let wordsY = layout.y + 12;
+  if (words.length) {
+    page.text('AMOUNT IN WORDS', MARGIN, wordsY, { font: 'bold', size: 7.5, color: MUTED });
+    wordsY += 14;
+    for (const line of words) {
+      page.text(line, MARGIN, wordsY, { size: 9, color: INK });
+      wordsY += 12;
+    }
+    wordsY += 4;
+  }
+  page.text('All amounts are in UAE Dirhams (AED).', MARGIN, wordsY, { size: 8, color: MUTED });
+  page.rect(left, layout.y, 230, boxHeight, { fill: SOFT, radius: 8 });
   let y = layout.y + 22;
   for (const total of doc.totals) {
     const strong = total.emphasis === 'total' || total.emphasis === 'balance';
@@ -834,7 +860,8 @@ function totals(layout: Layout, doc: CustomerDocumentModel) {
       size: strong ? 10.5 : 9.5,
       color: strong ? INK : MUTED,
     });
-    page.text(formatAed(total.amount), RIGHT - 14, y, {
+    // The amount payable says its currency; the rows adding up to it needn't.
+    page.text(strong ? formatAed(total.amount) : formatAmount(total.amount), RIGHT - 14, y, {
       font: strong ? 'bold' : 'regular',
       size: strong ? 11.5 : 9.5,
       color: total.emphasis === 'balance' ? BRAND : INK,

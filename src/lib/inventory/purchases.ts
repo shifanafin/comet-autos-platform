@@ -24,7 +24,8 @@ import {
   toMilli,
   type LineAmounts,
 } from '@/lib/money';
-import { localDateString, parseCalendarDate } from '@/lib/format';
+import { formatCalendarDate, localDateString, parseCalendarDate } from '@/lib/format';
+import { whyEntryCantMove } from '@/lib/accounting/redate';
 import { resolveDefaultVatRate } from '@/lib/tax';
 import { postMovement, resolveInventoryBranch } from '@/lib/inventory/stock';
 import { getTaxCodeOptions, resolveTaxCodes } from '@/lib/accounting/tax-codes';
@@ -37,7 +38,7 @@ import {
   supplierPaidFils,
 } from '@/lib/finance/supplier-balance';
 import { roundingField, withRounding } from '@/lib/billing/document-lines';
-import { syncPosting } from '@/lib/accounting/journal';
+import { syncPosting, renumberJournal } from '@/lib/accounting/journal';
 
 /*
  * Purchase receiving: a purchase records one supplier invoice / delivery
@@ -61,6 +62,11 @@ import { syncPosting } from '@/lib/accounting/journal';
  * an ordinary supplier payment, by the same function the Pay screen uses
  * (takeSupplierPayment), in the same transaction. "Pay later" records
  * nothing but an optional due date.
+ *
+ * The dates. A purchase is often entered after the day it happened: the
+ * purchase date is that day, so its first delivery — the stock, and a payment
+ * taken with it — is dated by it, and falls in the right month for the books
+ * and VAT. A later delivery of the same purchase is dated when it comes.
  */
 
 const lineSchema = z.object({
@@ -540,7 +546,7 @@ export async function createPurchaseInTransaction(
   }
   if (options.receive) {
     const receipt = await receiveInTransaction(tx, user, purchase.id, null);
-    await settleOnReceipt(tx, user, purchase.id, settlement, receipt.itemIds);
+    await settleOnReceipt(tx, user, purchase.id, settlement, receipt.itemIds, receipt.receivedAt);
   }
   await settleRequestKey(tx, user, rawInput, purchase.id);
   return purchase;
@@ -632,14 +638,140 @@ export async function updatePurchase(
 
 const detailsSchema = purchaseSchema
   .pick({ supplierInvoiceNumber: true, supplierInvoiceDate: true, dueDate: true, notes: true })
-  .extend({ requestKey: z.string().optional() });
+  .extend({
+    /** Also move the stock and the payment taken with it to the purchase date. */
+    moveBooks: z.string().optional(),
+    requestKey: z.string().optional(),
+  });
+
+/** A day as a moment: midday in Dubai, so the day never slips. */
+const middayOf = (day: string) => new Date(`${day}T12:00:00+04:00`);
+
+/**
+ * When a first delivery is dated: the purchase date, or now when it is today,
+ * has none, or falls before these books began.
+ */
+async function receiptMoment(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  purchaseDate: Date | null,
+) {
+  if (!purchaseDate) return new Date();
+  const day = purchaseDate.toISOString().slice(0, 10);
+  if (day >= localDateString()) return new Date();
+  const { openingBalanceDate } = await tx.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { openingBalanceDate: true },
+  });
+  return openingBalanceDate && purchaseDate < openingBalanceDate ? new Date() : middayOf(day);
+}
+
+/**
+ * Moves a received purchase to the day it happened: its stock, its received
+ * date, the payment made the day it was received, and the VAT date of its
+ * bill — and their entries, by each record's own rule. A payment made on
+ * another day really was, and stays. Refused by the rules for moving any
+ * entry (lib/accounting/redate.ts): closed periods, filed VAT returns,
+ * reconciled entries. One delivery only: two came on their own days.
+ */
+async function moveReceiptToDay(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  purchase: { id: string; billMatchedByUserId: string | null; billReceivedOn: Date | null },
+  day: string,
+) {
+  const organizationId = user.organizationId;
+  const refuse = (why: string) => new DomainError(`The date can't be moved: ${why}.`, 'moveBooks');
+  const movements = await tx.inventoryTransaction.findMany({
+    where: { organizationId, purchaseItem: { purchaseId: purchase.id } },
+    select: { id: true, createdAt: true, transactionType: true },
+  });
+  const receipts = movements.filter((m) => m.transactionType === 'PURCHASE_RECEIPT');
+  if (receipts.length === 0) return null;
+  if (receipts.length !== movements.length) throw refuse('some of these goods have gone back');
+  const days = new Set(receipts.map((m) => localDateString(m.createdAt)));
+  if (days.size > 1) throw refuse('the goods came in more than one delivery');
+  const [from] = days;
+  if (from === day) return null;
+  const to = parseCalendarDate(day)!;
+  const { openingBalanceDate } = await tx.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { openingBalanceDate: true },
+  });
+  if (openingBalanceDate && to < openingBalanceDate) {
+    throw refuse(`the books begin on ${formatCalendarDate(openingBalanceDate)}`);
+  }
+
+  const payments = await tx.supplierPayment.findMany({
+    where: { organizationId, purchaseId: purchase.id, reversalOfSupplierPaymentId: null },
+    select: { id: true, paidAt: true, reversals: { select: { id: true } } },
+  });
+  const live = payments.filter((payment) => payment.reversals.length === 0);
+  const moving = live.filter((payment) => localDateString(payment.paidAt) === from);
+  if (live.some((p) => !moving.includes(p) && localDateString(p.paidAt) < day)) {
+    throw refuse('a payment was made before that day');
+  }
+
+  // Only entries still standing: one already reversed keeps its history.
+  const entries = await tx.journalEntry.findMany({
+    where: {
+      organizationId,
+      reversalOfJournalEntryId: null,
+      reversals: { none: {} },
+      OR: [
+        { sourceType: 'STOCK_MOVEMENT', sourceId: { in: receipts.map((m) => m.id) } },
+        { sourceType: 'SUPPLIER_PAYMENT', sourceId: { in: moving.map((p) => p.id) } },
+        { sourceType: 'PURCHASE_ROUNDING', sourceId: purchase.id },
+        { sourceType: 'PURCHASE_BILL', sourceId: purchase.id },
+      ],
+    },
+    select: { id: true },
+  });
+  const fromDate = parseCalendarDate(from)!;
+  for (const entry of entries) {
+    const why = await whyEntryCantMove(tx, organizationId, entry.id, fromDate, to);
+    if (why) throw refuse(why);
+  }
+
+  const at = middayOf(day);
+  // The stock ledger is append-only but for this (migration 20261113090000).
+  await tx.$executeRaw`SELECT set_config('app.redate_purchase_receipt', 'on', true)`;
+  await tx.inventoryTransaction.updateMany({
+    where: { organizationId, id: { in: receipts.map((m) => m.id) } },
+    data: { createdAt: at },
+  });
+  await tx.$executeRaw`SELECT set_config('app.redate_purchase_receipt', 'off', true)`;
+  await tx.purchase.update({
+    where: { id: purchase.id },
+    data: { receivedAt: at, ...(purchase.billReceivedOn ? { billReceivedOn: to } : {}) },
+  });
+  if (moving.length) {
+    await tx.supplierPayment.updateMany({
+      where: { organizationId, id: { in: moving.map((p) => p.id) } },
+      data: { paidAt: at },
+    });
+  }
+  for (const { id } of receipts) {
+    await syncPosting(tx, organizationId, 'STOCK_MOVEMENT', id, user.id);
+  }
+  for (const { id } of moving) {
+    await syncPosting(tx, organizationId, 'SUPPLIER_PAYMENT', id, user.id);
+  }
+  await syncPosting(tx, organizationId, 'PURCHASE_ROUNDING', purchase.id, user.id);
+  if (purchase.billMatchedByUserId) {
+    await syncPosting(tx, organizationId, 'PURCHASE_BILL', purchase.id, user.id);
+  }
+  await renumberJournal(tx, organizationId);
+  return { from, to: day, deliveries: receipts.length, payments: moving.length };
+}
 
 /**
  * Corrects a purchase's details once it is past draft — the supplier's
  * invoice number, the purchase (bill) date, the due date and the notes. None
- * of them changes an amount, the stock or an entry: the books keep the day
- * the goods were received. The lines and figures stay as received; the
- * audit log keeps the details as they were.
+ * of them changes an amount or the stock. The books keep the day the goods
+ * were received unless asked to move to the purchase date (moveReceiptToDay).
+ * The lines and figures stay as received; the audit log keeps the details as
+ * they were.
  */
 export async function updatePurchaseDetails(
   user: AuthenticatedUser,
@@ -672,6 +804,10 @@ export async function updatePurchaseDetails(
     };
     await tx.purchase.update({ where: { id: purchase.id }, data: after });
     const day = (date: Date | null) => date?.toISOString().slice(0, 10) ?? null;
+    const moved =
+      ON.has(input.moveBooks ?? '') && supplierInvoiceDate
+        ? await moveReceiptToDay(tx, user, purchase, day(supplierInvoiceDate)!)
+        : null;
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
       branchId: purchase.branchId,
@@ -691,11 +827,11 @@ export async function updatePurchaseDetails(
         dueDate: day(after.dueDate),
         notes: after.notes,
       },
-      metadata: { purchaseNumber: purchase.purchaseNumber },
+      metadata: { purchaseNumber: purchase.purchaseNumber, ...(moved ? { moved } : {}) },
     });
     await settleRequestKey(tx, user, rawInput, purchase.id);
     return { purchaseId: purchase.id };
-  });
+  }, RECEIPT_TRANSACTION);
 }
 
 /**
@@ -753,7 +889,14 @@ export async function receivePurchase(
   return prisma.$transaction(async (tx) => {
     await claimRequestKey(tx, user, options, 'purchase.receipt');
     const receipt = await receiveInTransaction(tx, user, purchaseId, parsed);
-    const payment = await settleOnReceipt(tx, user, purchaseId, settlement, receipt.itemIds);
+    const payment = await settleOnReceipt(
+      tx,
+      user,
+      purchaseId,
+      settlement,
+      receipt.itemIds,
+      receipt.receivedAt,
+    );
     return { status: receipt.status, received: receipt.received, payment };
   }, RECEIPT_TRANSACTION);
 }
@@ -810,6 +953,8 @@ async function settleOnReceipt(
   purchaseId: string,
   settlement: z.infer<typeof settlementSchema>,
   receivedItemIds: string[],
+  /** When the goods came in: a payment taken with them is dated the same. */
+  receivedAt: Date,
 ) {
   const purchase = await tx.purchase.findUniqueOrThrow({
     where: { id: purchaseId },
@@ -880,7 +1025,7 @@ async function settleOnReceipt(
     method: settlement.method,
     accountId: settlement.accountId,
     referenceNumber: settlement.payReference,
-    paidAt: new Date(),
+    paidAt: receivedAt,
   });
 }
 
@@ -904,6 +1049,11 @@ async function receiveInTransaction(
     );
   }
 
+  // The first delivery came on the purchase date; a later one comes today.
+  const receivedAt =
+    purchase.status === 'PARTIALLY_RECEIVED'
+      ? new Date()
+      : await receiptMoment(tx, user.organizationId, purchase.supplierInvoiceDate);
   const received: { sku: string; quantity: string; inventoryTransactionId: string }[] = [];
   const itemIds: string[] = [];
   let complete = true;
@@ -930,6 +1080,7 @@ async function receiveInTransaction(
         unitCost: item.unitCost.toString(),
         purchaseItemId: item.id,
         performedByUserId: user.id,
+        at: receivedAt,
         note: `Received on ${purchase.purchaseNumber}${purchase.supplierInvoiceNumber ? ` (supplier invoice ${purchase.supplierInvoiceNumber})` : ''}`,
       });
       received.push({
@@ -947,7 +1098,7 @@ async function receiveInTransaction(
   const status: PurchaseStatus = complete ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
   await tx.purchase.update({
     where: { id: purchase.id },
-    data: { status, receivedAt: new Date(), receivedByUserId: user.id },
+    data: { status, receivedAt, receivedByUserId: user.id },
   });
   await writeAuditLog(tx, {
     organizationId: user.organizationId,
@@ -965,7 +1116,7 @@ async function receiveInTransaction(
   if (purchase.billMatchedByUserId) {
     await syncPosting(tx, user.organizationId, 'PURCHASE_BILL', purchase.id, user.id);
   }
-  return { status, received, itemIds };
+  return { status, received, itemIds, receivedAt };
 }
 
 /** Cancels a purchase that has received nothing. Anything already received stays in stock and in the ledger. */

@@ -1,48 +1,67 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NavList } from '@/components/shell/nav-list';
 import { BrandMark } from '@/components/shell/brand-mark';
 import type { Brand } from '@/lib/brand/brand';
+import { setPreferenceCookie, SIDEBAR_COOKIE, TOGGLE_SIDEBAR_EVENT } from '@/lib/theme';
 
-const COLLAPSE_STORAGE_KEY = 'garage:sidebar-collapsed';
+/** The opener in the top bar. The sidebar itself listens: they are apart on the page. */
+export function SidebarToggle() {
+  return (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new Event(TOGGLE_SIDEBAR_EVENT))}
+      aria-label="Open or close the sidebar"
+      title="Open or close the sidebar (Ctrl+B)"
+      className="hidden size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 md:flex"
+    >
+      <PanelLeft className="size-5" />
+    </button>
+  );
+}
 
 export function SidebarNav({
   allowedHrefs,
   brand,
+  initialCollapsed = false,
 }: {
   allowedHrefs: string[];
   brand: Pick<Brand, 'shortName' | 'initial'>;
+  /** As it was left: read on the server, so the page never draws it the other way first. */
+  initialCollapsed?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
 
   useEffect(() => {
-    // Deferred a tick so this doesn't read as a synchronous setState-in-effect
-    // (which would cascade an extra render) — it's a one-time hydration of a
-    // per-viewer preference, not something worth optimizing further.
-    const timeout = setTimeout(() => {
-      try {
-        setCollapsed(window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1');
-      } catch {
-        // Private browsing / storage disabled — default to expanded.
+    function toggle() {
+      setCollapsed((prev) => {
+        setPreferenceCookie(SIDEBAR_COOKIE, prev ? 'open' : 'collapsed');
+        return !prev;
+      });
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'b') return;
+      // Ctrl+B is "bold" in the letter editor, and belongs to whatever is being typed in.
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      ) {
+        return;
       }
-    }, 0);
-    return () => clearTimeout(timeout);
+      event.preventDefault();
+      toggle();
+    }
+    window.addEventListener(TOGGLE_SIDEBAR_EVENT, toggle);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener(TOGGLE_SIDEBAR_EVENT, toggle);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
-
-  function toggle() {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(COLLAPSE_STORAGE_KEY, next ? '1' : '0');
-      } catch {
-        // Per-viewer convenience only — fine if it doesn't persist.
-      }
-      return next;
-    });
-  }
 
   return (
     <aside
@@ -52,7 +71,7 @@ export function SidebarNav({
         collapsed ? 'w-[72px]' : 'w-64',
       )}
     >
-      {/* A violet bloom behind the brand keeps the rail from reading as a flat slab. */}
+      {/* A bloom of the theme's colour behind the brand keeps the rail from reading as a flat slab. */}
       <span
         aria-hidden
         className="pointer-events-none absolute -top-28 left-1/2 size-64 -translate-x-1/2 rounded-full bg-sidebar-primary/25 blur-3xl"
@@ -67,30 +86,6 @@ export function SidebarNav({
       </div>
 
       <NavList allowedHrefs={allowedHrefs} collapsed={collapsed} />
-
-      <div
-        className={cn(
-          'relative shrink-0 border-t border-sidebar-border py-3',
-          collapsed ? 'px-3' : 'px-4',
-        )}
-      >
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={cn(
-            'flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-foreground',
-            collapsed && 'justify-center px-0',
-          )}
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="size-[18px]" />
-          ) : (
-            <PanelLeftClose className="size-[18px]" />
-          )}
-          {!collapsed ? 'Collapse' : null}
-        </button>
-      </div>
     </aside>
   );
 }

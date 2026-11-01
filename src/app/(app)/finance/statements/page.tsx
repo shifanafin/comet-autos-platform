@@ -10,7 +10,7 @@ import {
   getSupplierStatement,
   type StatementLine,
 } from '@/lib/finance/statements';
-import { formatCalendarDate, formatMoney, localDateString } from '@/lib/format';
+import { formatAmount, formatCalendarDate, formatMoney, localDateString } from '@/lib/format';
 import { PageHeader, Panel, Section, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -21,11 +21,11 @@ import { Button } from '@/components/ui/button';
 
 export const metadata = { title: 'Statements' };
 
-/** "AED 1,250.00", or "AED 1,250.00 CR" for a balance the other way. */
+/** "1,250.00", or "1,250.00 in credit" for a balance the other way; the column says AED. */
 function balanceText(amount: string, creditLabel: string) {
   return amount.startsWith('-')
-    ? `${formatMoney(amount.slice(1))} ${creditLabel}`
-    : formatMoney(amount);
+    ? `${formatAmount(amount.slice(1))} ${creditLabel}`
+    : formatAmount(amount);
 }
 
 function StatementTable({
@@ -59,9 +59,9 @@ function StatementTable({
           <tr>
             <th className="w-28 px-4 py-3 pl-6">Date</th>
             <th className="px-2 py-3">Transaction</th>
-            <th className="w-32 px-2 py-3 text-right">{debitLabel}</th>
-            <th className="w-32 px-2 py-3 text-right">{creditLabel}</th>
-            <th className="w-36 px-4 py-3 pr-6 text-right">Balance</th>
+            <th className="w-32 px-2 py-3 text-right">{debitLabel} (AED)</th>
+            <th className="w-32 px-2 py-3 text-right">{creditLabel} (AED)</th>
+            <th className="w-36 px-4 py-3 pr-6 text-right">Balance (AED)</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -91,10 +91,10 @@ function StatementTable({
                 <span className="block text-xs text-muted-foreground">{line.description}</span>
               </td>
               <td className="px-2 py-2.5 text-right tabular-nums">
-                {line.debit ? formatMoney(line.debit) : ''}
+                {line.debit ? formatAmount(line.debit) : ''}
               </td>
               <td className="px-2 py-2.5 text-right tabular-nums">
-                {line.credit ? formatMoney(line.credit) : ''}
+                {line.credit ? formatAmount(line.credit) : ''}
               </td>
               <td className="px-4 py-2.5 pr-6 text-right tabular-nums">
                 {balanceText(line.balance, reverseLabel)}
@@ -106,8 +106,8 @@ function StatementTable({
           <tr>
             <td className="px-4 py-3 pl-6 tabular-nums">{formatCalendarDate(to)}</td>
             <td className="px-2 py-3 font-semibold">Closing balance</td>
-            <td className="px-2 py-3 text-right tabular-nums">{formatMoney(totalDebits)}</td>
-            <td className="px-2 py-3 text-right tabular-nums">{formatMoney(totalCredits)}</td>
+            <td className="px-2 py-3 text-right tabular-nums">{formatAmount(totalDebits)}</td>
+            <td className="px-2 py-3 text-right tabular-nums">{formatAmount(totalCredits)}</td>
             <td className="px-4 py-3 pr-6 text-right font-semibold tabular-nums">
               {balanceText(closing, reverseLabel)}
             </td>

@@ -82,6 +82,16 @@ export function formatMoney(value: { toString(): string } | number | string): st
   return money.format(Number(value.toString()));
 }
 
+const plainAmount = new Intl.NumberFormat(WORKSHOP_LOCALE, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** "1,250.00": an amount under a heading that already says AED, on a printed sheet. */
+export function formatAmount(value: { toString(): string } | number | string): string {
+  return plainAmount.format(Number(value.toString()));
+}
+
 /** "YYYY-MM-DD" for a moment, in Dubai. */
 export function localDateString(value: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {

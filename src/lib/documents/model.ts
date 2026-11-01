@@ -119,11 +119,22 @@ export interface CustomerDocumentModel {
 
 /** "AED 1,250.00" from an exact decimal string, without floating-point conversion. */
 export function formatAed(amount: string): string {
+  return amount.trim().startsWith('-')
+    ? `-AED ${formatAmount(amount.trim().slice(1))}`
+    : `AED ${formatAmount(amount)}`;
+}
+
+/**
+ * "1,250.00": an amount under a heading that already says AED. Everything here
+ * is in dirhams, so the lines of a document carry none of their own; the
+ * currency is in the column heading, on the amount payable and in its words.
+ */
+export function formatAmount(amount: string): string {
   const fils = amount.trim().startsWith('-')
     ? -toFils(amount.trim().slice(1))
     : toFils(amount.trim());
   const [whole, fraction] = filsToString(Math.abs(fils)).split('.');
-  return `${fils < 0 ? '-' : ''}AED ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`;
+  return `${fils < 0 ? '-' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`;
 }
 
 /** "2.5", "1" — quantities without trailing zeros. */

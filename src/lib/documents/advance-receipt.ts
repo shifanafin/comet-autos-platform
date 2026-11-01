@@ -5,7 +5,7 @@ import { filsToString, toFils } from '@/lib/money';
 import { METHOD_LABEL } from '@/lib/accounting/payment-modes';
 import { getCustomerAdvance, ADVANCE_STATUS_LABEL } from '@/lib/billing/advances';
 import { fileName, loadSeller } from '@/lib/documents/build';
-import { formatAed, formatRate, type CustomerDocumentModel, type DocumentField } from '@/lib/documents/model';
+import { formatAmount, formatRate, type CustomerDocumentModel, type DocumentField } from '@/lib/documents/model';
 import { aedInWords } from '@/lib/documents/amount-words';
 
 /*
@@ -44,7 +44,7 @@ export async function getAdvanceReceiptDocument(
   const method = METHOD_LABEL[advance.method];
 
   const details: DocumentField[] = [
-    { label: 'Amount received', value: formatAed(amount) },
+    { label: 'Amount received', value: formatAmount(amount) },
     { label: 'Amount in words', value: aedInWords(amount) },
     { label: 'Paid by', value: advance.account?.accountName ? `${method} · ${advance.account.accountName}` : method },
     ...(advance.reference ? [{ label: 'Reference', value: advance.reference }] : []),
@@ -56,7 +56,7 @@ export async function getAdvanceReceiptDocument(
     details.push({
       label: 'Applied to',
       value: applied
-        .map((row) => `${row.invoice.invoiceNumber} (${formatAed(row.amount.toString())})`)
+        .map((row) => `${row.invoice.invoiceNumber} (${formatAmount(row.amount.toString())})`)
         .join(', '),
     });
   }
@@ -102,7 +102,7 @@ export async function getAdvanceReceiptDocument(
         ]
       : [{ label: 'Total received', amount, emphasis: 'total' }],
     highlight: { label: 'Advance received', amount, caption: method },
-    detailsTitle: 'Payment details',
+    detailsTitle: 'Payment details (AED)',
     details,
     notes: [
       ...(cancelled

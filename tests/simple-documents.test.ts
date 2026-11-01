@@ -955,7 +955,7 @@ describe("the owner's quotation sheet", () => {
     );
 
     const text = pdfStrings(renderDocumentPdf(document));
-    for (const heading of ['S.NO', 'TYPE', 'DESCRIPTION', 'QTY', 'PRICE', 'AMOUNT']) {
+    for (const heading of ['S.NO', 'TYPE', 'DESCRIPTION', 'QTY', 'PRICE (AED)', 'AMOUNT (AED)']) {
       assert.ok(text.includes(heading), `PDF column ${heading}`);
     }
     assert.ok(text.includes('POWER STEERING PUMP'));

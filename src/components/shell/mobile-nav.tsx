@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { X } from 'lucide-react';
 import { NavList } from '@/components/shell/nav-list';
 import { BrandMark } from '@/components/shell/brand-mark';
+import { ThemeControls } from '@/components/shell/theme-menu';
 import type { Brand } from '@/lib/brand/brand';
 
 /**
@@ -38,6 +39,10 @@ export function MobileNav({
             </DialogPrimitive.Close>
           </div>
           <NavList allowedHrefs={allowedHrefs} onNavigate={() => onOpenChange(false)} />
+          {/* The drawer's dark rail: the picker on a light card, as in the top bar's menu. */}
+          <div className="m-3 shrink-0 rounded-xl bg-popover p-3 text-popover-foreground">
+            <ThemeControls />
+          </div>
           <div className="shrink-0 pb-[env(safe-area-inset-bottom)]" aria-hidden />
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

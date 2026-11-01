@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { Suspense } from 'react';
 import {
   ArrowRight,
@@ -20,7 +21,8 @@ import { formatMoney, WORKSHOP_LOCALE, WORKSHOP_TIME_ZONE } from '@/lib/format';
 import { getGarageSummary, type GarageSummary } from '@/lib/overview/garage';
 import { getWorkshopPreferences } from '@/lib/organization/settings';
 import { isMenuShown } from '@/lib/nav';
-import { Grid, Panel, Section, Stack } from '@/components/layout/primitives';
+import { DASHBOARD_CLOSED_COOKIE } from '@/lib/theme';
+import { Grid, Panel, Stack } from '@/components/layout/primitives';
 import { FinancePeriodPicker } from '@/components/finance/period-picker';
 import { OwedToOwnerLine } from '@/components/finance/owed-to-owner-line';
 import { MyDayStrip } from '@/components/team/my-day-strip';
@@ -29,11 +31,18 @@ import { Kpi } from '@/components/overview/kpi';
 import { GarageNumbers } from '@/components/overview/garage-numbers';
 import { AttentionList, WorkshopNow, type AttentionItem } from '@/components/overview/workshop-now';
 import { RevenueCostTrend } from '@/components/overview/trend-chart';
+import { SummaryCards } from '@/components/overview/summary-cards';
+import {
+  CollapsibleSection,
+  CollapsibleSections,
+  SectionsBulkToggle,
+} from '@/components/overview/collapsible-sections';
 import { cn } from '@/lib/utils';
 
 /*
  * The dashboard, in the order the day asks its questions:
  *
+ *   0. the headline figures, each a card that opens what is behind it;
  *   1. where every car is right now, stage by stage;
  *   2. what needs someone to act — overdue money, approvals, cars ready;
  *   3. how the garage is doing in the period picked — earned, kept, owed,
@@ -61,6 +70,9 @@ function greeting(): string {
 }
 
 const PRESETS = ['month', 'last-month', 'quarter', 'year'] as const;
+
+/** The dashboard's folding sections. */
+const SECTION_IDS = ['now', 'attention', 'garage', 'trend', 'workshop', 'sales'];
 
 export default async function DashboardPage({
   searchParams,
@@ -98,6 +110,9 @@ export default async function DashboardPage({
   const summary = await getGarageSummary(user, input);
   const anything =
     summary.profit || summary.money.invoiced !== null || summary.jobs || summary.money.inHand;
+  const closed = decodeURIComponent((await cookies()).get(DASHBOARD_CLOSED_COOKIE)?.value ?? '')
+    .split(',')
+    .filter((id) => SECTION_IDS.includes(id));
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -142,74 +157,84 @@ export default async function DashboardPage({
         <MyDayStrip user={user} />
       </Suspense>
 
-      {summary.workshopNow ? (
-        <Section
-          title="In the workshop now"
-          description={
-            summary.workshopNow.onHold
-              ? `Every open job card by stage — ${summary.workshopNow.onHold} on hold besides.`
-              : 'Every open job card by stage. Tap one to see the cars in it.'
-          }
-          action={<SectionLink href="/live">Workshop today</SectionLink>}
-        >
-          <WorkshopNow
-            stages={summary.workshopNow.stages}
-            detailed={preferences.detailedJobCards}
-          />
-        </Section>
-      ) : null}
+      <SummaryCards summary={summary} menu={menu} />
 
-      <Attention summary={summary} menu={menu} />
+      <CollapsibleSections ids={SECTION_IDS} initialClosed={closed}>
+        <Stack gap="2xl">
+          {anything ? <SectionsBulkToggle /> : null}
+          {summary.workshopNow ? (
+            <CollapsibleSection
+              id="now"
+              title="In the workshop now"
+              description={
+                summary.workshopNow.onHold
+                  ? `Every open job card by stage — ${summary.workshopNow.onHold} on hold besides.`
+                  : 'Every open job card by stage. Tap one to see the cars in it.'
+              }
+              action={<SectionLink href="/live">Workshop today</SectionLink>}
+            >
+              <WorkshopNow
+                stages={summary.workshopNow.stages}
+                detailed={preferences.detailedJobCards}
+              />
+            </CollapsibleSection>
+          ) : null}
 
-      {summary.profit || summary.money.invoiced !== null || summary.money.inHand !== null ? (
-        <Section
-          title="How the garage is doing"
-          description={`${summary.period.label} · ${
-            comparable(summary)
-              ? `changes are ${summary.compareLabel}`
-              : 'nothing earlier in the books to compare with yet'
-          }`}
-        >
-          <Stack gap="lg">
-            <FinancePeriodPicker period={summary.period} basePath="/" presets={[...PRESETS]} />
-            <GarageNumbers summary={summary} />
-            {hasPermission(user, 'accounting.view') ? (
-              <Suspense fallback={null}>
-                <OwedToOwnerLine organizationId={user.organizationId} />
-              </Suspense>
-            ) : null}
-          </Stack>
-        </Section>
-      ) : null}
+          <Attention summary={summary} menu={menu} />
 
-      {summary.trend ? (
-        <Section
-          title="Revenue against costs — last 12 months"
-          description="From the books: revenue excl. VAT, against cost of parts and every expense. The gap between the two is the profit."
-          action={
-            <SectionLink href="/finance/accounting?view=profit">Profit &amp; loss</SectionLink>
-          }
-        >
-          <Panel>
-            <RevenueCostTrend data={summary.trend} />
-          </Panel>
-        </Section>
-      ) : null}
+          {summary.profit || summary.money.invoiced !== null || summary.money.inHand !== null ? (
+            <CollapsibleSection
+              id="garage"
+              title="How the garage is doing"
+              description={`${summary.period.label} · ${
+                comparable(summary)
+                  ? `changes are ${summary.compareLabel}`
+                  : 'nothing earlier in the books to compare with yet'
+              }`}
+            >
+              <Stack gap="lg">
+                <FinancePeriodPicker period={summary.period} basePath="/" presets={[...PRESETS]} />
+                <GarageNumbers summary={summary} />
+                {hasPermission(user, 'accounting.view') ? (
+                  <Suspense fallback={null}>
+                    <OwedToOwnerLine organizationId={user.organizationId} />
+                  </Suspense>
+                ) : null}
+              </Stack>
+            </CollapsibleSection>
+          ) : null}
 
-      {summary.jobs || summary.sales ? (
-        <Grid gap="xl" className="items-start lg:grid-cols-2">
-          {summary.jobs ? <WorkshopSummary summary={summary} /> : null}
-          {summary.sales ? <SalesSummary summary={summary} /> : null}
-        </Grid>
-      ) : null}
+          {summary.trend ? (
+            <CollapsibleSection
+              id="trend"
+              title="Revenue against costs — last 12 months"
+              description="From the books: revenue excl. VAT, against cost of parts and every expense. The gap between the two is the profit."
+              action={
+                <SectionLink href="/finance/accounting?view=profit">Profit &amp; loss</SectionLink>
+              }
+            >
+              <Panel>
+                <RevenueCostTrend data={summary.trend} />
+              </Panel>
+            </CollapsibleSection>
+          ) : null}
 
-      {!anything ? (
-        <Panel>
-          <p className="text-sm text-muted-foreground">
-            Your role has no figures to show here. Use the menu to open your work.
-          </p>
-        </Panel>
-      ) : null}
+          {summary.jobs || summary.sales ? (
+            <Grid gap="xl" className="items-start lg:grid-cols-2">
+              {summary.jobs ? <WorkshopSummary summary={summary} /> : null}
+              {summary.sales ? <SalesSummary summary={summary} /> : null}
+            </Grid>
+          ) : null}
+
+          {!anything ? (
+            <Panel>
+              <p className="text-sm text-muted-foreground">
+                Your role has no figures to show here. Use the menu to open your work.
+              </p>
+            </Panel>
+          ) : null}
+        </Stack>
+      </CollapsibleSections>
     </Stack>
   );
 }
@@ -323,9 +348,13 @@ function Attention({ summary, menu }: { summary: GarageSummary; menu: (href: str
     );
   }
   return (
-    <Section title="Needs attention" description="Most urgent first. Open one to act on it.">
+    <CollapsibleSection
+      id="attention"
+      title="Needs attention"
+      description="Most urgent first. Open one to act on it."
+    >
       <AttentionList items={items} />
-    </Section>
+    </CollapsibleSection>
   );
 }
 
@@ -337,7 +366,8 @@ function WorkshopSummary({ summary }: { summary: GarageSummary }) {
     { label: 'Cancelled', value: String(jobs.cancelled) },
   ];
   return (
-    <Section
+    <CollapsibleSection
+      id="workshop"
       title="Workshop"
       description="Job cards opened and vehicles handed back in the period."
       action={<SectionLink href="/workshop">Workshop overview</SectionLink>}
@@ -386,14 +416,15 @@ function WorkshopSummary({ summary }: { summary: GarageSummary }) {
           </div>
         ) : null}
       </Panel>
-    </Section>
+    </CollapsibleSection>
   );
 }
 
 function SalesSummary({ summary }: { summary: GarageSummary }) {
   const sales = summary.sales!;
   return (
-    <Section
+    <CollapsibleSection
+      id="sales"
       title="Sales"
       description="Invoices issued in the period and the customers behind them."
       action={<SectionLink href="/sales">Sales overview</SectionLink>}
@@ -434,6 +465,6 @@ function SalesSummary({ summary }: { summary: GarageSummary }) {
           </p>
         )}
       </Panel>
-    </Section>
+    </CollapsibleSection>
   );
 }

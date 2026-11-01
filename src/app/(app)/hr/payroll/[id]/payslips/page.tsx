@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { canSeePay, getPayrollRun, type PayrollRun } from '@/lib/hr/payroll';
-import { formatCalendarDate, formatMoney } from '@/lib/format';
+import { formatAmount, formatCalendarDate, formatMoney } from '@/lib/format';
 import { PageHeader, Stack } from '@/components/layout/primitives';
 import { AccessDenied } from '@/components/shared/access-denied';
 import { PrintButton } from '@/components/shared/print-button';
@@ -81,17 +81,18 @@ function Payslip({ run, line }: { run: PayrollRun; line: Line }) {
       </dl>
 
       <div className="flex flex-col gap-2 text-sm">
-        <Row label="Basic salary" value={formatMoney(line.basicSalary)} />
-        <Row label="Allowances" value={formatMoney(line.allowances)} />
+        <p className="text-right text-xs text-muted-foreground">Amounts in AED</p>
+        <Row label="Basic salary" value={formatAmount(line.basicSalary)} />
+        <Row label="Allowances" value={formatAmount(line.allowances)} />
         {line.overtimePay !== '0.00' ? (
           <Row
             label={`Overtime (${line.overtimeHours} h)`}
-            value={`+${formatMoney(line.overtimePay)}`}
+            value={`+${formatAmount(line.overtimePay)}`}
           />
         ) : null}
-        <Row label="Gross pay" value={formatMoney(line.earned)} strong />
+        <Row label="Gross pay" value={formatAmount(line.earned)} strong />
         {line.leaveDeduction !== '0.00' ? (
-          <Row label="Unpaid days and absence" value={`−${formatMoney(line.leaveDeduction)}`} />
+          <Row label="Unpaid days and absence" value={`−${formatAmount(line.leaveDeduction)}`} />
         ) : null}
         {line.otherDeduction !== '0.00' ? (
           <Row
@@ -102,10 +103,10 @@ function Payslip({ run, line }: { run: PayrollRun; line: Line }) {
                   ? 'Penalty'
                   : 'Other deduction'
             }
-            value={`−${formatMoney(line.otherDeduction)}`}
+            value={`−${formatAmount(line.otherDeduction)}`}
           />
         ) : null}
-        {line.deductions === '0.00' ? <Row label="Deductions" value={formatMoney('0.00')} /> : null}
+        {line.deductions === '0.00' ? <Row label="Deductions" value={formatAmount('0.00')} /> : null}
         <Row label="Net pay" value={formatMoney(line.netPay)} strong />
       </div>
 
