@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
-import { X } from 'lucide-react';
+import { ChevronRight, Palette, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { NavList } from '@/components/shell/nav-list';
 import { BrandMark } from '@/components/shell/brand-mark';
 import { ThemeControls } from '@/components/shell/theme-menu';
@@ -23,6 +25,8 @@ export function MobileNav({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  // Closed until asked for: the menu keeps the drawer's height.
+  const [themeOpen, setThemeOpen] = useState(false);
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -39,9 +43,28 @@ export function MobileNav({
             </DialogPrimitive.Close>
           </div>
           <NavList allowedHrefs={allowedHrefs} onNavigate={() => onOpenChange(false)} />
-          {/* The drawer's dark rail: the picker on a light card, as in the top bar's menu. */}
-          <div className="m-3 shrink-0 rounded-xl bg-popover p-3 text-popover-foreground">
-            <ThemeControls />
+          <div className="shrink-0 border-t border-sidebar-border p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            <button
+              type="button"
+              onClick={() => setThemeOpen((current) => !current)}
+              aria-expanded={themeOpen}
+              className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75 outline-none hover:bg-sidebar-accent/70 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            >
+              <Palette className="size-[18px] shrink-0" />
+              <span className="flex-1 text-left">Appearance</span>
+              <ChevronRight
+                className={cn(
+                  'size-4 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
+                  themeOpen && 'rotate-90',
+                )}
+              />
+            </button>
+            {/* The drawer's dark rail: the picker on a light card, as in the top bar's menu. */}
+            {themeOpen ? (
+              <div className="mt-2 rounded-xl bg-popover p-3 text-popover-foreground">
+                <ThemeControls />
+              </div>
+            ) : null}
           </div>
           <div className="shrink-0 pb-[env(safe-area-inset-bottom)]" aria-hidden />
         </DialogPrimitive.Popup>

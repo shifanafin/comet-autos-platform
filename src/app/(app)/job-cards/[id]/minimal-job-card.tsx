@@ -15,6 +15,7 @@ import {
 import type { AuthenticatedUser } from '@/lib/auth/session';
 import { getAccountChoices } from '@/lib/accounting/reports';
 import { hasPermission } from '@/lib/auth/authorize';
+import { JobCostsSection } from '@/components/finance/job-costs-section';
 import { formatDateTime, formatKm, formatMoney, toLocalDateTimeInput } from '@/lib/format';
 import type { JobWorkspace } from '@/lib/workshop/workspace';
 import { getSecondaryNextStatuses } from '@/lib/workshop/job-status';
@@ -316,6 +317,8 @@ export async function MinimalJobCard({
           </Section>
 
           <JobAdvances user={user} jobCard={jobCard} open={!isFinished} />
+
+          <JobCostsSection user={user} jobCardId={jobCard.id} />
 
           {estimate || invoice ? (
             <Section title="Paperwork">

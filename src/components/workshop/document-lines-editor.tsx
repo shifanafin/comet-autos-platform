@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { NumberInput, type NumberKind } from '@/components/forms/number-input';
 import { NativeSelect } from '@/components/forms/fields';
-import { Package, Plus, Trash2, Wrench } from 'lucide-react';
+import { Fuel, Package, Plus, Trash2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -48,6 +48,25 @@ import type { BoughtPart } from '@/app/(app)/inventory/actions';
 export type { BillDiscount, EditableLine, LineType };
 
 export const NO_BILL_DISCOUNT: BillDiscount = { type: 'PERCENT', value: '' };
+
+/** Offered while typing an Other line: anything else can be typed too. */
+const OTHER_CHARGES_LIST = 'other-charge-names';
+const OTHER_CHARGES = [
+  'Fuel',
+  'Car wash',
+  'Interior cleaning',
+  'Towing / recovery',
+  'Vehicle passing / testing',
+  'Registration renewal',
+  'Outside work',
+  'Consumables',
+];
+
+const DESCRIPTION_HINT: Record<LineType, string> = {
+  PART: 'e.g. Ignition coil',
+  LABOUR: 'e.g. Labour and consumables',
+  OTHER: 'e.g. Fuel, car wash, towing',
+};
 
 /** "5.00" → "5" for the rate input. */
 export const trimRate = (rate: string) => (rate.includes('.') ? rate.replace(/\.?0+$/, '') : rate);
@@ -445,11 +464,8 @@ export function DocumentLinesEditor({
                   aria={`Line ${n} description`}
                   value={line.description}
                   onChange={(value) => update(line.key, { description: value })}
-                  placeholder={
-                    line.itemType === 'LABOUR'
-                      ? 'e.g. Labour and consumables'
-                      : 'e.g. Ignition coil'
-                  }
+                  placeholder={DESCRIPTION_HINT[line.itemType]}
+                  list={line.itemType === 'OTHER' ? OTHER_CHARGES_LIST : undefined}
                 />
               )}
               <div className="grid grid-cols-[1fr_1.4fr_1fr] gap-2">
@@ -524,7 +540,7 @@ export function DocumentLinesEditor({
           <thead className="bg-muted/50 text-left text-xs font-semibold tracking-wider text-muted-foreground uppercase">
             <tr>
               <th className="w-12 px-3 py-2.5 text-right">S.No</th>
-              <th className="w-40 px-2 py-2.5">Type</th>
+              <th className="w-44 px-2 py-2.5">Type</th>
               <th className="px-2 py-2.5">Description</th>
               {incomeAccounts ? <th className="w-44 px-2 py-2.5">Account</th> : null}
               <th className="w-20 px-2 py-2.5 text-right">Qty</th>
@@ -578,11 +594,8 @@ export function DocumentLinesEditor({
                         aria-label={`Line ${n} description`}
                         value={line.description}
                         onChange={(event) => update(line.key, { description: event.target.value })}
-                        placeholder={
-                          line.itemType === 'LABOUR'
-                            ? 'e.g. Labour and consumables'
-                            : 'e.g. Ignition coil'
-                        }
+                        placeholder={DESCRIPTION_HINT[line.itemType]}
+                        list={line.itemType === 'OTHER' ? OTHER_CHARGES_LIST : undefined}
                       />
                     )}
                   </td>
@@ -657,6 +670,11 @@ export function DocumentLinesEditor({
         </table>
       </div>
 
+      <datalist id={OTHER_CHARGES_LIST}>
+        {OTHER_CHARGES.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <Button
           type="button"
@@ -677,6 +695,16 @@ export function DocumentLinesEditor({
           <Plus />
           <Wrench />
           Add labour
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="col-span-2 h-12 sm:h-10"
+          onClick={() => add('OTHER')}
+        >
+          <Plus />
+          <Fuel />
+          Add other (fuel, wash…)
         </Button>
       </div>
 
@@ -937,7 +965,7 @@ function TypeSwitch({
       aria-label={label}
       className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5"
     >
-      {(['PART', 'LABOUR'] as const).map((option) => (
+      {(['PART', 'LABOUR', 'OTHER'] as const).map((option) => (
         <button
           key={option}
           type="button"
@@ -945,14 +973,14 @@ function TypeSwitch({
           aria-checked={value === option}
           onClick={() => onChange(option)}
           className={cn(
-            'rounded-md px-3 text-xs font-semibold tracking-wide uppercase transition-colors',
-            compact ? 'h-8' : 'h-10',
+            'rounded-md text-xs font-semibold tracking-wide uppercase transition-colors',
+            compact ? 'h-8 px-1.5' : 'h-10 px-3',
             value === option
               ? 'bg-card text-foreground shadow-xs'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          {option === 'PART' ? 'Parts' : 'Labour'}
+          {option === 'PART' ? 'Parts' : option === 'LABOUR' ? 'Labour' : 'Other'}
         </button>
       ))}
     </div>
@@ -1155,7 +1183,10 @@ function AccountSelect({
         large ? 'h-12 text-base' : 'h-9',
       )}
     >
-      <option value="">Default — {itemType === 'LABOUR' ? 'labour' : 'parts'} sales</option>
+      <option value="">
+        Default — {itemType === 'LABOUR' ? 'labour' : itemType === 'OTHER' ? 'other' : 'parts'}{' '}
+        sales
+      </option>
       {accounts.map((account) => (
         <option key={account.id} value={account.id}>
           {account.code} · {account.name}
@@ -1270,6 +1301,7 @@ function LabelledInput({
   onChange,
   placeholder,
   numeric,
+  list,
 }: {
   label: string;
   aria: string;
@@ -1278,6 +1310,8 @@ function LabelledInput({
   placeholder?: string;
   /** A number box, in the app's one standard. */
   numeric?: NumberKind;
+  /** Suggestions while typing: a datalist's id. */
+  list?: string;
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -1296,6 +1330,7 @@ function LabelledInput({
           aria-label={aria}
           value={value}
           placeholder={placeholder}
+          list={list}
           onChange={(event) => onChange(event.target.value)}
           className="h-12 text-base"
         />

@@ -112,11 +112,12 @@ function readLineDiscount(value: string): Pick<TypedLine, 'discountType' | 'disc
   return { discountType: 'AMOUNT', discount: text };
 }
 
-function readItemType(value: string): 'PART' | 'LABOUR' {
+function readItemType(value: string): 'PART' | 'LABOUR' | 'OTHER' {
   const text = value.trim().toLowerCase();
   if (!text || text.startsWith('part')) return 'PART';
   if (text.startsWith('lab') || text.startsWith('service')) return 'LABOUR';
-  throw new DomainError(`Type "${value}" should be Parts or Labour.`);
+  if (text.startsWith('other')) return 'OTHER';
+  throw new DomainError(`Type "${value}" should be Parts, Labour or Other.`);
 }
 
 /** Every name a status is known by on screen, and its enum name. */
@@ -528,7 +529,7 @@ const VEHICLE_COLUMNS = [
 ];
 
 const LINE_COLUMNS = [
-  { header: 'Type', example: 'Parts', hint: 'Parts or Labour — blank means Parts' },
+  { header: 'Type', example: 'Parts', hint: 'Parts, Labour or Other — blank means Parts' },
   { header: 'Description', required: true, example: 'Front brake pads' },
   { header: 'Quantity', example: '1', hint: 'Blank means 1' },
   { header: 'Unit price', required: true, example: '180.00', hint: 'Before VAT' },

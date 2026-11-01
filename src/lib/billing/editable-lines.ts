@@ -10,7 +10,7 @@ import { treatmentFromRate, type VatTreatment } from '@/lib/vat-treatment';
  * starting values and the editor can use the same shapes.
  */
 
-export type LineType = 'PART' | 'LABOUR';
+export type LineType = 'PART' | 'LABOUR' | 'OTHER';
 
 export interface EditableLine {
   key: string;
@@ -73,7 +73,7 @@ export function editableLine(
   return {
     key,
     ...(item.id ? { sourceId: item.id } : {}),
-    itemType: item.itemType === 'LABOUR' ? 'LABOUR' : 'PART',
+    itemType: item.itemType === 'LABOUR' || item.itemType === 'OTHER' ? item.itemType : 'PART',
     description: item.description,
     quantity: typed(item.quantity),
     unitPrice: item.unitPrice.toString(),

@@ -10,7 +10,7 @@ import { emptyToNull } from '@/lib/normalize';
 import { claimRequestKey, settleRequestKey } from '@/lib/request-keys';
 import { allocateDocumentNumber } from '@/lib/numbering';
 import { filsToString, toFils } from '@/lib/money';
-import { parseLocalDateTime } from '@/lib/format';
+import { parseLocalDateTime, localDateString } from '@/lib/format';
 import { resolveDefaultVatRate } from '@/lib/tax';
 import { syncPosting } from '@/lib/accounting/journal';
 import { checkMoneyAccount, refuseCardSettlementAccount } from '@/lib/accounting/chart';
@@ -480,7 +480,9 @@ export async function takeSupplierPayment(
       'Only a purchase that has been received can be paid. Receive the delivery first.',
     );
   }
-  if (purchase.receivedAt && paidAt.getTime() < purchase.receivedAt.getTime() - 60_000) {
+  // By the day: goods dated by their purchase date are stamped midday, and a
+  // payment that morning is not before them.
+  if (purchase.receivedAt && localDateString(paidAt) < localDateString(purchase.receivedAt)) {
     throw new DomainError('A payment can’t be dated before the goods were received.', 'paidAt');
   }
 

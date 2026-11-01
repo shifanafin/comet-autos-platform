@@ -12,6 +12,7 @@ import { LinkButton } from '@/components/shared/link-button';
 import { StatusPill } from '@/components/shared/status-pill';
 import { MovementTable } from '@/components/inventory/movement-table';
 import { AdjustStockForm } from '@/components/inventory/stock-actions';
+import { ConvertPartUnitButton } from '@/components/inventory/convert-part-unit';
 import { PurchaseStatusPill } from '@/components/inventory/purchase-status';
 import { StockPill, StockQuantity } from '@/components/inventory/stock-level';
 import {
@@ -74,6 +75,15 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
         }
         actions={
           <>
+            {canAdjust && ['piece', 'bottle', 'box'].includes(unit) ? (
+              <ConvertPartUnitButton
+                partId={part.id}
+                unit={unit}
+                onHandMilli={onHandMilli}
+                cost={part.defaultCostPrice?.toString() ?? null}
+                selling={part.defaultSellingPrice?.toString() ?? null}
+              />
+            ) : null}
             {canPurchase && part.isActive ? (
               <LinkButton href="/inventory/purchases/new" variant="outline" size="lg">
                 <ShoppingCart />

@@ -155,7 +155,7 @@ export async function buildBilling(
     };
 
     const records =
-      line.itemType === 'LABOUR'
+      line.itemType !== 'PART'
         ? labours
             .filter((l) => l.estimateItemId === line.id)
             .map((l) => ({
@@ -181,7 +181,7 @@ export async function buildBilling(
       if (toFils(record.actualPrice) !== toFils(approvedPrice)) {
         notes.push({
           kind: 'PRICE_DIFFERS',
-          message: `${record.label}: ${line.itemType === 'LABOUR' ? 'rate recorded' : 'catalog price when fitted'} ${filsToString(toFils(record.actualPrice))}, approved ${filsToString(toFils(approvedPrice))} — billed at the approved price.`,
+          message: `${record.label}: ${line.itemType !== 'PART' ? 'rate recorded' : 'catalog price when fitted'} ${filsToString(toFils(record.actualPrice))}, approved ${filsToString(toFils(approvedPrice))} — billed at the approved price.`,
         });
       }
       if (billedMilli > 0) {
@@ -199,7 +199,7 @@ export async function buildBilling(
           estimateKind: line.estimate.kind,
           estimateNumber: line.estimate.estimateNumber,
           description:
-            line.itemType === 'LABOUR' ? line.description : `${line.description} — ${record.label}`,
+            line.itemType !== 'PART' ? line.description : `${line.description} — ${record.label}`,
           amounts,
         });
         const entry = quoted.get(line.estimate.id) ?? { estimate: line.estimate, billedFils: 0 };

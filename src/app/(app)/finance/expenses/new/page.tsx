@@ -11,10 +11,17 @@ export const metadata = { title: 'Record an expense' };
  * Recording expenses: type them, or scan the supplier's bill. "Save" keeps
  * the form open for the next one; "Save & close" goes back to the list.
  */
-export default async function NewExpensePage() {
+export default async function NewExpensePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ job?: string }>;
+}) {
   const user = await requireUser();
   if (!hasPermission(user, 'expense.create')) return <AccessDenied what="recording expenses" />;
   const options = await getExpenseFormOptions(user);
+  // From a job card's "Add cost": filed against it, and back to it afterwards.
+  const { job } = await searchParams;
+  const card = job?.match(/^card:([0-9a-f-]{36})$/i)?.[1];
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -35,7 +42,8 @@ export default async function NewExpensePage() {
         people={options.people}
         jobs={options.jobs}
         moneyAccounts={options.moneyAccounts}
-        closeTo="/finance/expenses"
+        closeTo={card ? `/job-cards/${card}` : '/finance/expenses'}
+        forJob={card ? job : undefined}
       />
     </Stack>
   );

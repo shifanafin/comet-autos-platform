@@ -26,6 +26,7 @@ import {
 } from '@/lib/money';
 import { formatCalendarDate, localDateString, parseCalendarDate } from '@/lib/format';
 import { whyEntryCantMove } from '@/lib/accounting/redate';
+import { booksClosedThrough } from '@/lib/accounting/periods';
 import { resolveDefaultVatRate } from '@/lib/tax';
 import { postMovement, resolveInventoryBranch } from '@/lib/inventory/stock';
 import { getTaxCodeOptions, resolveTaxCodes } from '@/lib/accounting/tax-codes';
@@ -649,7 +650,8 @@ const middayOf = (day: string) => new Date(`${day}T12:00:00+04:00`);
 
 /**
  * When a first delivery is dated: the purchase date, or now when it is today,
- * has none, or falls before these books began.
+ * has none, falls before these books began, or lies in a closed period or a
+ * filed VAT return.
  */
 async function receiptMoment(
   tx: Prisma.TransactionClient,
@@ -663,7 +665,15 @@ async function receiptMoment(
     where: { id: organizationId },
     select: { openingBalanceDate: true },
   });
-  return openingBalanceDate && purchaseDate < openingBalanceDate ? new Date() : middayOf(day);
+  if (openingBalanceDate && purchaseDate < openingBalanceDate) return new Date();
+  // A settled period stays as it was: the input VAT falls in the open return.
+  const closed = await booksClosedThrough(tx, organizationId);
+  if (closed && purchaseDate.getTime() <= closed.getTime()) return new Date();
+  const filed = await tx.vatFiling.findFirst({
+    where: { organizationId, periodFrom: { lte: purchaseDate }, periodTo: { gte: purchaseDate } },
+    select: { id: true },
+  });
+  return filed ? new Date() : middayOf(day);
 }
 
 /**
@@ -743,7 +753,11 @@ async function moveReceiptToDay(
   await tx.$executeRaw`SELECT set_config('app.redate_purchase_receipt', 'off', true)`;
   await tx.purchase.update({
     where: { id: purchase.id },
-    data: { receivedAt: at, ...(purchase.billReceivedOn ? { billReceivedOn: to } : {}) },
+    data: {
+      receivedAt: at,
+      // A bill matched later keeps the day it really came: its VAT is claimed from then.
+      ...(purchase.billReceivedOn && !purchase.billMatchedByUserId ? { billReceivedOn: to } : {}),
+    },
   });
   if (moving.length) {
     await tx.supplierPayment.updateMany({

@@ -20,10 +20,10 @@ export type DocumentKind =
 export type DocumentTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
 /** The TYPE column, as the workshop's own sheet prints it. */
-export type DocumentLineType = 'PARTS' | 'LABOUR';
+export type DocumentLineType = 'PARTS' | 'LABOUR' | 'OTHER';
 
 export interface DocumentLine {
-  /** Parts or labour; null for a line that was never given a type. */
+  /** Parts, labour or other charges; null for a line that was never given a type. */
   type: DocumentLineType | null;
   description: string;
   /** Quantity as a decimal string; hours for labour. */

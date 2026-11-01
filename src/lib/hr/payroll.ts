@@ -50,8 +50,8 @@ import { automaticPayrollMonth } from '@/lib/hr/payroll-schedule';
  *              days (a raise mid-month splits it); a full month under one
  *              row is never pro-rated, and a day no row covers is not paid
  *              but reported — never guessed
- *   deduction  approved UNPAID leave days × (basic + allowances) / days in
- *              the month; editable with a reason while CALCULATED
+ *   deduction  approved UNPAID leave days × (basic + allowances) ÷ 30, the
+ *              UAE day's wage; editable with a reason while CALCULATED
  *   net        basic + allowances − deductions, never below zero
  *
  * Absence marked in attendance that no approved leave covers is deducted at

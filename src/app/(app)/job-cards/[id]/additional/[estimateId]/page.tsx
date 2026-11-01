@@ -97,9 +97,9 @@ export default async function AdditionalWorkPage({
                 }
                 minValidUntil={localDateString()}
                 initialBill={editableBill(estimate)}
-                initialLines={estimate.items
-                  .filter((item) => item.itemType !== 'OTHER')
-                  .map((item) => editableLine(item, item.id, defaultVatRate))}
+                initialLines={estimate.items.map((item) =>
+                  editableLine(item, item.id, defaultVatRate),
+                )}
               />
             </Panel>
           ) : estimate.items.length > 0 ? (

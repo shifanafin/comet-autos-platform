@@ -75,7 +75,8 @@ describe('staff sign-in', () => {
   test('the lock lifts when its time is up, and a success clears the count', async () => {
     await prisma.authThrottle.update({
       where: { key: throttleKey('login', email) },
-      data: { lockedUntil: new Date(Date.now() - 1000) },
+      // Well in the past: the lock is judged by the database's clock, not this machine's.
+      data: { lockedUntil: new Date(Date.now() - 3_600_000) },
     });
     const result = await authenticate(email, PASSWORD, address);
     assert.equal(result.ok, true);

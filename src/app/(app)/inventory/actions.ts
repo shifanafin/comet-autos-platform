@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/auth/authorize';
 import { runAction, toClientResult } from '@/lib/action';
 import type { ActionResult } from '@/lib/errors';
 import { formDataToObject } from '@/lib/form-data';
+import { convertPartUnit } from '@/lib/inventory/unit-conversion';
 import { adjustStock, createPart, reverseMovement, updatePart } from '@/lib/inventory/parts';
 import { createSupplier, updateSupplier } from '@/lib/inventory/suppliers';
 import { getPartOption, type PartOption } from '@/lib/inventory/part-options';
@@ -77,6 +78,17 @@ export async function updatePartAction(
   if (!result.ok) return toClientResult(result);
   refreshInventory();
   redirect(`/inventory/parts/${partId}`);
+}
+
+export async function convertPartUnitAction(
+  partId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => convertPartUnit(user, partId, formDataToObject(formData)));
+  if (result.ok) refreshInventory();
+  return toClientResult(result);
 }
 
 export async function adjustStockAction(

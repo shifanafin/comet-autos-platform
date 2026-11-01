@@ -74,7 +74,7 @@ function Notes({ notes }: { notes: BillingNote[] }) {
 
 type Row = {
   key: string;
-  group: 'Labour' | 'Parts' | 'Additional approved work';
+  group: 'Labour' | 'Parts' | 'Other charges' | 'Additional approved work';
   description: string;
   quantity: string;
   unitPrice: string;
@@ -87,7 +87,7 @@ type Row = {
 const discounted = (row: Row) => toFils(row.discountAmount) > 0;
 
 function LineGroups({ rows }: { rows: Row[] }) {
-  const groups = (['Labour', 'Parts', 'Additional approved work'] as const)
+  const groups = (['Labour', 'Parts', 'Other charges', 'Additional approved work'] as const)
     .map((title) => ({ title, rows: rows.filter((r) => r.group === title) }))
     .filter((g) => g.rows.length > 0);
   return (
@@ -162,6 +162,7 @@ function LineGroups({ rows }: { rows: Row[] }) {
 
 function groupFor(itemType: string, kind: string | undefined): Row['group'] {
   if (kind === 'ADDITIONAL') return 'Additional approved work';
+  if (itemType === 'OTHER') return 'Other charges';
   return itemType === 'LABOUR' ? 'Labour' : 'Parts';
 }
 
@@ -292,7 +293,7 @@ export function BillingSections({
               rows={invoice.items.map((item) => ({
                 key: item.id,
                 group: groupFor(
-                  item.labourId ? 'LABOUR' : 'PART',
+                  item.itemType ?? (item.labourId ? 'LABOUR' : 'PART'),
                   (item.labour?.estimateItem ?? item.partUsage?.estimateItem)?.estimate.kind,
                 ),
                 description: item.description,

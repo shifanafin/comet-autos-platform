@@ -242,9 +242,11 @@ export async function readAttachment(
       documentType: rules.category,
       deletedAt: null,
     },
-    select: { id: true, fileName: true, mimeType: true, storageKey: true },
+    select: { id: true, entityId: true, fileName: true, mimeType: true, storageKey: true },
   });
   if (!document) throw new NotFoundError('file');
+  // The record it belongs to must still be there: a removed employee document's copies don't open.
+  if (!(await rules.load(user.organizationId, document.entityId))) throw new NotFoundError('file');
   const bytes = await getStorage().get(document.storageKey);
   if (!bytes) throw new NotFoundError('file');
   return { ...document, bytes };

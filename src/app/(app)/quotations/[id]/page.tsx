@@ -272,9 +272,9 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
                 defaultVatRate={defaultVatRate}
                 taxCodes={await getTaxCodeOptions(user.organizationId, 'sales')}
                 initialBill={editableBill(quotation)}
-                initialLines={quotation.items
-                  .filter((item) => item.itemType !== 'OTHER')
-                  .map((item) => editableLine(item, item.id, defaultVatRate))}
+                initialLines={quotation.items.map((item) =>
+                  editableLine(item, item.id, defaultVatRate),
+                )}
               />
             </Panel>
           ) : (

@@ -289,9 +289,9 @@ describe('payroll run', () => {
     const detail = await getPayrollRun(a.owner, run.id);
     assert.equal(detail.lines.length, 1);
     const [line] = detail.lines;
-    // 3700.00 a month, 2 unpaid days: 370000 × 2 / days, half-up, in fils.
-    const days = daysIn(lastMonth);
-    const expected = Math.floor((370000 * 2 * 2 + days) / (days * 2));
+    // 3700.00 a month, 2 unpaid days: a day's wage is monthly ÷ 30, whatever
+    // the month's length (lib/hr/leave-rules.ts) — half-up, in fils.
+    const expected = Math.round((370000 * 2) / 30);
     assert.equal(line.deductions, (expected / 100).toFixed(2));
     assert.equal(line.netPay, ((370000 - expected) / 100).toFixed(2));
     assert.equal(line.unpaidLeaveDays, 2);

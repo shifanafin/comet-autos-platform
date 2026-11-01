@@ -80,6 +80,7 @@ export function ScanExpense({
   people = [],
   jobs,
   closeTo,
+  forJob,
 }: {
   categories: { id: string; accountCode: string; accountName: string }[];
   defaultVatRate: string;
@@ -90,6 +91,8 @@ export function ScanExpense({
   jobs?: JobChoice[];
   /** On its own page: Save & close goes back here. */
   closeTo?: string;
+  /** Opened from a job card: the job it starts filed against. */
+  forJob?: string;
 }) {
   const router = useRouter();
   const { phase, scan, reset } = useBillScan('expense');
@@ -151,7 +154,7 @@ export function ScanExpense({
             <ExpenseForm
               key={scanned.previewUrl}
               {...form}
-              prefill={filled.prefill}
+              prefill={forJob ? { ...filled.prefill, forJob } : filled.prefill}
               flags={filled.flags}
               hidden={{ scannedFields: scanned.draft.filled.join(',') || 'none' }}
               submit={save}
@@ -164,6 +167,7 @@ export function ScanExpense({
         <ExpenseForm
           key={`manual-${saved}`}
           {...form}
+          prefill={forJob ? { forJob } : undefined}
           onDone={() => setSaved((count) => count + 1)}
         />
       )}

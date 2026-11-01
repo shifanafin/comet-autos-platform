@@ -55,7 +55,7 @@ export function DocumentItems({ document }: { document: CustomerDocumentModel })
                   <span className="flex flex-wrap items-center gap-x-2 pt-0.5 text-xs text-muted-foreground tabular-nums">
                     {line.type ? (
                       <span className="font-semibold tracking-wide">
-                        {line.type === 'LABOUR' ? 'Labour' : 'Parts'}
+                        {line.type === 'LABOUR' ? 'Labour' : line.type === 'OTHER' ? 'Other' : 'Parts'}
                       </span>
                     ) : null}
                     <span>

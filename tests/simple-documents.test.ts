@@ -311,7 +311,10 @@ describe('quotation without a job card', () => {
       await createShareLink(a.owner, { kind: 'quotation', id: quote.id }),
       ORIGIN,
     );
-    assert.match(shared.whatsappUrl, /^https:\/\/wa\.me\/971500204411\?text=/);
+    assert.match(
+      shared.whatsappUrl,
+      /^https:\/\/api\.whatsapp\.com\/send\?phone=971500204411&text=/,
+    );
     // WhatsApp bold (*…*) marks the figures; the plate sits beside the car.
     assert.match(shared.message, /Quotation \*EST-/);
     assert.match(shared.message, /Toyota Hilux\* · S20/);
@@ -329,7 +332,7 @@ describe('quotation without a job card', () => {
     assert.equal(approved.approvals[0].approvalMethod, 'ONLINE');
   });
 
-  test('revising a standalone quotation versions it and revokes the old link', async () => {
+  test('revising a standalone quotation versions it; the old link opens but decides nothing', async () => {
     const quote = await createQuotation(a.owner, { customerId, vehicleId });
     await saveEstimateDraft(a.owner, quote.id, {
       validUntil: validUntil(),
@@ -341,7 +344,8 @@ describe('quotation without a job card', () => {
     assert.equal(revision.jobCardId, null);
     assert.equal(revision.customerId, customerId);
     assert.equal(revision.vehicleId, vehicleId);
-    assert.equal((await getQuoteAccess(rawToken)).state, 'invalid', 'the old link stops working');
+    assert.equal((await getQuoteAccess(rawToken)).state, 'open', 'the old link still opens');
+    await expectDomainError(decideQuoteAsCustomer(rawToken, 'APPROVED', null), /replaced/);
 
     const screen = await getQuotation(a.owner, revision.id);
     assert.deepEqual(
@@ -1016,7 +1020,7 @@ describe("the owner's quotation sheet", () => {
         customerId: customer.id,
         items: [{ description: 'Untyped', quantity: '1', unitPrice: '10' }],
       }),
-      /parts or labour/,
+      /parts, labour or other/,
     );
     const { invoiceId } = await createDirectInvoice(a.owner, {
       customerId: customer.id,

@@ -263,7 +263,12 @@ export function ExpenseForm({
       />
 
       <div className="grid gap-6 sm:grid-cols-2">
-        <Field label="Category" htmlFor={id('categoryId')} error={errors.categoryId}>
+        <Field
+          label="Category"
+          htmlFor={id('categoryId')}
+          error={errors.categoryId}
+          hint="Parts you keep in stock go through Purchases, not here: entering both counts the cost twice."
+        >
           <NativeSelect
             id={id('categoryId')}
             name="categoryId"

@@ -53,7 +53,8 @@ async function requireApprovedLine(
   const approved = await approvedLineIds(tx, organizationId, jobCardId);
   const type = approved.get(estimateItemId);
   if (!type) throw new DomainError('Choose a line from the approved work.', 'estimateItemId');
-  if (type !== expectedType) {
+  // An Other line (fuel, a wash) is marked done like labour: it has no part to fit.
+  if (type !== expectedType && !(expectedType === 'LABOUR' && type === 'OTHER')) {
     throw new DomainError(
       expectedType === 'PART' ? 'That approved line is labour, not a part.' : 'That approved line is a part, not labour.',
       'estimateItemId',
@@ -334,7 +335,7 @@ export async function getRepairWorkspace(user: AuthenticatedUser, jobCardId: str
   const approvedLines = approvedEstimates.flatMap((estimate) =>
     estimate.items.map((item) => {
       const approvedMilli = signedToMilli(item.quantity);
-      if (item.itemType === 'LABOUR') {
+      if (item.itemType !== 'PART') {
         const recorded = labours.filter((l) => l.estimateItemId === item.id);
         const doneHundredths = recorded.reduce((sum, l) => sum + toFils(l.hours.toString()), 0);
         return {
@@ -429,7 +430,7 @@ export async function getIncompleteApprovedLines(
       .then((rows) => withNetQuantities(client, organizationId, rows)),
   ]);
   return items.filter((item) => {
-    if (item.itemType === 'LABOUR') return !labours.some((l) => l.estimateItemId === item.id);
+    if (item.itemType !== 'PART') return !labours.some((l) => l.estimateItemId === item.id);
     const fitted = usages.filter((u) => u.estimateItemId === item.id).reduce((sum, u) => sum + u.netMilli, 0);
     return fitted < signedToMilli(item.quantity);
   });

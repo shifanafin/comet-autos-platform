@@ -37,8 +37,13 @@ export const discountFields = {
 export const lineSchema = z.object({
   /** Editing: the line this one was, so links to the repair records carry over. */
   sourceId: z.uuid().optional(),
-  /** Parts or labour — printed in the document's TYPE column. */
-  itemType: z.enum(['PART', 'LABOUR'], { error: 'Choose parts or labour for every line.' }),
+  /**
+   * Parts, labour, or other charges (fuel, a wash, towing, a passing fee) —
+   * printed in the document's TYPE column. Other sells to "Sales — other".
+   */
+  itemType: z.enum(['PART', 'LABOUR', 'OTHER'], {
+    error: 'Choose parts, labour or other for every line.',
+  }),
   description: z
     .string({ error: 'Every line needs a description.' })
     .trim()

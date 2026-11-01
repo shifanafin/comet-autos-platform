@@ -38,6 +38,7 @@ import { getRepairWorkspace } from '@/lib/workshop/repair';
 import type { WorkflowStatus } from '@/lib/workshop/stages';
 import { RepairSections } from './repair/repair-sections';
 import { BillingSections } from './billing/billing-sections';
+import { JobCostsSection } from '@/components/finance/job-costs-section';
 import { getBillingPreview, getJobInvoice } from '@/lib/billing/invoice';
 import { getJobDocuments, type JobDocuments } from '@/lib/documents/build';
 import { CreateEstimateButton } from '@/components/workshop/quotation-controls';
@@ -428,6 +429,8 @@ export default async function JobCardWorkspacePage({
               <CustomerCommunication documents={documents} canShareQuotation={canEdit} />
             </Section>
           ) : null}
+
+          <JobCostsSection user={user} jobCardId={jobCard.id} />
 
           <Section title="Visit">
             <Panel>

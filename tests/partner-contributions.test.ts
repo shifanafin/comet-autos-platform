@@ -34,6 +34,7 @@ import {
   updateBusinessPurchasePayment,
 } from '@/lib/finance/business-purchase';
 import { getPartnerContributions } from '@/lib/finance/partner-contributions';
+import { ensureChart } from '@/lib/accounting/chart';
 import { createTestOrg, expectDomainError, RUN, type TestOrg } from './support';
 
 let a: TestOrg;
@@ -45,6 +46,8 @@ before(async () => {
   a = await createTestOrg('Partner contributions', []);
   afin = (await addPartner(a.owner, { name: `Afin ${RUN}` })).id;
   shahid = (await addPartner(a.owner, { name: `Shahid ${RUN}` })).id;
+  // A new organization has no chart until its first posting; the form reads it.
+  await prisma.$transaction((tx) => ensureChart(tx, a.organizationId));
   form = await getOwnerMoneyForm(a.owner);
 });
 

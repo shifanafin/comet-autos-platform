@@ -40,6 +40,8 @@ function NotApprovedPill() {
 }
 
 /** The repair workspace of the job card: shown from APPROVED onwards. */
+const LINE_TYPE_LABEL: Record<string, string> = { PART: 'Part', LABOUR: 'Labour', OTHER: 'Other' };
+
 export function RepairSections({
   workspace,
   repair,
@@ -58,8 +60,8 @@ export function RepairSections({
   const { jobCard, primaryTechnician } = workspace;
   const inRepair = status === 'REPAIR';
   const qcOpen = status === 'REPAIR' || status === 'QUALITY_CHECK';
-  const partLines = repair.approvedLines.filter((l) => l.itemType !== 'LABOUR');
-  const labourLines = repair.approvedLines.filter((l) => l.itemType === 'LABOUR');
+  const partLines = repair.approvedLines.filter((l) => l.itemType === 'PART');
+  const labourLines = repair.approvedLines.filter((l) => l.itemType !== 'PART');
   const doneCount = repair.approvedLines.length - repair.remainingLines.length;
   const defaultTech = primaryTechnician?.id ?? null;
   const base = `/job-cards/${jobCard.id}`;
@@ -98,7 +100,7 @@ export function RepairSections({
                   </StatusPill>
                 }
                 details={[
-                  { label: 'Type', value: line.itemType === 'LABOUR' ? 'Labour' : 'Part' },
+                  { label: 'Type', value: LINE_TYPE_LABEL[line.itemType] ?? 'Part' },
                   {
                     label: 'Approved',
                     value: `${formatMilli(line.approvedQuantity)}${line.itemType === 'LABOUR' ? ' h' : ''}`,
@@ -133,7 +135,7 @@ export function RepairSections({
                       </span>
                     </td>
                     <td className="px-2 py-4 text-muted-foreground">
-                      {line.itemType === 'LABOUR' ? 'Labour' : 'Part'}
+                      {LINE_TYPE_LABEL[line.itemType] ?? 'Part'}
                     </td>
                     <td className="px-2 py-4 text-right tabular-nums whitespace-nowrap">
                       {formatMilli(line.approvedQuantity)}

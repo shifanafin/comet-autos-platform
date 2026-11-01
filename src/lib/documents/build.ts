@@ -91,10 +91,11 @@ export const fileName = (seller: { name: string }, title: string, number: string
   return `${workshop ? `${workshop}-` : ''}${title.replace(/\s+/g, '-')}-${number}`;
 };
 
-/** The TYPE column: parts or labour, as the workshop's own sheet prints it. */
+/** The TYPE column: parts, labour or other, as the workshop's own sheet prints it. */
 function lineType(itemType: EstimateItemType | null): DocumentLineType | null {
   if (itemType === 'LABOUR') return 'LABOUR';
   if (itemType === 'PART') return 'PARTS';
+  if (itemType === 'OTHER') return 'OTHER';
   return null;
 }
 

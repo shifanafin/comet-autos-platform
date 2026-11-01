@@ -541,7 +541,7 @@ describe('customer documents and sharing', () => {
       link: 'https://x.test/customer/invoice/abc?x=1&y=2',
     });
     const url = whatsAppUrl('0501234567', message);
-    const encoded = url.split('?text=')[1];
+    const encoded = url.split('text=')[1];
     assert.ok(!/[\s&#?]/.test(encoded), 'spaces, newlines, & # ? are all encoded');
     assert.equal(decodeURIComponent(encoded), message);
     assert.ok(
