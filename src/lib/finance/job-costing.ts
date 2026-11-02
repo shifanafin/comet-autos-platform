@@ -7,6 +7,7 @@ import { filsToString, multiplyQuantity, milliToString, signedToMilli, toFils } 
 import { withNetQuantities } from '@/lib/inventory/stock';
 import { resolvePeriod, type ResolvedPeriod } from '@/lib/finance/dashboard';
 import { parseCalendarDate } from '@/lib/format';
+import { OPEN_JOB_STATUSES } from '@/lib/workshop/check-in';
 
 /*
  * What a job cost the workshop, and what it made.
@@ -293,7 +294,10 @@ export async function listJobChoices(user: AuthenticatedUser): Promise<JobChoice
   const since = new Date(Date.now() - 183 * 86_400_000);
   const [cards, invoices] = await Promise.all([
     prisma.jobCard.findMany({
-      where: { organizationId: user.organizationId, createdAt: { gte: since } },
+      where: {
+        organizationId: user.organizationId,
+        OR: [{ createdAt: { gte: since } }, { status: { in: OPEN_JOB_STATUSES } }],
+      },
       orderBy: { createdAt: 'desc' },
       take: 300,
       select: {

@@ -64,10 +64,13 @@ export default async function PurchaseDetailPage({ params }: { params: Promise<{
   const canReceive =
     receivable && hasPermission(user, 'purchase.approve', { branchId: purchase.branchId });
   const nothingReceived = lines.every((line) => line.receivedMilli === 0);
+  // A draft, or a received purchase: the server refuses one whose period is
+  // closed or filed, and says why.
   const canEdit =
-    purchase.status === 'DRAFT' &&
+    (purchase.status === 'DRAFT' ||
+      (purchase.status === 'RECEIVED' && !purchase.billMatchedByUserId)) &&
     hasPermission(user, 'purchase.edit', { branchId: purchase.branchId });
-  // Past draft, only the details can change — never the lines or amounts.
+  // Past draft the details can always change, even once the figures can't.
   const canEditDetails =
     purchase.status !== 'DRAFT' &&
     purchase.status !== 'CANCELLED' &&
@@ -126,7 +129,7 @@ export default async function PurchaseDetailPage({ params }: { params: Promise<{
                 size="lg"
               >
                 <Pencil />
-                Edit draft
+                {purchase.status === 'DRAFT' ? 'Edit draft' : 'Edit purchase'}
               </LinkButton>
             ) : null}
             {canEditDetails ? (

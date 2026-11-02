@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from '@/lib/auth/session';
 import { hasPermission } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
 import { resolveDefaultVatRate } from '@/lib/tax';
+import { OPEN_JOB_STATUSES } from '@/lib/workshop/check-in';
 import {
   getStockByPart,
   getStockOnHand,
@@ -31,6 +32,8 @@ export interface PartOption {
   supplierName: string | null;
   /** Stock on hand at the user's branch, as a decimal ("3.000"; negative when oversold). */
   stock: string;
+  /** The open jobs it was bought for: "JC-000017 · SHJ 75633". */
+  forJobs?: string[];
 }
 
 /** What the part picker needs: the parts, the suppliers to file a new one under, and whether it may add one. */
@@ -70,7 +73,32 @@ type PartRow = {
   preferredSupplier: { name: string } | null;
 };
 
-const toOption = (part: PartRow, stockMilli: number): PartOption => ({
+/** The open jobs each part was bought for. A label only: anyone may still use the part. */
+async function jobsByPart(organizationId: string, partIds?: string[]) {
+  const rows = await prisma.purchaseItem.findMany({
+    where: {
+      organizationId,
+      ...(partIds ? { partId: { in: partIds } } : {}),
+      jobCard: { status: { in: OPEN_JOB_STATUSES } },
+      purchase: { status: { not: 'CANCELLED' } },
+    },
+    select: {
+      partId: true,
+      jobCard: { select: { jobNumber: true, vehicle: { select: { plateNumber: true } } } },
+    },
+  });
+  const byPart = new Map<string, string[]>();
+  for (const { partId, jobCard } of rows) {
+    if (!jobCard) continue;
+    const label = `${jobCard.jobNumber} · ${jobCard.vehicle.plateNumber}`;
+    const labels = byPart.get(partId) ?? [];
+    if (!labels.includes(label)) labels.push(label);
+    byPart.set(partId, labels);
+  }
+  return byPart;
+}
+
+const toOption = (part: PartRow, stockMilli: number, forJobs?: string[]): PartOption => ({
   id: part.id,
   sku: part.sku,
   name: part.name,
@@ -81,20 +109,22 @@ const toOption = (part: PartRow, stockMilli: number): PartOption => ({
   supplierId: part.preferredSupplierId,
   supplierName: part.preferredSupplier?.name ?? null,
   stock: signedMilliToString(stockMilli),
+  ...(forJobs?.length ? { forJobs } : {}),
 });
 
 /** Every active part with its stock at the user's branch. The caller has checked permission. */
 export async function loadPartOptions(user: AuthenticatedUser): Promise<PartOption[]> {
   const branch = await resolveInventoryBranch(user);
-  const [parts, stock] = await Promise.all([
+  const [parts, stock, forJobs] = await Promise.all([
     prisma.part.findMany({
       where: { organizationId: user.organizationId, isActive: true },
       orderBy: { name: 'asc' },
       select: partSelect,
     }),
     getStockByPart(user.organizationId, branch.id),
+    jobsByPart(user.organizationId),
   ]);
-  return parts.map((part) => toOption(part, stock.get(part.id) ?? 0));
+  return parts.map((part) => toOption(part, stock.get(part.id) ?? 0, forJobs.get(part.id)));
 }
 
 /** One part as an option — a part just added from the picker. */
@@ -105,7 +135,11 @@ export async function getPartOption(user: AuthenticatedUser, partId: string): Pr
   });
   if (!part) throw new NotFoundError('part');
   const branch = await resolveInventoryBranch(user);
-  return toOption(part, await getStockOnHand(prisma, user.organizationId, branch.id, part.id));
+  const [stock, forJobs] = await Promise.all([
+    getStockOnHand(prisma, user.organizationId, branch.id, part.id),
+    jobsByPart(user.organizationId, [part.id]),
+  ]);
+  return toOption(part, stock, forJobs.get(part.id));
 }
 
 /**

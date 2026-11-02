@@ -430,8 +430,8 @@ const linkSchema = z.object({
  */
 const QUOTED_STATUSES = [
   'APPROVED',
-  'REPAIR',
-  'QUALITY_CHECK',
+  // Not REPAIR or QUALITY_CHECK: lines linked mid-repair would count as approved
+  // work with nothing recorded against them, and the job could never pass.
   'READY',
   'INVOICED',
   'PAID',

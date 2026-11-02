@@ -1178,6 +1178,7 @@ model JobCard {
   assignments   JobAssignment[]
   inspections   Inspection[]
   diagnoses     Diagnosis[]
+  purchaseItems PurchaseItem[]
   estimates     Estimate[]
   labours       Labour[]
   partUsages    PartUsage[]
@@ -1788,6 +1789,8 @@ model PurchaseItem {
   /// are copied onto the record when saved, so changing the code later never
   /// alters an issued document.
   taxCodeId        String?       @map("tax_code_id") @db.Uuid
+  /// The job this part was bought for, shown when it is picked on an invoice.
+  jobCardId        String?       @map("job_card_id") @db.Uuid
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -1796,11 +1799,14 @@ model PurchaseItem {
   part         Part         @relation(fields: [organizationId, partId], references: [organizationId, id], onDelete: Restrict)
   taxCode      TaxCode?     @relation(fields: [organizationId, taxCodeId], references: [organizationId, id], onDelete: Restrict)
 
+  jobCard      JobCard?     @relation(fields: [organizationId, jobCardId], references: [organizationId, id], onDelete: Restrict)
+
   inventoryTransactions InventoryTransaction[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
   @@index([organizationId, purchaseId])
+  @@index([organizationId, jobCardId])
   @@index([organizationId, partId])
   @@map("purchase_items")
 }

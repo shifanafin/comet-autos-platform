@@ -297,6 +297,10 @@ export function ExpenseForm({
               className="h-11 text-base md:text-sm"
             >
               <option value="">Not for a particular job</option>
+              {/* Filed against a job too old for the list: saving must not lose it. */}
+              {start?.forJob && !jobs.some((job) => job.value === start.forJob) ? (
+                <option value={start.forJob}>The job already chosen</option>
+              ) : null}
               {jobs.map((job) => (
                 <option key={job.value} value={job.value} data-hint={job.hint}>
                   {job.label}

@@ -26,9 +26,15 @@ import {
 } from '@/lib/money';
 import { formatCalendarDate, localDateString, parseCalendarDate } from '@/lib/format';
 import { whyEntryCantMove } from '@/lib/accounting/redate';
+import { listJobChoices } from '@/lib/finance/job-costing';
 import { booksClosedThrough } from '@/lib/accounting/periods';
 import { resolveDefaultVatRate } from '@/lib/tax';
-import { postMovement, resolveInventoryBranch } from '@/lib/inventory/stock';
+import {
+  getStockOnHand,
+  lockPart,
+  postMovement,
+  resolveInventoryBranch,
+} from '@/lib/inventory/stock';
 import { getTaxCodeOptions, resolveTaxCodes } from '@/lib/accounting/tax-codes';
 import { PURCHASE_STATUS_LABEL } from '@/lib/inventory/labels';
 import { receivedValueFils, unitCostAfterDiscount } from '@/lib/inventory/purchase-value';
@@ -95,6 +101,8 @@ const lineSchema = z.object({
     ),
   /** The purchase tax code; when given, its rate is the line's VAT rate. */
   taxCodeId: z.union([z.literal(''), z.uuid()]).optional(),
+  /** The job this part was bought for: shown when it is picked on an invoice. */
+  jobCardId: z.union([z.literal(''), z.uuid()]).optional(),
   /** The line's own trade discount: a percentage or an AED amount, as entered. */
   discountType: z.union([z.literal(''), z.enum(['PERCENT', 'AMOUNT'])]).optional(),
   discountValue: z
@@ -130,6 +138,8 @@ const purchaseSchema = z.object({
       "The purchase date can't be in the future.",
     ),
   notes: z.string().trim().max(500).optional(),
+  /** Correcting a received purchase: also move its stock and payment to the purchase date. */
+  moveBooks: z.string().optional(),
   /** A trade discount on the whole bill, after the lines' own. */
   billDiscountType: z.union([z.literal(''), z.enum(['PERCENT', 'AMOUNT'])]).optional(),
   billDiscountValue: z
@@ -235,7 +245,17 @@ async function prepareLines(
   });
   const defaultVat = await resolveDefaultVatRate(organizationId, tx);
   const codes = await resolveTaxCodes(tx, organizationId, items);
+  const jobIds = [...new Set(items.flatMap((item) => (item.jobCardId ? [item.jobCardId] : [])))];
+  const jobs = jobIds.length
+    ? await tx.jobCard.findMany({
+        where: { organizationId, id: { in: jobIds } },
+        select: { id: true },
+      })
+    : [];
   return items.map((item, index) => {
+    if (item.jobCardId && !jobs.some((job) => job.id === item.jobCardId)) {
+      throw new ValidationError({ items: `Line ${index + 1}: choose the job from the list.` });
+    }
     const part = parts.find((p) => p.id === item.partId);
     if (!part)
       throw new ValidationError({ items: `Line ${index + 1}: choose a part from the catalogue.` });
@@ -267,6 +287,7 @@ async function prepareLines(
       unitCost: item.unitCost,
       taxRate,
       taxCodeId: code?.id ?? null,
+      jobCardId: item.jobCardId || null,
       amounts,
     };
   });
@@ -435,6 +456,7 @@ function itemRows(priced: PricedPurchase) {
     taxRate: line.taxRate,
     taxAmount: line.amounts.taxAmount,
     taxCodeId: line.taxCodeId,
+    jobCardId: line.jobCardId,
     discountType: line.amounts.discountType,
     discountValue: line.amounts.discountValue,
     discountAmount: line.amounts.discountAmount,
@@ -586,8 +608,15 @@ export async function updatePurchase(
   return prisma.$transaction(async (tx) => {
     const purchase = await lockPurchase(tx, user.organizationId, purchaseId);
     requirePermission(user, 'purchase.edit', { branchId: purchase.branchId });
-    if (purchase.status !== 'DRAFT') throw new DomainError('Only a draft purchase can be edited.');
     const supplierId = await requireActiveSupplier(tx, user.organizationId, input.supplierId);
+    if (purchase.status === 'RECEIVED') {
+      return correctReceivedPurchase(tx, user, purchase, supplierId, input);
+    }
+    if (purchase.status !== 'DRAFT') {
+      throw new DomainError(
+        'Only a draft or a fully received purchase can be edited. Receive the rest of this one first.',
+      );
+    }
     const priced = pricePurchase(await prepareLines(tx, user.organizationId, input.items), {
       type: input.billDiscountType,
       value: input.billDiscountValue,
@@ -634,7 +663,7 @@ export async function updatePurchase(
         dueDate: input.dueDate || null,
       },
     });
-  });
+  }, RECEIPT_TRANSACTION);
 }
 
 const detailsSchema = purchaseSchema
@@ -674,6 +703,380 @@ async function receiptMoment(
     select: { id: true },
   });
   return filed ? new Date() : middayOf(day);
+}
+
+/** Why a day's books can't change: a closed period or a filed VAT return, or null. */
+async function whyDayIsLocked(tx: Prisma.TransactionClient, organizationId: string, day: Date) {
+  const closed = await booksClosedThrough(tx, organizationId);
+  if (closed && day.getTime() <= closed.getTime()) {
+    return `the books are closed through ${formatCalendarDate(closed)}`;
+  }
+  const filed = await tx.vatFiling.findFirst({
+    where: { organizationId, periodFrom: { lte: day }, periodTo: { gte: day } },
+    select: { periodFrom: true, periodTo: true },
+  });
+  return filed
+    ? `the VAT return for ${formatCalendarDate(filed.periodFrom)} – ${formatCalendarDate(filed.periodTo)} is filed`
+    : null;
+}
+
+/**
+ * Corrects a received purchase — its lines, amounts, supplier and dates — as
+ * long as its period is open: not closed, its VAT return not filed. While it is
+ * open the stock receipts and their entries are corrected where they stand, as
+ * every other record is; afterwards a correction belongs in the next period (a
+ * credit note from the supplier). The audit log keeps what it said before.
+ *
+ * Parts already used stay as they were sold: quantity can't fall below what is
+ * still in stock, and a cost already charged to a job isn't re-charged, so a
+ * corrected cost on used parts leaves that difference in the stock account until
+ * the next stock count. The part's cost price follows the correction.
+ */
+async function correctReceivedPurchase(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  purchase: Awaited<ReturnType<typeof lockPurchase>>,
+  supplierId: string,
+  input: ReturnType<typeof parsePurchase>,
+) {
+  const organizationId = user.organizationId;
+  requirePermission(user, 'purchase.approve', { branchId: purchase.branchId });
+  const refuse = (why: string) => new DomainError(`This purchase can't be changed: ${why}.`);
+  if (purchase.billMatchedByUserId) {
+    throw refuse(
+      'its tax invoice was matched later, with its VAT on an entry of its own. Use Edit details, or ask the supplier for a credit note',
+    );
+  }
+  const receivedAt = purchase.receivedAt;
+  if (!receivedAt) throw refuse('it has no received date');
+  const locked = await whyDayIsLocked(
+    tx,
+    organizationId,
+    parseCalendarDate(localDateString(receivedAt))!,
+  );
+  if (locked) throw refuse(`${locked}. Ask the supplier for a credit note`);
+
+  const movements = await tx.inventoryTransaction.findMany({
+    where: { organizationId, purchaseItem: { purchaseId: purchase.id } },
+    select: { id: true, partId: true, transactionType: true, purchaseItemId: true },
+  });
+  if (movements.some((movement) => movement.transactionType !== 'PURCHASE_RECEIPT')) {
+    throw refuse('some of these goods have gone back to the supplier');
+  }
+  const movementOf = new Map(movements.map((movement) => [movement.purchaseItemId, movement]));
+  if (movementOf.size !== movements.length) {
+    throw refuse('it came in more than one delivery');
+  }
+
+  const priced = pricePurchase(await prepareLines(tx, organizationId, input.items), {
+    type: input.billDiscountType,
+    value: input.billDiscountValue,
+  });
+  const header = headerData(input, priced);
+  await assertSupplierInvoiceFree(
+    tx,
+    organizationId,
+    supplierId,
+    header.supplierInvoiceNumber,
+    purchase.id,
+  );
+  const payments = await tx.supplierPayment.findMany({
+    where: { organizationId, purchaseId: purchase.id, reversalOfSupplierPaymentId: null },
+    select: { amount: true, reversals: { select: { id: true } } },
+  });
+  const paidFils = payments
+    .filter((payment) => payment.reversals.length === 0)
+    .reduce((sum, payment) => sum + toFils(payment.amount.toString()), 0);
+  if (paidFils > 0 && supplierId !== purchase.supplierId) {
+    throw refuse('it has been paid, so it stays with this supplier. Reverse the payment first');
+  }
+  if (paidFils > toFils(header.totalAmount)) {
+    throw refuse(
+      `${filsToString(paidFils)} has already been paid, more than the new total. Reverse the payment first`,
+    );
+  }
+
+  // Every part locked first, in one order: nothing can be fitted from them while they change.
+  const partIds = [
+    ...new Set([
+      ...purchase.items.map((item) => item.partId),
+      ...input.items.map((item) => item.partId),
+    ]),
+  ].sort();
+  for (const partId of partIds) await lockPart(tx, organizationId, partId);
+
+  const before = purchase.items.map((item) => ({
+    partId: item.partId,
+    quantity: item.quantityOrdered.toString(),
+    unitCost: item.unitCost.toString(),
+    taxRate: item.taxRate?.toString() ?? null,
+  }));
+  const rows = itemRows(priced);
+  const touched = new Set<string>();
+  const added: string[] = [];
+  // The stock ledger is append-only but for this (migration 20261114090000).
+  await tx.$executeRaw`SELECT set_config('app.redate_purchase_receipt', 'on', true)`;
+  for (const row of rows) {
+    const existing = purchase.items.find((item) => item.partId === row.partId);
+    if (!existing) continue;
+    touched.add(row.partId);
+    await tx.purchaseItem.update({
+      where: { id: existing.id },
+      data: { ...row, quantityReceived: row.quantityOrdered },
+    });
+    const movement = movementOf.get(existing.id);
+    if (movement) {
+      await tx.inventoryTransaction.update({
+        where: { id: movement.id },
+        data: { quantity: row.quantityOrdered, unitCost: row.unitCost },
+      });
+    }
+  }
+  const removed = purchase.items.filter((item) => !rows.some((row) => row.partId === item.partId));
+  for (const item of removed) {
+    touched.add(item.partId);
+    await tx.inventoryTransaction.deleteMany({
+      where: { organizationId, purchaseItemId: item.id },
+    });
+    await tx.purchaseItem.delete({ where: { id: item.id } });
+  }
+  await tx.$executeRaw`SELECT set_config('app.redate_purchase_receipt', 'off', true)`;
+
+  await tx.purchase.update({
+    where: { id: purchase.id },
+    data: {
+      supplierId,
+      ...header,
+      // Closed as having no tax invoice stays closed.
+      ...(purchase.billStatus === 'NO_TAX_INVOICE'
+        ? { billStatus: 'NO_TAX_INVOICE' as const }
+        : {}),
+    },
+  });
+  for (const row of rows) {
+    if (purchase.items.some((item) => item.partId === row.partId)) continue;
+    const item = await tx.purchaseItem.create({
+      data: {
+        organizationId,
+        purchaseId: purchase.id,
+        ...row,
+        quantityReceived: row.quantityOrdered,
+      },
+    });
+    const movement = await postMovement(tx, {
+      organizationId,
+      branchId: purchase.branchId,
+      partId: row.partId,
+      type: 'PURCHASE_RECEIPT',
+      quantityMilli: signedToMilli(row.quantityOrdered),
+      unitCost: row.unitCost,
+      purchaseItemId: item.id,
+      performedByUserId: user.id,
+      at: receivedAt,
+      note: `Received on ${purchase.purchaseNumber}${header.supplierInvoiceNumber ? ` (supplier invoice ${header.supplierInvoiceNumber})` : ''}`,
+    });
+    added.push(movement.id);
+  }
+
+  // The part's cost price follows, if this purchase set it: parts fitted from
+  // here on are charged out of stock at the corrected cost.
+  for (const row of rows) {
+    const existing = purchase.items.find((item) => item.partId === row.partId);
+    if (!existing) continue;
+    const oldCost = toFils(unitCostAfterDiscount(existing));
+    const newCost = unitCostAfterDiscount({
+      quantityOrdered: row.quantityOrdered,
+      unitCost: row.unitCost,
+      taxRate: row.taxRate,
+      taxAmount: row.taxAmount,
+      netAmount: row.netAmount ?? null,
+    });
+    if (toFils(newCost) === oldCost) continue;
+    const part = await tx.part.findUniqueOrThrow({
+      where: { id: row.partId },
+      select: { defaultCostPrice: true },
+    });
+    if (part.defaultCostPrice && toFils(part.defaultCostPrice.toString()) === oldCost) {
+      await tx.part.update({ where: { id: row.partId }, data: { defaultCostPrice: newCost } });
+      await writeAuditLog(tx, {
+        organizationId,
+        actorUserId: user.id,
+        action: 'part.updated',
+        entityType: 'Part',
+        entityId: row.partId,
+        beforeData: { defaultCostPrice: part.defaultCostPrice.toString() },
+        afterData: { defaultCostPrice: newCost },
+        metadata: { source: 'purchase_correction', purchaseNumber: purchase.purchaseNumber },
+      });
+    }
+  }
+
+  // Parts already used can't be taken back off this purchase.
+  for (const partId of touched) {
+    const onHand = await getStockOnHand(tx, organizationId, purchase.branchId, partId);
+    if (onHand < 0) {
+      const part = await tx.part.findUniqueOrThrow({
+        where: { id: partId },
+        select: { sku: true },
+      });
+      throw refuse(
+        `${formatMilli(-onHand)} more of ${part.sku} has already been used than this would leave in stock`,
+      );
+    }
+  }
+
+  // Each entry is corrected to what its record now says; a removed one is removed.
+  for (const { id } of movements) {
+    await syncPosting(tx, organizationId, 'STOCK_MOVEMENT', id, user.id);
+  }
+  await syncPosting(tx, organizationId, 'PURCHASE_ROUNDING', purchase.id, user.id);
+  const moved =
+    ON.has(input.moveBooks ?? '') && header.supplierInvoiceDate
+      ? await moveReceiptToDay(
+          tx,
+          user,
+          {
+            id: purchase.id,
+            billMatchedByUserId: null,
+            billReceivedOn: header.billReceivedOn,
+          },
+          header.supplierInvoiceDate.toISOString().slice(0, 10),
+        )
+      : null;
+  if (!moved && !ON.has(input.moveBooks ?? '') && header.supplierInvoiceDate) {
+    await keepDate(tx, user, purchase, header.supplierInvoiceDate);
+  }
+  await renumberJournal(tx, organizationId);
+  await writeAuditLog(tx, {
+    organizationId,
+    branchId: purchase.branchId,
+    actorUserId: user.id,
+    action: 'purchase.corrected',
+    entityType: 'Purchase',
+    entityId: purchase.id,
+    beforeData: {
+      lines: before,
+      supplierId: purchase.supplierId,
+      total: purchase.totalAmount?.toString() ?? null,
+    },
+    afterData: { lines: rows, supplierId, total: header.totalAmount },
+    metadata: { purchaseNumber: purchase.purchaseNumber, ...(moved ? { moved } : {}) },
+  });
+  return purchase;
+}
+
+/**
+ * Records that goods really came on another day than the bill's date, when that
+ * is so, and the list below stops offering the purchase for those two dates.
+ */
+async function keepDate(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  purchase: { id: string; branchId: string; purchaseNumber: string; receivedAt: Date | null },
+  purchaseDate: Date,
+) {
+  if (!purchase.receivedAt) return;
+  const bookedOn = localDateString(purchase.receivedAt);
+  const day = purchaseDate.toISOString().slice(0, 10);
+  if (bookedOn === day) return;
+  await writeAuditLog(tx, {
+    organizationId: user.organizationId,
+    branchId: purchase.branchId,
+    actorUserId: user.id,
+    action: 'purchase.date_kept',
+    entityType: 'Purchase',
+    entityId: purchase.id,
+    afterData: { purchaseDate: day, bookedOn },
+    metadata: { purchaseNumber: purchase.purchaseNumber },
+  });
+}
+
+/** From the list: the goods really came on the day they are booked. */
+export async function keepPurchaseDate(user: AuthenticatedUser, purchaseId: string) {
+  return prisma.$transaction(async (tx) => {
+    const purchase = await lockPurchase(tx, user.organizationId, purchaseId);
+    requirePermission(user, 'purchase.edit', { branchId: purchase.branchId });
+    if (purchase.supplierInvoiceDate) {
+      await keepDate(tx, user, purchase, purchase.supplierInvoiceDate);
+    }
+    return { id: purchase.id };
+  });
+}
+
+/**
+ * Received purchases booked on another day than their purchase date, leaving
+ * out any someone has said really came on that day.
+ */
+export async function listMisdatedPurchases(user: AuthenticatedUser) {
+  requirePermission(user, 'purchase.view');
+  const kept = await prisma.auditLog.findMany({
+    where: {
+      organizationId: user.organizationId,
+      action: 'purchase.date_kept',
+      entityType: 'Purchase',
+    },
+    select: { entityId: true, afterData: true },
+  });
+  const keptKeys = new Set(
+    kept.map(({ entityId, afterData }) => {
+      const dates = afterData as { purchaseDate?: string; bookedOn?: string } | null;
+      return `${entityId}|${dates?.purchaseDate}|${dates?.bookedOn}`;
+    }),
+  );
+  const purchases = await prisma.purchase.findMany({
+    where: {
+      organizationId: user.organizationId,
+      status: 'RECEIVED',
+      receivedAt: { not: null },
+      supplierInvoiceDate: { not: null },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, purchaseNumber: true, receivedAt: true, supplierInvoiceDate: true },
+  });
+  return purchases.flatMap((purchase) => {
+    const bookedOn = localDateString(purchase.receivedAt!);
+    const purchaseDate = purchase.supplierInvoiceDate!.toISOString().slice(0, 10);
+    if (bookedOn === purchaseDate || keptKeys.has(`${purchase.id}|${purchaseDate}|${bookedOn}`)) {
+      return [];
+    }
+    return [{ id: purchase.id, purchaseNumber: purchase.purchaseNumber, purchaseDate, bookedOn }];
+  });
+}
+
+/**
+ * Brings every misdated purchase to its purchase date, each on its own: one that
+ * can't move (a closed period, a filed return, a reconciled payment) is reported,
+ * and the rest still move.
+ */
+export async function moveMisdatedPurchases(user: AuthenticatedUser) {
+  requirePermission(user, 'purchase.edit');
+  requirePermission(user, 'purchase.approve');
+  const moved: string[] = [];
+  const refused: { number: string; why: string }[] = [];
+  for (const { id, purchaseNumber } of await listMisdatedPurchases(user)) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const purchase = await lockPurchase(tx, user.organizationId, id);
+        const day = purchase.supplierInvoiceDate!.toISOString().slice(0, 10);
+        const result = await moveReceiptToDay(tx, user, purchase, day);
+        await writeAuditLog(tx, {
+          organizationId: user.organizationId,
+          branchId: purchase.branchId,
+          actorUserId: user.id,
+          action: 'purchase.date_moved',
+          entityType: 'Purchase',
+          entityId: purchase.id,
+          afterData: { purchaseDate: day },
+          metadata: { purchaseNumber, moved: result },
+        });
+      }, RECEIPT_TRANSACTION);
+      moved.push(purchaseNumber);
+    } catch (error) {
+      if (!(error instanceof DomainError)) throw error;
+      refused.push({ number: purchaseNumber, why: error.message });
+    }
+  }
+  return { moved, refused };
 }
 
 /**
@@ -822,6 +1225,9 @@ export async function updatePurchaseDetails(
       ON.has(input.moveBooks ?? '') && supplierInvoiceDate
         ? await moveReceiptToDay(tx, user, purchase, day(supplierInvoiceDate)!)
         : null;
+    if (!ON.has(input.moveBooks ?? '') && supplierInvoiceDate) {
+      await keepDate(tx, user, purchase, supplierInvoiceDate);
+    }
     await writeAuditLog(tx, {
       organizationId: user.organizationId,
       branchId: purchase.branchId,
@@ -1345,5 +1751,9 @@ export async function getPurchaseFormOptions(user: AuthenticatedUser) {
     canCreateParts: hasPermission(user, 'inventory.create'),
     defaultVat: await resolveDefaultVatRate(user.organizationId),
     taxCodes: await getTaxCodeOptions(user.organizationId, 'purchases'),
+    /** The job cards a part can be bought for. */
+    jobs: (await listJobChoices(user))
+      .filter((job) => job.value.startsWith('card:'))
+      .map((job) => ({ ...job, value: job.value.slice('card:'.length) })),
   };
 }

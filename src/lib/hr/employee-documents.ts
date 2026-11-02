@@ -89,7 +89,7 @@ function currentIds(rows: { id: string; kind: EmployeeDocumentKind; expiryDate: 
       current.add(row.id);
       continue;
     }
-    const expiry = isoDay(row.expiryDate) ?? '9999-12-31';
+    const expiry = isoDay(row.expiryDate) ?? '';
     const held = best.get(row.kind);
     if (!held || expiry > held.expiry) best.set(row.kind, { id: row.id, expiry });
   }

@@ -19,7 +19,8 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
     if (error instanceof NotFoundError) notFound();
     throw error;
   }
-  if (purchase.status !== 'DRAFT') redirect(`/inventory/purchases/${purchase.id}`);
+  const received = purchase.status === 'RECEIVED' && !purchase.billMatchedByUserId;
+  if (purchase.status !== 'DRAFT' && !received) redirect(`/inventory/purchases/${purchase.id}`);
   const options = await getPurchaseFormOptions(user);
 
   return (
@@ -33,7 +34,12 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
             {purchase.purchaseNumber}
           </Link>
         }
-        title="Edit draft purchase"
+        title={received ? 'Edit purchase' : 'Edit draft purchase'}
+        description={
+          received
+            ? 'Stock, VAT and what is owed are corrected to match, and the part\'s cost price with them. Parts already used keep the cost they were charged at. Refused once its period is closed or its VAT return is filed.'
+            : undefined
+        }
       />
       <Panel className="w-full sm:p-8">
         <PurchaseForm
@@ -43,6 +49,8 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
           suppliers={options.suppliers}
           defaultVat={options.defaultVat}
           taxCodes={options.taxCodes}
+          jobs={options.jobs}
+          receivedOn={received && purchase.receivedAt ? localDateString(purchase.receivedAt) : null}
           today={localDateString()}
           initial={{
             supplierId: purchase.supplierId,
@@ -63,6 +71,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
               unitCost: item.unitCost.toFixed(2),
               taxRate: item.taxRate?.toString() ?? options.defaultVat,
               taxCodeId: item.taxCodeId,
+              jobCardId: item.jobCardId ?? '',
               discountType: item.discountType,
               discountValue: item.discountValue?.toString() ?? '',
             })),

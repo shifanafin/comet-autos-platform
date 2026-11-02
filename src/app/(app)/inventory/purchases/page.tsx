@@ -1,3 +1,4 @@
+import { MisdatedPurchases } from '@/components/inventory/misdated-purchases';
 import Link from 'next/link';
 import { FileCheck2, Plus, ShoppingCart } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
@@ -5,7 +6,7 @@ import type { PurchaseStatus } from '@/generated/prisma/enums';
 import { requireUser, hasPermission } from '@/lib/auth/authorize';
 import { canExport } from '@/lib/data-transfer/exports';
 import { canImport, importColumns, importNote } from '@/lib/data-transfer/imports';
-import { listPurchases } from '@/lib/inventory/purchases';
+import { listPurchases, listMisdatedPurchases } from '@/lib/inventory/purchases';
 import { PURCHASE_STATUS_LABEL } from '@/lib/inventory/labels';
 import { formatCalendarDate, formatDate, formatMoney } from '@/lib/format';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
@@ -67,6 +68,11 @@ export default async function PurchasesPage({
     .filter(removable)
     .map((purchase) => ({ id: purchase.id, label: purchase.purchaseNumber }));
   const filtered = Boolean(params.q || params.status || params.supplier);
+  // Booked on another day than their purchase date: can be brought into step at once.
+  const misdated =
+    hasPermission(user, 'purchase.edit') && hasPermission(user, 'purchase.approve')
+      ? await listMisdatedPurchases(user)
+      : [];
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -100,6 +106,7 @@ export default async function PurchasesPage({
           </>
         }
       />
+      {misdated.length ? <MisdatedPurchases rows={misdated} /> : null}
       <Stack gap="base">
         <ListFilters
           placeholder="PO number, supplier invoice, supplier or part"

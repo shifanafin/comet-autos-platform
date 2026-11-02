@@ -341,6 +341,11 @@ export function PartPicker({
                         <span className="font-mono">{row.sku}</span>
                         {row.supplierName ? ` · ${row.supplierName}` : ''}
                       </span>
+                      {row.forJobs?.length ? (
+                        <span className="block truncate text-xs font-medium text-primary">
+                          {`For ${row.forJobs.join(', ')}`}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
                       <span className="text-xs text-muted-foreground tabular-nums">

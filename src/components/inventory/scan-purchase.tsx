@@ -59,6 +59,7 @@ export function ScanPurchase({
   suppliers,
   defaultVat,
   taxCodes,
+  jobs,
   today,
   initial,
   canReceive,
@@ -73,6 +74,7 @@ export function ScanPurchase({
   suppliers: { id: string; name: string }[];
   defaultVat: string;
   taxCodes: TaxCodeOption[];
+  jobs?: { value: string; label: string; hint: string }[];
   today: string;
   initial?: PurchaseFormInitial;
   canReceive: boolean;
@@ -89,6 +91,7 @@ export function ScanPurchase({
     suppliers,
     defaultVat,
     taxCodes,
+    jobs,
     today,
     isNew: true,
     canReceive,

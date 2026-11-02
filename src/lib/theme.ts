@@ -70,7 +70,7 @@ export function saveTheme(settings: ThemeSettings) {
  * device's setting, other tabs, and switches to light for printing.
  */
 export const THEME_SCRIPT = `(function(){try{
-if(location.pathname.indexOf('/customer')===0)return;
+if(location.pathname.indexOf('/customer/')===0)return;
 var d=document.documentElement,k=${JSON.stringify(THEME_KEY)},q=matchMedia('(prefers-color-scheme: dark)');
 function apply(s){
 if(!s){try{s=JSON.parse(localStorage.getItem(k)||'{}')}catch(e){s={}}}

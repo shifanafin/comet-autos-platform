@@ -53,7 +53,11 @@ export function trimQuantity(value: string): string {
   return value.includes('.') ? value.replace(/\.?0+$/, '') : value;
 }
 
-const TYPE_LABEL: Partial<Record<EstimateItemType, string>> = { PART: 'Parts', LABOUR: 'Labour' };
+const TYPE_LABEL: Partial<Record<EstimateItemType, string>> = {
+  PART: 'Parts',
+  LABOUR: 'Labour',
+  OTHER: 'Other',
+};
 
 const rateOf = (line: LineLike) => trimQuantity(line.taxRate?.toString() ?? '0');
 

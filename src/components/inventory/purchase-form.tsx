@@ -23,7 +23,7 @@ import { SubmitButton } from '@/components/forms/submit-button';
 import { useFormAction } from '@/components/forms/use-form-action';
 import { LinkButton } from '@/components/shared/link-button';
 import type { ActionResult } from '@/lib/errors';
-import { formatMoney } from '@/lib/format';
+import { formatMoney, formatCalendarDate } from '@/lib/format';
 import {
   calculateDocument,
   calculateLine,
@@ -60,6 +60,8 @@ interface Line {
   taxRate: string;
   /** The purchase tax code chosen; blank where the rate was typed. */
   taxCodeId: string;
+  /** The job this part was bought for; blank for none. */
+  jobCardId: string;
   /** The line's own trade discount; a blank value is none. */
   discountType: DiscountType;
   discountValue: string;
@@ -99,6 +101,7 @@ export interface PurchaseFormInitial {
     unitCost: string;
     taxRate: string;
     taxCodeId?: string | null;
+    jobCardId?: string;
     discountType?: DiscountType | null;
     discountValue?: string;
   }[];
@@ -247,6 +250,8 @@ function PurchaseFormBody({
   canReceive,
   cancelHref,
   taxCodes = [],
+  jobs = [],
+  receivedOn = null,
   hidden = {},
   receipt,
   intro,
@@ -263,6 +268,10 @@ function PurchaseFormBody({
   cancelHref: string;
   /** The purchase tax codes. Given, each line picks a code instead of typing a rate. */
   taxCodes?: TaxCodeOption[];
+  /** The job cards a part can be bought for. */
+  jobs?: { value: string; label: string; hint: string }[];
+  /** Correcting a received purchase: the day its stock is booked on. */
+  receivedOn?: string | null;
   /** Extra values sent with the form (Scan bill marks what the reader filled). */
   hidden?: Record<string, string>;
   /** Paying the supplier as the goods are received ("Save & receive stock"). */
@@ -286,6 +295,7 @@ function PurchaseFormBody({
         ...item,
         taxRate: code ? code.rate : item.taxRate,
         taxCodeId: code?.id ?? '',
+        jobCardId: item.jobCardId ?? '',
         discountType: item.discountType ?? 'PERCENT',
         discountValue: item.discountValue ?? '',
       };
@@ -296,6 +306,7 @@ function PurchaseFormBody({
     value: initial?.billDiscountValue ?? '',
   });
   const [rounding, setRounding] = useState(initial?.roundingAdjustment ?? '');
+  const [purchaseDate, setPurchaseDate] = useState(initial?.supplierInvoiceDate ?? today);
   const [payment, setPayment] = useState<'later' | 'now'>('later');
   const [payAmount, setPayAmount] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -317,6 +328,7 @@ function PurchaseFormBody({
         partId: part.id,
         quantity,
         unitCost: part.cost,
+        jobCardId: '',
         discountType: 'PERCENT',
         discountValue: '',
         ...(() => {
@@ -434,7 +446,17 @@ function PurchaseFormBody({
   const discountFils = totals ? grossFils - toFils(totals.subtotal) : 0;
   const payload = JSON.stringify(
     lines.map(
-      ({ partId, quantity, unitCost, taxRate, taxCodeId, discountType, discountValue }) => ({
+      ({
+        partId,
+        quantity,
+        unitCost,
+        taxRate,
+        taxCodeId,
+        jobCardId,
+        discountType,
+        discountValue,
+      }) => ({
+        jobCardId,
         partId,
         quantity,
         unitCost,
@@ -512,7 +534,8 @@ function PurchaseFormBody({
               name="supplierInvoiceDate"
               type="date"
               max={today}
-              defaultValue={initial?.supplierInvoiceDate ?? today}
+              value={purchaseDate}
+              onChange={(event) => setPurchaseDate(event.target.value)}
               error={errors.supplierInvoiceDate}
               className="[&_input]:h-11 [&_input]:text-base md:[&_input]:text-sm"
             />
@@ -686,6 +709,34 @@ function PurchaseFormBody({
                       <Trash2 />
                     </Button>
                   </div>
+                  {jobs.length ? (
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      Bought for a job (optional)
+                      <NativeSelect
+                        value={line.jobCardId}
+                        onChange={(event) =>
+                          setLines((current) =>
+                            current.map((entry) =>
+                              entry.key === line.key
+                                ? { ...entry, jobCardId: event.target.value }
+                                : entry,
+                            ),
+                          )
+                        }
+                        className="h-11 text-base md:text-sm"
+                      >
+                        <option value="">Not for a particular job</option>
+                        {line.jobCardId && !jobs.some((job) => job.value === line.jobCardId) ? (
+                          <option value={line.jobCardId}>The job already chosen</option>
+                        ) : null}
+                        {jobs.map((job) => (
+                          <option key={job.value} value={job.value} data-hint={job.hint}>
+                            {job.label}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </label>
+                  ) : null}
                   {part && part.unit !== 'piece' ? (
                     <PackHelper
                       unit={part.unit}
@@ -785,6 +836,25 @@ function PurchaseFormBody({
         </div>
       ) : null}
 
+      {receivedOn && purchaseDate && purchaseDate !== receivedOn ? (
+        <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+          <input
+            type="checkbox"
+            name="moveBooks"
+            defaultChecked
+            className="mt-0.5 size-4 accent-primary"
+          />
+          <span>
+            <span className="font-medium">
+              {`Move the stock and payment to ${formatCalendarDate(purchaseDate)}`}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {`They are booked on ${formatCalendarDate(receivedOn)}. Untick if the goods really came that day. A payment made on any other day stays as it is.`}
+            </span>
+          </span>
+        </label>
+      ) : null}
+      <FormError message={errors.moveBooks} />
       <FormError message={Object.keys(errors).length ? undefined : state.error} />
 
       <div className="flex flex-wrap gap-3 border-t border-border pt-6">

@@ -18,6 +18,8 @@ import {
   receivePurchase,
   updatePurchase,
   updatePurchaseDetails,
+  moveMisdatedPurchases,
+  keepPurchaseDate,
 } from '@/lib/inventory/purchases';
 
 import { removeAttachment } from '@/lib/documents/attachments';
@@ -194,6 +196,22 @@ export async function createScannedPurchaseAction(
 export async function removePurchaseBillAction(documentId: string): Promise<ActionResult> {
   const user = await requireUser();
   const result = await runAction(() => removeAttachment(user, 'Purchase', documentId));
+  if (result.ok) refreshInventory();
+  return toClientResult(result);
+}
+
+/** Brings every misdated purchase to its purchase date; reports any that can't move. */
+export async function moveMisdatedPurchasesAction() {
+  const user = await requireUser();
+  const result = await runAction(() => moveMisdatedPurchases(user));
+  if (result.ok) refreshInventory();
+  return result;
+}
+
+/** From the list: the goods really came on the day they are booked. */
+export async function keepPurchaseDateAction(purchaseId: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runAction(() => keepPurchaseDate(user, purchaseId));
   if (result.ok) refreshInventory();
   return toClientResult(result);
 }
