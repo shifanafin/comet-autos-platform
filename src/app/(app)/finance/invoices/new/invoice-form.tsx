@@ -129,6 +129,13 @@ export function NewInvoiceForm({
         }
       : null,
   );
+  // A quotation fixes the customer and the car; one not yet on a job card can
+  // still be billed against the job, which files the quotation there too.
+  const chooseJob = (next: PickedParty | null) => {
+    if (next && picked && next.customer.id === picked.customer.id) {
+      setPicked({ ...picked, jobCardId: next.jobCardId });
+    }
+  };
   const [lines, setLinesState] = useState<EditableLine[]>(
     quotation?.lines.length
       ? quotation.lines
@@ -208,7 +215,7 @@ export function NewInvoiceForm({
         <h2 className="text-base font-semibold tracking-tight">Who is this invoice for?</h2>
         <CustomerPicker
           value={picked}
-          onChange={quotation ? () => {} : setPicked}
+          onChange={quotation ? (quotation.jobCardId ? () => {} : chooseJob) : setPicked}
           autoFocus={!initialCustomer}
         />
       </section>

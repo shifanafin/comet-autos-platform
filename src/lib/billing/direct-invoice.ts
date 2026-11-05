@@ -30,6 +30,7 @@ import { applyHeldAdvances, customerAdvanceHeld } from '@/lib/billing/advances';
 import { syncPosting } from '@/lib/accounting/journal';
 import { applyJobStatusChange, normalizeStatus } from '@/lib/workshop/job-status';
 import { CLOSED_JOB_STATUSES } from '@/lib/workshop/stages';
+import { versionsOf } from '@/lib/workshop/estimates';
 import { resolveTaxCodes } from '@/lib/accounting/tax-codes';
 import { assertNotFitted, partsFittedOnJob, resolvePartLines } from '@/lib/billing/part-lines';
 import { syncInvoiceStock } from '@/lib/inventory/invoice-stock';
@@ -120,6 +121,68 @@ export function readDueDate(value: string | undefined, issueDate: Date): Date {
 }
 
 export type DirectInvoiceInput = z.input<typeof directInvoiceSchema>;
+
+/**
+ * A quotation raised before its job card, billed against the job: every
+ * version is filed on the job, as Link to job card would (lib/workshop/
+ * estimates.ts). The invoice then moves the job on, so its status isn't
+ * stepped through the quotation stages.
+ */
+async function fileQuotationOnJob(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  estimate: {
+    id: string;
+    kind: string;
+    branchId: string;
+    vehicleId: string | null;
+    estimateNumber: string;
+  },
+  jobCard: { id: string; branchId: string; vehicleId: string },
+) {
+  if (estimate.vehicleId && estimate.vehicleId !== jobCard.vehicleId) {
+    throw new DomainError('That job card is for a different vehicle.', 'jobCardId');
+  }
+  if (estimate.branchId !== jobCard.branchId) {
+    throw new DomainError('That job card is at another branch.', 'jobCardId');
+  }
+  const own = await tx.estimate.findFirst({
+    where: { organizationId: user.organizationId, jobCardId: jobCard.id, kind: 'ORIGINAL' },
+    select: { estimateNumber: true },
+  });
+  if (own) {
+    throw new DomainError(
+      `That job card already has quotation ${own.estimateNumber}.`,
+      'jobCardId',
+    );
+  }
+  const ids = (
+    await versionsOf(tx, user.organizationId, {
+      id: estimate.id,
+      jobCardId: null,
+      kind: estimate.kind,
+    })
+  ).map((version) => version.id);
+  await tx.estimate.updateMany({
+    where: { organizationId: user.organizationId, id: { in: ids } },
+    data: { jobCardId: jobCard.id },
+  });
+  await tx.estimate.updateMany({
+    where: { organizationId: user.organizationId, id: { in: ids }, vehicleId: null },
+    data: { vehicleId: jobCard.vehicleId },
+  });
+  await writeAuditLog(tx, {
+    organizationId: user.organizationId,
+    branchId: estimate.branchId,
+    actorUserId: user.id,
+    action: 'estimate.linked_to_job',
+    entityType: 'Estimate',
+    entityId: estimate.id,
+    beforeData: { jobCardId: null },
+    afterData: { jobCardId: jobCard.id, versions: ids.length, recordOnly: true },
+    metadata: { viaInvoice: true, estimateNumber: estimate.estimateNumber },
+  });
+}
 
 /**
  * The quotation's own lines, already priced when it was saved. They are
@@ -296,6 +359,14 @@ export async function createDirectInvoice(
     const source = input.estimateId
       ? await linesFromEstimate(tx, user.organizationId, input.estimateId, customer.id)
       : null;
+    if (source && jobCard) {
+      if (source.estimate.jobCardId && source.estimate.jobCardId !== jobCard.id) {
+        throw new DomainError('That quotation is on another job card.', 'jobCardId');
+      }
+      if (!source.estimate.jobCardId) {
+        await fileQuotationOnJob(tx, user, source.estimate, jobCard);
+      }
+    }
     if (source?.estimate.jobCardId && !jobCard) {
       // Invoicing a quotation that belongs to a job card bills that work
       // order, rather than leaving it open and unbilled beside the invoice.
