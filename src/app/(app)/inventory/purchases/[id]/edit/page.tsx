@@ -2,9 +2,16 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/authorize';
 import { NotFoundError } from '@/lib/errors';
-import { getPurchaseForEdit, getPurchaseFormOptions } from '@/lib/inventory/purchases';
+import {
+  canPayOnReceipt,
+  getPurchaseForEdit,
+  getPurchaseFormOptions,
+} from '@/lib/inventory/purchases';
+import { supplierPaidFils } from '@/lib/finance/supplier-balance';
+import { getPaymentModeOptions } from '@/lib/accounting/payment-modes';
+import { getAccountChoices } from '@/lib/accounting/reports';
 import { localDateString } from '@/lib/format';
-import { formatMilli, signedToMilli } from '@/lib/money';
+import { filsToString, formatMilli, signedToMilli } from '@/lib/money';
 import { PageHeader, Panel, Stack } from '@/components/layout/primitives';
 import { PurchaseForm } from '@/components/inventory/purchase-form';
 import { updatePurchaseAction } from '../../../actions';
@@ -22,6 +29,15 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
   const received = purchase.status === 'RECEIVED' && !purchase.billMatchedByUserId;
   if (purchase.status !== 'DRAFT' && !received) redirect(`/inventory/purchases/${purchase.id}`);
   const options = await getPurchaseFormOptions(user);
+  // Nothing paid yet: it can be paid with the correction, as on receiving it.
+  const paidSoFar = received ? filsToString(supplierPaidFils(purchase.supplierPayments)) : null;
+  const canPay = received && paidSoFar === '0.00' && canPayOnReceipt(user);
+  const [modes, accounts] = canPay
+    ? await Promise.all([
+        getPaymentModeOptions(user.organizationId, 'spending'),
+        getAccountChoices(user),
+      ])
+    : [[], null];
 
   return (
     <Stack gap="2xl" className="animate-in fade-in duration-300">
@@ -37,7 +53,7 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
         title={received ? 'Edit purchase' : 'Edit draft purchase'}
         description={
           received
-            ? 'Stock, VAT and what is owed are corrected to match, and the part\'s cost price with them. Parts already used keep the cost they were charged at. Refused once its period is closed or its VAT return is filed.'
+            ? "Stock, VAT and what is owed are corrected to match, and the part's cost price with them. Parts already used keep the cost they were charged at. Refused once its period is closed or its VAT return is filed."
             : undefined
         }
       />
@@ -51,6 +67,12 @@ export default async function EditPurchasePage({ params }: { params: Promise<{ i
           taxCodes={options.taxCodes}
           jobs={options.jobs}
           receivedOn={received && purchase.receivedAt ? localDateString(purchase.receivedAt) : null}
+          paidSoFar={paidSoFar}
+          receipt={
+            canPay
+              ? { modes, moneyAccounts: accounts?.money ?? [], canPay, canUpdateCost: false }
+              : undefined
+          }
           today={localDateString()}
           initial={{
             supplierId: purchase.supplierId,

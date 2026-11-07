@@ -140,6 +140,11 @@ const purchaseSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   /** Correcting a received purchase: also move its stock and payment to the purchase date. */
   moveBooks: z.string().optional(),
+  /**
+   * Correcting a received purchase already paid: "follow" changes the payment
+   * to the new total; "keep" leaves it, any difference owed.
+   */
+  paidChoice: z.union([z.literal(''), z.enum(['follow', 'keep'])]).optional(),
   /** A trade discount on the whole bill, after the lines' own. */
   billDiscountType: z.union([z.literal(''), z.enum(['PERCENT', 'AMOUNT'])]).optional(),
   billDiscountValue: z
@@ -610,7 +615,14 @@ export async function updatePurchase(
     requirePermission(user, 'purchase.edit', { branchId: purchase.branchId });
     const supplierId = await requireActiveSupplier(tx, user.organizationId, input.supplierId);
     if (purchase.status === 'RECEIVED') {
-      return correctReceivedPurchase(tx, user, purchase, supplierId, input);
+      return correctReceivedPurchase(
+        tx,
+        user,
+        purchase,
+        supplierId,
+        input,
+        parseSettlement(rawInput),
+      );
     }
     if (purchase.status !== 'DRAFT') {
       throw new DomainError(
@@ -738,6 +750,8 @@ async function correctReceivedPurchase(
   purchase: Awaited<ReturnType<typeof lockPurchase>>,
   supplierId: string,
   input: ReturnType<typeof parsePurchase>,
+  /** Nothing paid yet: "Paid now" pays it with the correction. */
+  settlement: z.infer<typeof settlementSchema>,
 ) {
   const organizationId = user.organizationId;
   requirePermission(user, 'purchase.approve', { branchId: purchase.branchId });
@@ -790,7 +804,7 @@ async function correctReceivedPurchase(
   if (paidFils > 0 && supplierId !== purchase.supplierId) {
     throw refuse('it has been paid, so it stays with this supplier. Reverse the payment first');
   }
-  if (paidFils > toFils(header.totalAmount)) {
+  if (input.paidChoice !== 'follow' && paidFils > toFils(header.totalAmount)) {
     throw refuse(
       `${filsToString(paidFils)} has already been paid, more than the new total. Reverse the payment first`,
     );
@@ -946,6 +960,19 @@ async function correctReceivedPurchase(
   if (!moved && !ON.has(input.moveBooks ?? '') && header.supplierInvoiceDate) {
     await keepDate(tx, user, purchase, header.supplierInvoiceDate);
   }
+  const { receivedAt: bookedAt } = await tx.purchase.findUniqueOrThrow({
+    where: { id: purchase.id },
+    select: { receivedAt: true },
+  });
+  const payment = await settleCorrection(
+    tx,
+    user,
+    purchase,
+    input.paidChoice,
+    settlement,
+    toFils(header.totalAmount),
+    bookedAt ?? receivedAt,
+  );
   await renumberJournal(tx, organizationId);
   await writeAuditLog(tx, {
     organizationId,
@@ -960,9 +987,106 @@ async function correctReceivedPurchase(
       total: purchase.totalAmount?.toString() ?? null,
     },
     afterData: { lines: rows, supplierId, total: header.totalAmount },
-    metadata: { purchaseNumber: purchase.purchaseNumber, ...(moved ? { moved } : {}) },
+    metadata: {
+      purchaseNumber: purchase.purchaseNumber,
+      ...(moved ? { moved } : {}),
+      ...(payment ? { payment } : {}),
+    },
   });
   return purchase;
+}
+
+/**
+ * What was paid, once a received purchase is corrected. Paid already:
+ * "follow" changes the latest payment by the difference, on its own day — the
+ * amount was typed wrong on both — so the payments come to the new total;
+ * "keep" leaves them, and any difference stays owed. Nothing paid yet: "Paid
+ * now" pays it, dated with the goods, as on receiving them.
+ */
+async function settleCorrection(
+  tx: Prisma.TransactionClient,
+  user: AuthenticatedUser,
+  purchase: { id: string; branchId: string; purchaseNumber: string },
+  paidChoice: string | undefined,
+  settlement: z.infer<typeof settlementSchema>,
+  totalFils: number,
+  receivedAt: Date,
+) {
+  const organizationId = user.organizationId;
+  const live = await tx.supplierPayment.findMany({
+    where: {
+      organizationId,
+      purchaseId: purchase.id,
+      status: 'COMPLETED',
+      reversalOfSupplierPaymentId: null,
+      reversals: { none: {} },
+    },
+    orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, amount: true, paidAt: true, supplierPaymentNumber: true },
+  });
+  if (live.length === 0) {
+    if (settlement.payment !== 'now' || totalFils === 0) return null;
+    if (!settlement.method) throw new DomainError('Choose how the supplier was paid.', 'method');
+    const paid = await takeSupplierPayment(tx, user, purchase.id, {
+      amountFils: settlement.payAmount ? toFils(settlement.payAmount) : null,
+      method: settlement.method,
+      accountId: settlement.accountId,
+      referenceNumber: settlement.payReference,
+      paidAt: receivedAt,
+    });
+    return { paid: paid.supplierPaymentNumber, amount: paid.amount };
+  }
+  if (paidChoice !== 'follow') return null;
+  const paidFils = live.reduce((sum, row) => sum + toFils(row.amount.toString()), 0);
+  const difference = totalFils - paidFils;
+  if (difference === 0) return null;
+  requirePermission(user, 'supplier_payment.create');
+  const last = live.at(-1)!;
+  const number = last.supplierPaymentNumber ?? 'the payment';
+  const before = last.amount.toString();
+  const amount = toFils(before) + difference;
+  if (amount <= 0) {
+    throw new DomainError(
+      `The payments come to ${filsToString(paidFils)}, more than the new total, and ${number} is only ${before}. Reverse a payment first.`,
+      'paidChoice',
+    );
+  }
+  const entry = await tx.journalEntry.findFirst({
+    where: {
+      organizationId,
+      sourceType: 'SUPPLIER_PAYMENT',
+      sourceId: last.id,
+      reversalOfJournalEntryId: null,
+    },
+    select: { id: true },
+  });
+  if (entry) {
+    const day = parseCalendarDate(localDateString(last.paidAt))!;
+    const why = await whyEntryCantMove(tx, organizationId, entry.id, day, day);
+    if (why) {
+      throw new DomainError(
+        `${number} can't be changed: ${why}. Choose “Leave the payment as it is”.`,
+        'paidChoice',
+      );
+    }
+  }
+  await tx.supplierPayment.update({
+    where: { id: last.id },
+    data: { amount: filsToString(amount) },
+  });
+  await syncPosting(tx, organizationId, 'SUPPLIER_PAYMENT', last.id, user.id);
+  await writeAuditLog(tx, {
+    organizationId,
+    branchId: purchase.branchId,
+    actorUserId: user.id,
+    action: 'supplier_payment.amended',
+    entityType: 'SupplierPayment',
+    entityId: last.id,
+    beforeData: { amount: before },
+    afterData: { amount: filsToString(amount) },
+    metadata: { source: 'purchase_correction', purchaseNumber: purchase.purchaseNumber },
+  });
+  return { amended: number, from: before, to: filsToString(amount) };
 }
 
 /**
@@ -1728,7 +1852,12 @@ export async function getPurchaseForEdit(user: AuthenticatedUser, purchaseId: st
   requirePermission(user, 'purchase.edit');
   const purchase = await prisma.purchase.findFirst({
     where: { id: purchaseId, organizationId: user.organizationId },
-    include: { items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } },
+    include: {
+      items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+      supplierPayments: {
+        select: { id: true, amount: true, status: true, reversalOfSupplierPaymentId: true },
+      },
+    },
   });
   if (!purchase) throw new NotFoundError('purchase');
   return purchase;

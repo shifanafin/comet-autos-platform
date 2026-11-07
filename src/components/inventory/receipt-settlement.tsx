@@ -201,3 +201,65 @@ export const owedHint = (total: string | null) =>
   total
     ? `The bill comes to ${formatMoney(total)}. Enter less for a part payment; the rest stays owed.`
     : 'Leave blank to pay everything owed. Enter less for a part payment; the rest stays owed.';
+
+/**
+ * Correcting a received purchase that is already paid: whether the payment
+ * follows the new total (the amount was typed wrong on both) or stays as it
+ * is, any difference owed. Sent as `paidChoice`.
+ */
+export function CorrectionPaymentFields({
+  paid,
+  total,
+  error,
+}: {
+  /** What is paid on it now. */
+  paid: string;
+  /** The corrected total, when the lines are complete. */
+  total: string | null;
+  error?: string;
+}) {
+  const [choice, setChoice] = useState<'follow' | 'keep'>('follow');
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:p-5">
+      <legend className="px-1 text-sm font-semibold">Paying the supplier</legend>
+      <input type="hidden" name="paidChoice" value={choice} />
+      <p className="text-sm text-muted-foreground">{`${formatMoney(paid)} is paid on this purchase.`}</p>
+      <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Payment">
+        {(
+          [
+            [
+              'follow',
+              'Paid in full',
+              total
+                ? `The payment changes to ${formatMoney(total)}, on the day it was made.`
+                : 'The payment changes to the new total, on the day it was made.',
+            ],
+            [
+              'keep',
+              'Leave the payment as it is',
+              'Any difference stays owed to the supplier, and is paid later.',
+            ],
+          ] as const
+        ).map(([value, title, note]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={choice === value}
+            onClick={() => setChoice(value)}
+            className={cn(
+              'flex flex-col gap-0.5 rounded-lg border px-4 py-3 text-left text-sm transition-colors',
+              choice === value
+                ? 'border-primary bg-primary/5'
+                : 'border-border bg-card hover:bg-muted',
+            )}
+          >
+            <span className="font-medium">{title}</span>
+            <span className="text-xs text-muted-foreground">{note}</span>
+          </button>
+        ))}
+      </div>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+    </fieldset>
+  );
+}

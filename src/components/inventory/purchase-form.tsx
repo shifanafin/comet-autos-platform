@@ -40,6 +40,7 @@ import {
   withRoundOff,
 } from '@/components/workshop/document-lines-editor';
 import {
+  CorrectionPaymentFields,
   ReceiptSettlementFields,
   owedHint,
   type ReceiptOptions,
@@ -252,6 +253,7 @@ function PurchaseFormBody({
   taxCodes = [],
   jobs = [],
   receivedOn = null,
+  paidSoFar = null,
   hidden = {},
   receipt,
   intro,
@@ -272,6 +274,8 @@ function PurchaseFormBody({
   jobs?: { value: string; label: string; hint: string }[];
   /** Correcting a received purchase: the day its stock is booked on. */
   receivedOn?: string | null;
+  /** Correcting a received purchase: what is paid on it now ("0.00" when nothing). */
+  paidSoFar?: string | null;
   /** Extra values sent with the form (Scan bill marks what the reader filled). */
   hidden?: Record<string, string>;
   /** Paying the supplier as the goods are received ("Save & receive stock"). */
@@ -834,6 +838,23 @@ function PurchaseFormBody({
             idPrefix="new-purchase"
           />
         </div>
+      ) : null}
+
+      {receivedOn && paidSoFar !== null ? (
+        Number(paidSoFar) > 0 ? (
+          <CorrectionPaymentFields paid={paidSoFar} total={grandTotal} error={errors.paidChoice} />
+        ) : receipt ? (
+          <ReceiptSettlementFields
+            options={receipt}
+            errors={errors}
+            showDueDate={false}
+            amount={payAmount ?? grandTotal ?? ''}
+            onAmountChange={setPayAmount}
+            amountHint={owedHint(grandTotal)}
+            onPaymentChange={setPayment}
+            idPrefix="correct-purchase"
+          />
+        ) : null
       ) : null}
 
       {receivedOn && purchaseDate && purchaseDate !== receivedOn ? (
